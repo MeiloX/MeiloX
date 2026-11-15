@@ -715,7 +715,7 @@
   <string name="download_filter_paused">一時停止</string>
   <string name="download_filter_completed">完了</string>
   <string name="download_filter_failed">失敗</string>
-  <string name="no_download_tasks">%1$s のタスクはありません</string>
+  <string name="no_download_tasks">「%1$s」のタスクはありません</string>
   <string name="resumed_download">ダウンロードを再開しました</string>
   <string name="download_waiting">待機中</string>
   <string name="download_paused">一時停止中</string>
