@@ -56,7 +56,7 @@ MeiloX は [Mei](https://github.com/ljyh223/Mei) をベースに改良と複数�
 
 MeiloX のインターフェース、歌詞、基盤機能は、以下のプロジェクトにインスピレーションを受けるか、そのオープンソースコンポーネントを直接使用しています。すべての貢献者に感謝します。
 
-- [Mei](https://github.com/ljyh223/Mei): 上流の Android プロジェクトと基盤機能
+- [Mei](https://github.com/ljyh223/Mei): アップストリームの Android プロジェクトと基盤機能
 - [MeloX](https://github.com/youshen2/MeloX): iOS 版のリファレンス実装とプロダクトの方向性
 - [Glasmio](https://github.com/NEORUAA/Glasmio): 高品質な iOS アニメーションとインターフェースライブラリ
 - [amll-ttml-db](https://github.com/Steve-xmh/amll-ttml-db): 高品質な単語ごとの歌詞データ
@@ -71,7 +71,7 @@ MeiloX の本体コードは [GNU General Public License v3](LICENSE) の下で�
 
 主な声明は以下のとおりです。
 
-- [Mei](https://github.com/ljyh223/Mei) の上流コードは Apache License 2.0 に従います
+- [Mei](https://github.com/ljyh223/Mei) のアップストリームコードは Apache License 2.0 に従います
 - [MeloX](https://github.com/youshen2/MeloX) の関連リファレンスコードは、同プロジェクトの GPLv3 条項に従います
 - [Glasmio](https://github.com/NEORUAA/Glasmio) は Apache License 2.0 に従い、保持しているサードパーティコードの出典と帰属は [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) に記載されています
 - [amll-ttml-db](https://github.com/Steve-xmh/amll-ttml-db) と [accompanist-lyrics-ui](https://github.com/6xingyv/accompanist-lyrics-ui) は、それぞれのリポジトリで公表されているライセンスと帰属要件に従います
