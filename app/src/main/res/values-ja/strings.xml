@@ -11,7 +11,7 @@
   <string name="artist_info_albums">アルバム</string>
   <string name="artist_info_music_videos">ミュージックビデオ</string>
   <string name="artist_info_identities">アーティストの肩書き</string>
-  <string name="artist_info_expertise">担当分野</string>
+  <string name="artist_info_expertise">創作分野</string>
   <string name="artist_info_translated_names">翻訳名</string>
   <string name="artist_info_aliases">エイリアス</string>
   <string name="artist_info_biography">バイオグラフィー</string>
@@ -95,7 +95,7 @@
   <string name="more_actions_sort">並べ替えアクション</string>
   <string name="more_actions_sort_title">アクションの並べ替え基準</string>
   <string name="more_actions_sort_frequency">使用頻度</string>
-  <string name="more_actions_sort_risk">誤タップのしやすさ</string>
+  <string name="more_actions_sort_risk">誤タップのリスク</string>
   <string name="song_wiki">Song Wiki</string>
   <string name="song_wiki_memories">思い出の座標</string>
   <string name="song_wiki_tags">曲のタグ</string>
@@ -150,7 +150,7 @@
   <string name="podcast_subscriptions_sign_in">購読を表示するにはサインインしてください</string>
   <string name="podcast_subscriptions_sign_in_description">ポッドキャストの購読は NetEase Cloud Music と同期されます。</string>
   <string name="cloud_music">クラウドの音楽</string>
-  <string name="cloud_music_quota">%1$s / %2$s を使用中</string>
+  <string name="cloud_music_quota">%2$s 中 %1$s を使用中</string>
   <string name="load_failed">コンテンツを読み込めませんでした</string>
   <string name="retry">再試行</string>
   <string name="refresh">更新</string>
@@ -938,7 +938,7 @@
   <string name="library_filter_all">すべて</string>
   <string name="library_filter_created">自分が作成</string>
   <string name="library_filter_subscribed">購読済み</string>
-  <string name="library_empty_created_playlists">作成したプレイリストはありません</string>
+  <string name="library_empty_created_playlists">プレイリストを作成していません</string>
   <string name="library_empty_subscribed_playlists">購読したプレイリストはありません</string>
   <string name="library_load_more">さらに読み込む</string>
   <string name="library_collection_load_failed">ライブラリを読み込めませんでした。再度お試しください。</string>
@@ -973,7 +973,7 @@
   <string name="local_library_path">場所</string>
   <string name="local_library_format">フォーマット</string>
   <string name="local_library_size">サイズ</string>
-  <string name="local_library_duration">長さ</string>
+  <string name="local_library_duration">再生時間</string>
   <string name="local_library_audio">音声</string>
   <string name="local_library_empty">ローカルの音楽はまだありません</string>
   <string name="local_library_empty_hint">この端末をスキャンするか、曲をダウンロードしてオフラインで聴きましょう。</string>
@@ -1012,8 +1012,8 @@
   <string name="playlist_order_hint">ハンドルを長押しして曲をドラッグします。変更は「完了」をタップしたときに保存されます。</string>
   <string name="playlist_order_unavailable">曲は利用できません</string>
   <string name="playlist_order_drag">長押しして並べ替え</string>
-  <string name="playlist_order_move_up">上へ移動</string>
-  <string name="playlist_order_move_down">下へ移動</string>
+  <string name="playlist_order_move_up">上に移動</string>
+  <string name="playlist_order_move_down">下に移動</string>
   <string name="playlist_order_load_failed">プレイリストを読み込めませんでした。再度お試しください。</string>
   <string name="playlist_order_save_failed">順序を保存できませんでした。変更はここに保持されます。「完了」をタップして再試行してください。</string>
   <string name="playlist_order_changed">このプレイリストは他の場所で変更されています。順序を再度編集する前に再読み込みしてください。</string>
