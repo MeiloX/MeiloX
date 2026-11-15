@@ -199,7 +199,7 @@
   <string name="general_theme_system">システム</string>
   <string name="general_theme_light">ライト</string>
   <string name="general_theme_dark">ダーク</string>
-  <string name="general_theme_hint">システムが端末のライト/ダークの外観に自動で追従します。</string>
+  <string name="general_theme_hint">システムがデバイスのライト/ダークの外観に自動で追従します。</string>
   <string name="general_startup_navigation">起動とナビゲーション</string>
   <string name="general_restore_last_tab">最後のタブから続行</string>
   <string name="general_restore_last_tab_description">起動後、最後に使用したメインタブに戻ります。</string>
@@ -325,7 +325,7 @@
   <string name="recognition_balanced">6 秒</string>
   <string name="recognition_extended">9 秒</string>
   <string name="recognition_continuous">連続認識</string>
-  <string name="recognition_ready">端末を音楽に近づけてください</string>
+  <string name="recognition_ready">デバイスを音楽に近づけてください</string>
   <string name="recognition_listening">聴き取り中…</string>
   <string name="recognition_fingerprinting">フィンガープリントを作成中…</string>
   <string name="recognition_matching">音楽ソースと照合中…</string>
@@ -334,10 +334,10 @@
   <string name="recognition_failed">認識に失敗しました</string>
   <string name="recognition_start">聴き取りを開始</string>
   <string name="recognition_stop">停止</string>
-  <string name="recognition_privacy">音声はこの端末内に留まります。音楽ソースへ送信されるのは、ローカルで生成したフィンガープリントのみです。</string>
+  <string name="recognition_privacy">音声はこのデバイス内に留まります。音楽ソースへ送信されるのは、ローカルで生成したフィンガープリントのみです。</string>
   <string name="recognition_source_microphone">マイク</string>
   <string name="recognition_source_playback">内部オーディオ</string>
-  <string name="recognition_playback_ready">この端末で音声を再生</string>
+  <string name="recognition_playback_ready">このデバイスで音声を再生</string>
   <string name="recognition_playback_hint">キャプチャを許可するアプリの音声を聴き取るには、Android のキャプチャ確認を承認してください。MeiloX がキャプチャするのは音声のみです。</string>
   <string name="recognition_panel_channel">曲の認識コントロール</string>
   <string name="recognition_panel_open">通知コントロールを開く</string>
@@ -554,7 +554,7 @@
   <string name="netease_mobile_login_sms_sending">送信中…</string>
   <string name="netease_mobile_login_sms_countdown">%1$d 秒</string>
   <string name="netease_mobile_login_tip_title">セキュリティ</string>
-  <string name="netease_mobile_login_tip">パスワードはこの暗号化されたサインインにのみ使用され、端末には保存されません。既存のセッションは、完全なモバイルアカウントセッションが返された後にのみ置き換えられます。</string>
+  <string name="netease_mobile_login_tip">パスワードはこの暗号化されたサインインにのみ使用され、デバイスには保存されません。既存のセッションは、完全なモバイルアカウントセッションが返された後にのみ置き換えられます。</string>
   <string name="netease_mobile_login_sms_tip">コードの送信と確認は NetEase URS が行います。コードも一時的なログイントークンも保存されません。既存のセッションは、完全なモバイルアカウントセッションが返された後にのみ置き換えられます。</string>
   <string name="netease_mobile_login_invalid_input">国/地域コード、携帯電話番号、サインイン情報を確認してください。</string>
   <string name="netease_mobile_login_failed">サインインに失敗しました。アカウント情報とネットワークを確認して、再度お試しください。</string>
@@ -576,7 +576,7 @@
   <string name="pc_qr_login_generic_platform">このコンピューター</string>
   <string name="pc_qr_login_success">PC のサインインが認証されました</string>
   <string name="pc_qr_login_account_required">PC を認証する前に、Mei で NetEase Cloud Music にサインインしてください</string>
-  <string name="pc_qr_login_camera_unavailable">この端末で利用できるカメラが見つかりませんでした</string>
+  <string name="pc_qr_login_camera_unavailable">このデバイスで利用できるカメラが見つかりませんでした</string>
   <string name="pc_qr_login_camera_permission">PC サインイン用 QR コードをスキャンするにはカメラへのアクセスが必要です</string>
   <string name="pc_qr_login_allow_camera">カメラのアクセスを許可</string>
   <string name="pc_qr_login_open_settings">設定を開く</string>
@@ -624,7 +624,7 @@
   <string name="storage_cache_limit_mb">%1$d MB</string>
   <string name="storage_cache_limit_gb">%1$d GB</string>
   <string name="storage_managed_content">Mei が管理するコンテンツ</string>
-  <string name="storage_device_summary">端末の使用量 %1$s · 空き %2$s</string>
+  <string name="storage_device_summary">デバイスの使用量 %1$s · 空き %2$s</string>
   <string name="storage_reclaimable">回収可能なキャッシュ: %1$s</string>
   <string name="storage_items">ストレージの項目</string>
   <string name="storage_downloads">ダウンロードと自動キャッシュ</string>
@@ -662,7 +662,7 @@
   <string name="storage_confirm_repair_message">ローカルファイルが既に存在しない、完了したダウンロードの記録を削除します。</string>
   <string name="storage_confirm_reset_auto_cache_message">自動キャッシュのトリガーに使う再生回数がゼロから数え直されます。履歴とダウンロード済みの曲は残ります。</string>
   <string name="storage_confirm_optimize_message">レコードを削除せずに、未使用のデータベースページを回収します。</string>
-  <string name="storage_confirm_delete_downloads_message">ダウンロードした曲とタスクの記録がこの端末から削除されます。これは元に戻せません。</string>
+  <string name="storage_confirm_delete_downloads_message">ダウンロードした曲とタスクの記録がこのデバイスから削除されます。これは元に戻せません。</string>
   <string name="confirm">確認</string>
   <string name="download_save_location">保存先</string>
   <string name="download_quality">ダウンロード品質</string>
@@ -962,7 +962,7 @@
   <string name="local_library_filter_local">ローカル</string>
   <string name="local_library_filter_active">転送</string>
   <string name="local_library_scan">ローカルの音楽をスキャン</string>
-  <string name="local_library_scan_hint">この端末に保存された音声を探す</string>
+  <string name="local_library_scan_hint">このデバイスに保存された音声を探す</string>
   <string name="local_library_permission">ローカルの音楽をスキャンするには音声へのアクセスを許可</string>
   <string name="local_library_scan_progress">スキャン中 %1$d / %2$d</string>
   <string name="local_library_match">曲情報を照合</string>
@@ -976,13 +976,13 @@
   <string name="local_library_duration">再生時間</string>
   <string name="local_library_audio">音声</string>
   <string name="local_library_empty">ローカルの音楽はまだありません</string>
-  <string name="local_library_empty_hint">この端末をスキャンするか、曲をダウンロードしてオフラインで聴きましょう。</string>
+  <string name="local_library_empty_hint">このデバイスをスキャンするか、曲をダウンロードしてオフラインで聴きましょう。</string>
   <string name="local_library_sort">並べ替え</string>
   <string name="local_library_sort_recent">最近追加</string>
   <string name="local_library_sort_title">曲名</string>
   <string name="local_library_sort_artist">アーティスト</string>
   <string name="local_library_count">%1$d 曲</string>
-  <string name="local_library_delete_confirm">「%1$s」をこの端末から削除しますか？</string>
+  <string name="local_library_delete_confirm">「%1$s」をこのデバイスから削除しますか？</string>
   <string name="local_library_delete_hint">音声ファイルは完全に削除されます。</string>
   <string name="local_library_remove_record">このダウンロードタスクを削除しますか？</string>
   <string name="local_library_delete_failed">このファイルを削除できませんでした</string>
