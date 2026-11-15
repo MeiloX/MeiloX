@@ -28,61 +28,61 @@ MeiloX は [Mei](https://github.com/ljyh223/Mei) をベースに改良と複数�
 > MeiloX は非公式かつ個人のオープンソースプロジェクトであり、NetEase Cloud Music や Apple とは一切関係ありません。<br>
 > プロジェクト自体は音楽リソースを提供しておらず、音楽コンテンツおよび関連する著作権は、それぞれの権利者に帰属します。
 
-## 功能概览
+## 機能の概要
 
-- 特定音源的 Cookie/Mobile 完整协议登录与账号信息展示；
-- 搜索歌曲、专辑、歌手和歌单；
-- 播放队列、随机播放、循环播放和定时停止；
-- 播放历史、喜欢的音乐、歌单管理和本地收藏；
-- 专辑详情、歌手主页、每日推荐及 FM 播放；
-- 逐字歌词与多语言歌词展示；
-- Apple Music 风格全屏播放器、迷你播放器和歌词浮窗；
-- 浅色/深色主题、动态专辑背景和 Liquid Glass 交互效果。
-- 默认安装且可移除的网易云音源、独立 QQ 音乐插件，以及按用户顺序自动切换播放音源。
-- [插件市场](https://github.com/NEORUAA/MeiloX-Source-Registry)、启动版本检查和自动更新，支持开发者提交 PR 上架。
+- 特定の音源における Cookie/Mobile の完全なプロトコルによるログインと、アカウント情報の表示
+- 曲、アルバム、アーティスト、プレイリストの検索
+- 再生キュー、シャッフル再生、リピート再生、スリープタイマー
+- 再生履歴、お気に入りの音楽、プレイリスト管理、ローカルのコレクション
+- アルバムの詳細、アーティストのホーム、毎日のおすすめ、FM 再生
+- 単語ごとの歌詞と、多言語歌詞の表示
+- Apple Music スタイルのフルスクリーンプレーヤー、ミニプレーヤー、歌詞のフローティング表示
+- ライト/ダークテーマ、動的なアルバム背景、Liquid Glass のインタラクション効果
+- デフォルトでインストールされ削除も可能な NetEase 音源、独立した QQ Music プラグイン、ユーザーが指定した順序による再生音源の自動切り替え
+- [プラグインマーケット](https://github.com/NEORUAA/MeiloX-Source-Registry)、起動時のバージョンチェックと自動更新。開発者は PR を提出して掲載できます
 
-功能仍在持续调整中，实际可用范围会随版本和音乐源接口状态变化。
+機能は継続的に調整中であり、実際に利用できる範囲はバージョンや音楽ソースのインターフェースの状態によって変わります。
 
-音源的导入、配置和切换方式见 [音源使用](docs/music-sources.md)。开发者可参考 [插件规范与 SDK](docs/source-plugin-spec.md) 和 [架构与兼容迁移](docs/multi-source-architecture.md)。
+音源の導入、設定、切り替えについては[音源の使い方](docs/music-sources.md)をご覧ください。開発者は[プラグイン仕様と SDK](docs/source-plugin-spec.md)および[アーキテクチャと互換性移行](docs/multi-source-architecture.md)も参照できます。
 
-## 歌词共享
+## 歌詞の共有
 
-已接入 [Lyricon Provider](https://tomakino.github.io/lyricon/zh-cn/developer/provider/)、[SuperLyricApi](https://github.com/HChenX/SuperLyricApi) 和 [ColorOS Live Lyrics Bridge](https://github.com/Andrea-lyz/ColorOS-Live-Lyrics-Bridge) 接口，用于共享歌词、逐字时间、翻译及播放状态。
+[Lyricon Provider](https://tomakino.github.io/lyricon/zh-cn/developer/provider/)、[SuperLyricApi](https://github.com/HChenX/SuperLyricApi)、[ColorOS Live Lyrics Bridge](https://github.com/Andrea-lyz/ColorOS-Live-Lyrics-Bridge) のインターフェースに対応しており、歌詞、単語ごとのタイミング、翻訳、再生状態を共有できます。
 
-「设置 → 歌词设置 → 歌词共享」中的「启用歌词共享」默认开启。
+「設定 → 歌詞設定 → 歌詞の共有」にある「歌詞の共有を有効化」は、デフォルトでオンになっています。
 
-## 开源致谢
+## オープンソースへの謝辞
 
-MeiloX 的界面、歌词和底层能力受以下项目启发或直接使用其开源组件，感谢所有贡献者：
+MeiloX のインターフェース、歌詞、基盤機能は、以下のプロジェクトにインスピレーションを受けるか、そのオープンソースコンポーネントを直接使用しています。すべての貢献者に感謝します。
 
-- [Mei](https://github.com/ljyh223/Mei)：上游 Android 项目与基础能力；
-- [MeloX](https://github.com/youshen2/MeloX)：iOS 版参考实现与产品方向；
-- [Glasmio](https://github.com/NEORUAA/Glasmio)：高质量的 iOS 动画与界面库；
-- [amll-ttml-db](https://github.com/Steve-xmh/amll-ttml-db)：高质量逐字歌词数据；
-- [accompanist-lyrics-ui](https://github.com/6xingyv/accompanist-lyrics-ui)：歌词模型与渲染组件；
-- [Lyricon](https://github.com/tomakino/lyricon)：词幕 Provider SDK；
-- [SuperLyricApi](https://github.com/HChenX/SuperLyricApi)：歌词共享 SDK；
-- [ColorOS Live Lyrics Bridge](https://github.com/Andrea-lyz/ColorOS-Live-Lyrics-Bridge)：ColorOS 锁屏歌词接口。
+- [Mei](https://github.com/ljyh223/Mei): 上流の Android プロジェクトと基盤機能
+- [MeloX](https://github.com/youshen2/MeloX): iOS 版のリファレンス実装とプロダクトの方向性
+- [Glasmio](https://github.com/NEORUAA/Glasmio): 高品質な iOS アニメーションとインターフェースライブラリ
+- [amll-ttml-db](https://github.com/Steve-xmh/amll-ttml-db): 高品質な単語ごとの歌詞データ
+- [accompanist-lyrics-ui](https://github.com/6xingyv/accompanist-lyrics-ui): 歌詞モデルとレンダリングコンポーネント
+- [Lyricon](https://github.com/tomakino/lyricon): 歌詞表示プロバイダー SDK
+- [SuperLyricApi](https://github.com/HChenX/SuperLyricApi): 歌詞の共有 SDK
+- [ColorOS Live Lyrics Bridge](https://github.com/Andrea-lyz/ColorOS-Live-Lyrics-Bridge): ColorOS ロック画面歌詞インターフェース
 
-## 许可证与第三方声明
+## ライセンスとサードパーティ声明
 
-MeiloX 主体代码以 [GNU General Public License v3](LICENSE) 发布。MeiloX 是 Mei 的衍生项目，相关上游代码和参考实现仍受其原始版权与许可证约束；第三方库、模型、脚本、字体和视觉素材不因 MeiloX 使用 GPLv3 就自动转为 GPLv3。
+MeiloX の本体コードは [GNU General Public License v3](LICENSE) の下で公開されています。MeiloX は Mei の派生プロジェクトであり、関連するアップストリームコードとリファレンス実装は、引き続き元の著作権とライセンスの制約を受けます。サードパーティのライブラリ、モデル、スクリプト、フォント、ビジュアル素材は、MeiloX が GPLv3 を使用しているからといって、自動的に GPLv3 になるわけではありません。
 
-重点声明如下：
+主な声明は以下のとおりです。
 
-- [Mei](https://github.com/ljyh223/Mei) 的上游代码遵循 Apache License 2.0；
-- [MeloX](https://github.com/youshen2/MeloX) 的相关参考代码遵循其项目的 GPLv3 条款；
-- [Glasmio](https://github.com/NEORUAA/Glasmio) 遵循 Apache License 2.0，其保留的第三方代码来源与署名见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)；
-- [amll-ttml-db](https://github.com/Steve-xmh/amll-ttml-db) 与 [accompanist-lyrics-ui](https://github.com/6xingyv/accompanist-lyrics-ui) 遵循各自仓库公布的许可证和署名要求；
-- BeatNet 模型、音频指纹运行时、ONNX Runtime、PV Tool 衍生内容及其它随项目分发的组件，遵循其各自的许可证、版权声明和再分发限制。
+- [Mei](https://github.com/ljyh223/Mei) の上流コードは Apache License 2.0 に従います
+- [MeloX](https://github.com/youshen2/MeloX) の関連リファレンスコードは、同プロジェクトの GPLv3 条項に従います
+- [Glasmio](https://github.com/NEORUAA/Glasmio) は Apache License 2.0 に従い、保持しているサードパーティコードの出典と帰属は [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) に記載されています
+- [amll-ttml-db](https://github.com/Steve-xmh/amll-ttml-db) と [accompanist-lyrics-ui](https://github.com/6xingyv/accompanist-lyrics-ui) は、それぞれのリポジトリで公表されているライセンスと帰属要件に従います
+- BeatNet モデル、音声フィンガープリントランタイム、ONNX Runtime、PV Tool の派生コンテンツ、その他プロジェクトと共に配布されるコンポーネントは、それぞれのライセンス、著作権表示、再配布制限に従います
 
-完整的来源、版权归属、许可证链接和特殊再分发要求请阅读 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。其中 `res/font/sf_pro.ttf` 仅作为个人项目资源使用；请勿从构建产物中单独提取或再分发，公开发布构建版本前请重新核对 Apple 的字体许可条款。
+完全な出典、著作権の帰属、ライセンスへのリンク、特別な再配布要件については [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) をお読みください。なお `res/font/sf_pro.ttf` は個人プロジェクトのリソースとしてのみ使用しています。ビルド成果物から単独で抽出したり、再配布したりしないでください。ビルド版を公開する前に、Apple のフォントライセンス条項を再確認してください。
 
-## 软件界面预览
+## 画面プレビュー
 
-以下预览来自 [`screenshot/2026-08-22`](./screenshot/2026-08-22/)，同时展示浅色、深色和播放器界面。
+以下のプレビューは [`screenshot/2026-08-22`](./screenshot/2026-08-22/) のもので、ライトモード、ダークモード、プレーヤーの画面を表示しています。
 
-### 浅色界面
+### ライトモード
 
 <table>
   <tr>
@@ -99,7 +99,7 @@ MeiloX 主体代码以 [GNU General Public License v3](LICENSE) 发布。MeiloX 
   </tr>
 </table>
 
-### 深色界面
+### ダークモード
 
 <table>
   <tr>
@@ -116,7 +116,7 @@ MeiloX 主体代码以 [GNU General Public License v3](LICENSE) 发布。MeiloX 
   </tr>
 </table>
 
-### 播放器与歌词
+### プレーヤーと歌詞
 
 <table>
   <tr>
@@ -128,16 +128,16 @@ MeiloX 主体代码以 [GNU General Public License v3](LICENSE) 发布。MeiloX 
   </tr>
 </table>
 
-## 从源码构建
+## ソースからビルド
 
-使用 JDK 21 和 Android SDK 37。默认从同级 `../Glasmio` 构建最新源码：
+JDK 21 と Android SDK 37 を使用します。デフォルトでは、同じ階層にある `../Glasmio` から最新のソースをビルドします。
 
 ```sh
 git clone https://github.com/NEORUAA/Glasmio.git ../Glasmio
 ./gradlew :app:assembleDebug
 ```
 
-需要使用最新已发布的 Maven 包时，可显式关闭源码替换：
+最新リリース済みの Maven パッケージを使用する場合は、ソースの置き換えを明示的に無効化できます。
 
 ```sh
 ./gradlew -Pglasmio.source=false -Pglasmio.version=0.1.3 :app:assembleDebug
@@ -147,12 +147,13 @@ Glasmio のレンダラー、ナビゲーションビューおよびミニプレ
 
 ## 免責事項
 
+
 本プロジェクトは、学習と研究および個人的利用を目的としています。本プロジェクトを使用して、NetEase Cloud Music のサービスにアクセスする際は、現地の法令と当該音楽サービスの利用規約、関連する著作権要件を遵守してください。プロジェクトの管理者は、サードパーティーサービスの利用とアカウントの状態および音楽コンテンツの利用に関しての一切の責任を負いません。
 
 権利侵害のコンテンツ、ライセンスの記載漏れ、不正確な第三者に関する記述を発見した場合は、[Issues](https://github.com/NEORUAA/MeiloX/issues) からメンテナにご連絡ください。
 
 <div align="center">
 
-Made with Jetpack Compose · MeiloX
+**Made with Jetpack Compose ♥ MeiloX**
 
 </div>
