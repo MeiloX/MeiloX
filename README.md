@@ -15,6 +15,8 @@
 
 ---
 
+Language: **中文** | [日本語](./README_ja-JP.md)
+
 ## 项目简介
 
 MeiloX 是一个基于 [Mei](https://github.com/ljyh223/Mei) 改造的多音源音乐客户端，默认安装可移除的网易云音源，使用 **Jetpack Compose** 构建，尝试把 iOS 27 的层次感、液态玻璃和沉浸式播放器体验带到 Android 上。
@@ -153,6 +155,6 @@ Glasmio 的渲染器、导航视口绑定和 MiniPlayer 原生附件动画说明
 
 <div align="center">
 
-Made with Jetpack Compose · MeiloX
+**Made with Jetpack Compose ♥ MeiloX**
 
 </div>
