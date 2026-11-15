@@ -141,9 +141,9 @@
   <string name="podcast_discover">探す</string>
   <string name="podcast_my_subscriptions">自分の購読済み</string>
   <string name="podcast_subscribe">購読</string>
-  <string name="podcast_subscribed">購読済み</string>
+  <string name="podcast_subscribed">購読中</string>
   <string name="podcast_duration_minutes">%1$d 分</string>
-  <string name="podcast_program_count">%1$d 個のエピソード</string>
+  <string name="podcast_program_count">%1$d 件のエピソード</string>
   <string name="podcast_loading_more">ポッドキャストをさらに読み込み中</string>
   <string name="podcast_empty_subscriptions">購読中のポッドキャストはありません</string>
   <string name="podcast_empty_subscriptions_description">ポッドキャストを開いて「購読」をタップするとここに表示されます。</string>
@@ -552,7 +552,7 @@
   <string name="netease_mobile_login_sms_code">SMS 認証コード</string>
   <string name="netease_mobile_login_sms_send">コードを送信</string>
   <string name="netease_mobile_login_sms_sending">送信中…</string>
-  <string name="netease_mobile_login_sms_countdown">%1$d秒</string>
+  <string name="netease_mobile_login_sms_countdown">%1$d 秒</string>
   <string name="netease_mobile_login_tip_title">セキュリティ</string>
   <string name="netease_mobile_login_tip">パスワードはこの暗号化されたサインインにのみ使用され、端末には保存されません。既存のセッションは、完全なモバイルアカウントセッションが返された後にのみ置き換えられます。</string>
   <string name="netease_mobile_login_sms_tip">コードの送信と確認は NetEase URS が行います。コードも一時的なログイントークンも保存されません。既存のセッションは、完全なモバイルアカウントセッションが返された後にのみ置き換えられます。</string>
@@ -785,7 +785,7 @@
   <string name="detail_playlist_unsubscribe">プレイリストを削除</string>
   <string name="detail_podcast_menu">ポッドキャストのアクション</string>
   <string name="detail_podcast_unsubscribe">購読を解除</string>
-  <string name="detail_podcast_download_all">すべてダウンロード (%1$d エピソード)</string>
+  <string name="detail_podcast_download_all">すべてダウンロード (%1$d 件のエピソード)</string>
   <string name="detail_download_queued">%1$d 件をダウンロードに追加しました</string>
   <string name="system_lyrics_settings">歌詞の共有</string>
   <string name="external_devices_settings">外部デバイス</string>
@@ -831,7 +831,7 @@
   <string name="listening_stats_hours_minutes">%1$s 時間 %2$s 分</string>
   <string name="listening_stats_minutes">%1$s 分</string>
   <string name="listening_stats_less_minute">1 分未満</string>
-  <string name="listening_stats_chart_hint">チャートをタップまたはスライドして探索</string>
+  <string name="listening_stats_chart_hint">チャートをタップまたはスライドして探す</string>
   <string name="listening_stats_previous_day">前日</string>
   <string name="listening_stats_next_day">翌日</string>
   <string name="listening_stats_info_title">再生アクティビティについて</string>
@@ -900,12 +900,12 @@
   <string name="appearance_interface">インターフェース</string>
   <string name="appearance_fixed_bottom_bar">タブバーを展開したままにする</string>
   <string name="appearance_fixed_bottom_bar_description">スクロール中も下部タブを展開したままにします。</string>
-  <string name="appearance_liquid_glass">リキッドガラス</string>
+  <string name="appearance_liquid_glass">Liquid Glass</string>
   <string name="appearance_liquid_glass_description">光の屈折と流体ガラスの効果を使用します。オフにするとすりガラスになります。</string>
-  <string name="appearance_glass_hdr_effects">リキッドガラス HDR 効果 (実験的)</string>
+  <string name="appearance_glass_hdr_effects">Liquid Glass HDR エフェクト (実験的)</string>
   <string name="appearance_reduce_transparency">透明度を下げる</string>
   <string name="appearance_reduce_transparency_description">コントロールとテキストを読みやすくするため、不透明な背景を使用します。</string>
-  <string name="appearance_predictive_back">予測型バックアニメーション</string>
+  <string name="appearance_predictive_back">予測型の戻るアニメーション</string>
   <string name="appearance_predictive_back_description">スワイプ中に前のページをプレビューします。オフにすると、ジェスチャーが完了した後にのみ戻ります。</string>
   <string name="appearance_library_default_page">デフォルトページ</string>
   <!-- values/artist_catalog_search.xml -->
@@ -937,7 +937,7 @@
   <string name="library_page_albums">アルバム</string>
   <string name="library_filter_all">すべて</string>
   <string name="library_filter_created">自分が作成</string>
-  <string name="library_filter_subscribed">購読済み</string>
+  <string name="library_filter_subscribed">購読中</string>
   <string name="library_empty_created_playlists">プレイリストを作成していません</string>
   <string name="library_empty_subscribed_playlists">購読したプレイリストはありません</string>
   <string name="library_load_more">さらに読み込む</string>
@@ -995,7 +995,7 @@
   <string name="lyric_version_word">単語ごと</string>
   <string name="lyric_version_line">行ごと</string>
   <string name="lyric_version_ttml">TTML</string>
-  <string name="lyric_version_selected">選択中の歌詞バージョン</string>
+  <string name="lyric_version_selected">選択中の歌詞のバージョン</string>
   <!-- values/lyricon.xml -->
   <string-array name="lyricon_module_tags">
     <item>$syllable</item>
@@ -1004,7 +1004,7 @@
   <!-- values/more_action_order.xml -->
   <string name="more_actions_order_title">順序を編集</string>
   <string name="more_actions_order_done">完了</string>
-  <string name="more_actions_sort_custom">カスタム順序</string>
+  <string name="more_actions_sort_custom">順序をカスタマイズ</string>
   <!-- values/playlist_order.xml -->
   <string name="playlist_order_title">順序を編集</string>
   <string name="playlist_order_cancel">キャンセル</string>
@@ -1021,5 +1021,5 @@
   <!-- values/search_history.xml -->
   <string name="search_history_title">最近の検索</string>
   <string name="search_history_clear">削除</string>
-  <string name="search_history_remove">%1$s を最近の検索から削除</string>
+  <string name="search_history_remove">「%1$s」を最近の検索から削除</string>
   <string name="search_history_show_all">すべて表示</string></resources>
