@@ -15,6 +15,7 @@
 
 ---
 
+Language: [中文](./README.md) | **日本語**
 ## プロジェクトの概要
 
 MeiloX は [Mei](https://github.com/ljyh223/Mei) をベースに改良と複数の音楽ソースに対応した音楽クライアントです。デフォルトで NetEase Cloud Music のソースが組み込まれていますが削除可能です。**Jetpack Compose** でビルドされており、iOS 27 に見られる奥行き感、Liquid Glass のような質感と没入感のある音楽体験を Android 上で実現することを目指しています。
