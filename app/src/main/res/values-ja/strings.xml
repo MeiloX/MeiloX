@@ -612,7 +612,7 @@
   <string name="account_week">先週</string>
   <string name="account_all_time">全期間</string>
   <string name="account_play_count">%1$d 回再生</string>
-  <string name="account_no_listening_records">再生記録はありません</string>
+  <string name="account_no_listening_records">視聴記録はありません</string>
   <string name="unknown_artist">不明なアーティスト</string>
   <string name="unknown_song">不明な曲</string>
   <string name="download_settings">ダウンロードの設定</string>
@@ -954,8 +954,8 @@
   <string name="listening_rank_all_time_context">全期間の再生</string>
   <string name="listening_rank_play_count">%1$s 回再生</string>
   <string name="listening_count_unavailable">利用できません</string>
-  <string name="listening_your_song_stats">あなたの再生記録</string>
-  <string name="listening_song_stats_unavailable">この曲の個人の再生記録はありません。</string>
+  <string name="listening_your_song_stats">あなたの視聴記録</string>
+  <string name="listening_song_stats_unavailable">この曲の個人の視聴記録はありません。</string>
   <!-- values/local_library.xml -->
   <string name="local_library_filter_all">すべて</string>
   <string name="local_library_filter_downloaded">ダウンロード済み</string>
