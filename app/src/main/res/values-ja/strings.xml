@@ -895,5 +895,131 @@
   <string name="musician_creator">コンテンツの作成者</string>
   <string name="landscape_player_not_playing">再生していません</string>
   <string name="show_sidebar">サイドバーを表示</string>
-  <string name="hide_sidebar">スタータスバーを非表示</string>
-</resources>
+  <string name="hide_sidebar">ステータスバーを非表示</string>
+  <!-- values/appearance_options.xml -->
+  <string name="appearance_interface">Interface</string>
+  <string name="appearance_fixed_bottom_bar">Keep tab bar expanded</string>
+  <string name="appearance_fixed_bottom_bar_description">Keep the bottom tabs expanded while scrolling.</string>
+  <string name="appearance_liquid_glass">Liquid Glass</string>
+  <string name="appearance_liquid_glass_description">Use light refraction and fluid glass effects. Turn off for frosted glass.</string>
+  <string name="appearance_glass_hdr_effects">Liquid Glass HDR effects (Experimental)</string>
+  <string name="appearance_reduce_transparency">Reduce transparency</string>
+  <string name="appearance_reduce_transparency_description">Use opaque backgrounds for clearer controls and text.</string>
+  <string name="appearance_predictive_back">Predictive back animation</string>
+  <string name="appearance_predictive_back_description">Preview the previous page while swiping back. Turn off to go back only after the gesture finishes.</string>
+  <string name="appearance_library_default_page">Default page</string>
+  <!-- values/artist_catalog_search.xml -->
+  <string name="artist_songs_search">Search songs or albums</string>
+  <string name="artist_albums_search">Search albums</string>
+  <string name="artist_catalog_search_progress">%1$d matches in %2$d items checked. Searching…</string>
+  <string name="artist_catalog_search_partial">%1$d matches in %2$d items checked. More items may match.</string>
+  <string name="artist_catalog_search_complete">%1$d matches in %2$d items.</string>
+  <string name="artist_catalog_search_continue">Search more items</string>
+  <!-- values/comment_actions.xml -->
+  <string name="comment_hide_replies">Hide replies</string>
+  <string name="comment_show_replies">Show %1$d replies</string>
+  <string name="comment_reply">Reply</string>
+  <string name="comment_like">Like comment</string>
+  <string name="comment_unlike">Unlike comment</string>
+  <string name="comment_liked">Liked</string>
+  <string name="comment_not_liked">Not liked</string>
+  <string name="comment_replying_to">Replying to %1$s</string>
+  <string name="comment_cancel_reply">Cancel reply</string>
+  <string name="comment_placeholder">Add a comment…</string>
+  <string name="comment_published">Comment sent</string>
+  <string name="comment_send_failed">Could not send: %1$s</string>
+  <string name="comment_action_failed">Could not update like: %1$s</string>
+  <string name="comment_login_hint">Sign in to join the conversation</string>
+  <string name="comment_sign_in">Sign in</string>
+  <string name="comment_empty">No comments yet. Share your thoughts.</string>
+  <string name="comment_retry">Retry</string>
+  <!-- values/library_collections.xml -->
+  <string name="library_page_albums">Albums</string>
+  <string name="library_filter_all">All</string>
+  <string name="library_filter_created">Created by Me</string>
+  <string name="library_filter_subscribed">Subscribed</string>
+  <string name="library_empty_created_playlists">No created playlists</string>
+  <string name="library_empty_subscribed_playlists">No subscribed playlists</string>
+  <string name="library_load_more">Load More</string>
+  <string name="library_collection_load_failed">Unable to load your library. Try again.</string>
+  <string name="album_subscription_update_failed">Unable to update album subscription. Try again.</string>
+  <string name="album_subscription_load_failed">Unable to check album subscription. Tap to retry.</string>
+  <string name="album_subscription_updating">Updating…</string>
+  <!-- values/listening_statistics.xml -->
+  <string name="listening_account_level_summary">Lv.%1$d · %2$s songs listened</string>
+  <string name="listening_cumulative_songs">Songs Listened</string>
+  <string name="listening_song_count">%1$s songs</string>
+  <string name="listening_account_total_context">All-time total for this NetEase account</string>
+  <string name="listening_rank_week_context">Your plays in the past week</string>
+  <string name="listening_rank_all_time_context">Your all-time plays</string>
+  <string name="listening_rank_play_count">%1$s plays</string>
+  <string name="listening_count_unavailable">Unavailable</string>
+  <string name="listening_your_song_stats">Your Listening</string>
+  <string name="listening_song_stats_unavailable">No personal listening records are available for this song.</string>
+  <!-- values/local_library.xml -->
+  <string name="local_library_filter_all">All</string>
+  <string name="local_library_filter_downloaded">Downloaded</string>
+  <string name="local_library_filter_local">Local</string>
+  <string name="local_library_filter_active">Transfers</string>
+  <string name="local_library_scan">Scan local music</string>
+  <string name="local_library_scan_hint">Find audio stored on this device</string>
+  <string name="local_library_permission">Allow audio access to scan local music</string>
+  <string name="local_library_scan_progress">Scanning %1$d / %2$d</string>
+  <string name="local_library_match">Match song information</string>
+  <string name="local_library_match_hint">Choose a result to update library information. Audio files stay unchanged.</string>
+  <string name="local_library_match_confirm">Use this information?</string>
+  <string name="local_library_apply">Apply</string>
+  <string name="local_library_info">File information</string>
+  <string name="local_library_path">Location</string>
+  <string name="local_library_format">Format</string>
+  <string name="local_library_size">Size</string>
+  <string name="local_library_duration">Duration</string>
+  <string name="local_library_audio">Audio</string>
+  <string name="local_library_empty">No local music yet</string>
+  <string name="local_library_empty_hint">Scan this device or download a song to listen offline.</string>
+  <string name="local_library_sort">Sort</string>
+  <string name="local_library_sort_recent">Recently added</string>
+  <string name="local_library_sort_title">Song title</string>
+  <string name="local_library_sort_artist">Artist</string>
+  <string name="local_library_count">%1$d songs</string>
+  <string name="local_library_delete_confirm">Delete “%1$s” from this device?</string>
+  <string name="local_library_delete_hint">The audio file will be permanently removed.</string>
+  <string name="local_library_remove_record">Remove this download task?</string>
+  <string name="local_library_delete_failed">Unable to delete this file</string>
+  <string name="local_library_scan_cancel">Stop scan</string>
+  <string name="local_library_scan_again">Scan again</string>
+  <string name="local_library_no_matches">No matches found. Try another title or artist.</string>
+  <string name="local_library_pending">Waiting</string>
+  <string name="local_library_downloaded">Downloaded</string>
+  <!-- values/lyric_versions.xml -->
+  <string name="lyric_version_word">Word by word</string>
+  <string name="lyric_version_line">Line by line</string>
+  <string name="lyric_version_ttml">TTML</string>
+  <string name="lyric_version_selected">Selected lyric version</string>
+  <!-- values/lyricon.xml -->
+  <string-array name="lyricon_module_tags">
+    <item>$syllable</item>
+    <item>$translation</item>
+  </string-array>
+  <!-- values/more_action_order.xml -->
+  <string name="more_actions_order_title">Edit Order</string>
+  <string name="more_actions_order_done">Done</string>
+  <string name="more_actions_sort_custom">Custom Order</string>
+  <!-- values/playlist_order.xml -->
+  <string name="playlist_order_title">Edit Order</string>
+  <string name="playlist_order_cancel">Cancel</string>
+  <string name="playlist_order_done">Done</string>
+  <string name="playlist_order_hint">Touch and hold the handle to drag a song. Changes are saved when you tap Done.</string>
+  <string name="playlist_order_unavailable">Song unavailable</string>
+  <string name="playlist_order_drag">Touch and hold to reorder</string>
+  <string name="playlist_order_move_up">Move up</string>
+  <string name="playlist_order_move_down">Move down</string>
+  <string name="playlist_order_load_failed">Could not load the playlist. Please try again.</string>
+  <string name="playlist_order_save_failed">Could not save the order. Your changes are kept here; tap Done to retry.</string>
+  <string name="playlist_order_changed">This playlist has changed elsewhere. Reload it before editing the order again.</string>
+  <string name="playlist_order_reload">Reload playlist</string>
+  <!-- values/search_history.xml -->
+  <string name="search_history_title">Recent Searches</string>
+  <string name="search_history_clear">Clear</string>
+  <string name="search_history_remove">Remove %1$s from recent searches</string>
+  <string name="search_history_show_all">Show All</string></resources>
