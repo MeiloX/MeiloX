@@ -77,7 +77,7 @@
   <string name="queue_cannot_remove_last">最後の曲は削除できません</string>
   <string name="queue_history">履歴</string>
   <string name="queue_continue_playing">再生を続行</string>
-  <string name="queue_from_source">%1$s から</string>
+  <string name="queue_from_source">「%1$s」から</string>
   <string name="queue_autoplay">自動再生</string>
   <string name="queue_autoplay_description">似た曲が引き続き再生されます</string>
   <string name="queue_reorder">曲を並べ替え</string>
