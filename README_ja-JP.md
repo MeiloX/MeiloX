@@ -15,7 +15,7 @@
 
 ---
 
-Language: [中文](./README.md) | **日本語**
+Language: [中文](./README.md) | [English](./README_en-US.md) | **日本語**
 ## プロジェクトの概要
 
 MeiloX は [Mei](https://github.com/ljyh223/Mei) をベースに改良と複数の音楽ソースに対応した音楽クライアントです。デフォルトで NetEase Cloud Music のソースが組み込まれていますが削除可能です。**Jetpack Compose** でビルドされており、iOS 27 に見られる奥行き感、Liquid Glass のような質感と没入感のある音楽体験を Android 上で実現することを目指しています。
@@ -81,51 +81,48 @@ MeiloX の本体コードは [GNU General Public License v3](LICENSE) の下で�
 
 ## 画面プレビュー
 
-以下のプレビューは [`screenshot/2026-08-22`](./screenshot/2026-08-22/) のもので、ライトモード、ダークモード、プレーヤーの画面を表示しています。
-
-### ライトモード
-
-<table>
+<table width="100%">
   <tr>
-    <td><img src="./screenshot/2026-08-22/light_Screenshot_2026-08-22-09-47-44-801_com.neoruaa.meilox.jpg" width="200" alt="Light mode 01"></td>
-    <td><img src="./screenshot/2026-08-22/light_Screenshot_2026-08-22-10-31-11-383_com.neoruaa.meilox.jpg" width="200" alt="Light mode 07"></td>
-    <td><img src="./screenshot/2026-08-22/light_Screenshot_2026-08-22-10-06-44-461_com.neoruaa.meilox.jpg" width="200" alt="Light mode 04"></td>
-    <td><img src="./screenshot/2026-08-22/light_Screenshot_2026-08-22-10-05-43-651_com.neoruaa.meilox.jpg" width="200" alt="Light mode 02"></td>
+    <td width="25%"><img src="./screenshot/2026-11-16/player/Screenshot_2026-11-16-12-17-40-602_com.neoruaa.meilox.jpg" width="100%" alt="Player screenshot 1"></td>
+    <td width="25%"><img src="./screenshot/2026-11-16/player/Screenshot_2026-11-16-12-20-48-527_com.neoruaa.meilox.jpg" width="100%" alt="Player screenshot 2"></td>
+    <td width="25%"><img src="./screenshot/2026-11-16/player/Screenshot_2026-11-16-12-20-04-075_com.neoruaa.meilox.jpg" width="100%" alt="Player screenshot 3"></td>
+    <td width="25%"><img src="./screenshot/2026-11-16/player/Screenshot_2026-11-16-12-22-45-066_com.neoruaa.meilox.jpg" width="100%" alt="Player screenshot 4"></td>
   </tr>
   <tr>
-    <td><img src="./screenshot/2026-08-22/light_Screenshot_2026-08-22-10-13-55-779_com.neoruaa.meilox.jpg" width="200" alt="Light mode 05"></td>
-    <td><img src="./screenshot/2026-08-22/light_Screenshot_2026-08-22-10-14-22-986_com.neoruaa.meilox.jpg" width="200" alt="Light mode 06"></td>
-    <td><img src="./screenshot/2026-08-22/light_Screenshot_2026-08-22-10-06-04-617_com.neoruaa.meilox.jpg" width="200" alt="Light mode 03"></td>
-    <td><img src="./screenshot/2026-08-22/light_Screenshot_2026-08-22-10-33-30-925_com.neoruaa.meilox.jpg" width="200" alt="Light mode 08"></td>
+    <td colspan="3" width="75%"><img src="./screenshot/2026-11-16/ui/pad/Screenshot_2026-11-16-13-36-58-88_b4ebea482d4eb8966c92221d11addacb.jpg" width="100%" alt="Tablet player screenshot"></td>
+    <td width="25%"><img src="./screenshot/2026-11-16/player/Screenshot_2026-11-16-12-25-00-174_com.neoruaa.meilox.jpg" width="100%" alt="Player screenshot 5"></td>
   </tr>
 </table>
 
-### ダークモード
-
 <table>
   <tr>
-    <td><img src="./screenshot/2026-08-22/dark_Screenshot_2026-08-22-10-17-19-250_com.neoruaa.meilox.jpg" width="200" alt="Dark mode 02"></td>
-    <td><img src="./screenshot/2026-08-22/dark_Screenshot_2026-08-22-10-28-56-966_com.neoruaa.meilox.jpg" width="200" alt="Dark mode 07"></td>
-    <td><img src="./screenshot/2026-08-22/dark_Screenshot_2026-08-22-10-19-07-140_com.neoruaa.meilox.jpg" width="200" alt="Dark mode 06"></td>
-    <td><img src="./screenshot/2026-08-22/dark_Screenshot_2026-08-22-10-17-04-531_com.neoruaa.meilox.jpg" width="200" alt="Dark mode 01"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-11-52-19-696_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 1"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-11-53-11-793_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 2"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-11-55-37-127_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 3"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-00-51-927_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 4"></td>
   </tr>
   <tr>
-    <td><img src="./screenshot/2026-08-22/dark_Screenshot_2026-08-22-10-17-59-681_com.neoruaa.meilox.jpg" width="200" alt="Dark mode 04"></td>
-    <td><img src="./screenshot/2026-08-22/dark_Screenshot_2026-08-22-10-34-42-884_com.neoruaa.meilox.jpg" width="200" alt="Dark mode 08"></td>
-    <td><img src="./screenshot/2026-08-22/dark_Screenshot_2026-08-22-10-17-30-088_com.neoruaa.meilox.jpg" width="200" alt="Dark mode 03"></td>
-    <td><img src="./screenshot/2026-08-22/dark_Screenshot_2026-08-22-10-18-09-075_com.neoruaa.meilox.jpg" width="200" alt="Dark mode 05"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-02-20-868_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 5"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-16-08-010_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 6"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-07-37-859_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 7"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-09-58-456_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 8"></td>
+  </tr>
+  <tr>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-04-02-421_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 9"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-11-54-815_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 10"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-13-27-264_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 11"></td>
+    <td><img src="./screenshot/2026-11-16/ui/phone/Screenshot_2026-11-16-12-13-58-153_com.neoruaa.meilox.jpg" width="200" alt="Phone screenshot 12"></td>
   </tr>
 </table>
 
-### プレーヤーと歌詞
-
 <table>
   <tr>
-    <td><img src="./screenshot/2026-08-22/player_Screenshot_2026-08-22-10-12-05-012_com.neoruaa.meilox.jpg" width="200" alt="Player 02"></td>
-    <td><img src="./screenshot/2026-08-22/player_Screenshot_2026-08-22-10-11-20-597_com.neoruaa.meilox.jpg" width="200" alt="Player 01"></td>
-    <td><img src="./screenshot/2026-08-22/player_Screenshot_2026-08-22-10-16-34-746_com.neoruaa.meilox.jpg" width="200" alt="Player 03"></td>
-    <td><img src="./screenshot/2026-08-22/player_Screenshot_2026-08-22-10-16-52-289_com.neoruaa.meilox.jpg" width="200" alt="Player 04"></td>
-    <td><img src="./screenshot/2026-08-22/player_Screenshot_2026-08-22-10-21-10-403_com.neoruaa.meilox.jpg" width="200" alt="Player 05"></td>
+    <td><img src="./screenshot/2026-11-16/ui/pad/Screenshot_2026-11-16-13-45-46-10_b4ebea482d4eb8966c92221d11addacb.jpg" width="320" alt="Tablet screenshot 1"></td>
+    <td><img src="./screenshot/2026-11-16/ui/pad/Screenshot_2026-11-16-13-42-08-96_b4ebea482d4eb8966c92221d11addacb.jpg" width="320" alt="Tablet screenshot 2"></td>
+  </tr>
+  <tr>
+    <td><img src="./screenshot/2026-11-16/ui/pad/Screenshot_2026-11-16-13-37-33-42_b4ebea482d4eb8966c92221d11addacb.jpg" width="320" alt="Tablet screenshot 3"></td>
+    <td><img src="./screenshot/2026-11-16/ui/pad/Screenshot_2026-11-16-13-35-15-01_b4ebea482d4eb8966c92221d11addacb.jpg" width="320" alt="Tablet screenshot 4"></td>
   </tr>
 </table>
 
