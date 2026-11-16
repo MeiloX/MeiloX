@@ -892,6 +892,7 @@
     <string name="landscape_player_not_playing">未在播放</string>
     <!-- values-zh-rTW/appearance_options.xml -->
     <string name="appearance_interface">介面</string>
+    <string name="appearance_horizontal_safe_area">左右安全區</string>
     <string name="appearance_fixed_bottom_bar">固定底部分頁列</string>
     <string name="appearance_fixed_bottom_bar_description">捲動頁面時，底部分頁列保持展開。</string>
     <string name="appearance_liquid_glass">液態玻璃</string>

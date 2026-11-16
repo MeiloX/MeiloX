@@ -54,6 +54,7 @@ import com.ljyh.mei.constants.LibraryStyle
 import com.ljyh.mei.constants.LibraryStyleKey
 import com.ljyh.mei.constants.LibraryDefaultPageKey
 import com.ljyh.mei.constants.KeepBottomBarExpandedKey
+import com.ljyh.mei.constants.HorizontalSafeAreaEnabledKey
 import com.ljyh.mei.constants.BottomFloatingContentExtraSpacingKey
 import com.ljyh.mei.constants.DefaultBottomFloatingContentExtraSpacing
 import com.ljyh.mei.constants.MaxBottomFloatingContentExtraSpacing
@@ -110,6 +111,8 @@ fun AppearanceSettings(
     val (libraryStyle, setLibraryStyle) = rememberEnumPreference(LibraryStyleKey, LibraryStyle.Default)
     val (libraryDefaultPage, setLibraryDefaultPage) = rememberPreference(LibraryDefaultPageKey, "")
     val (keepBottomBarExpanded, setKeepBottomBarExpanded) = rememberPreference(KeepBottomBarExpandedKey, false)
+    val (horizontalSafeAreaEnabled, setHorizontalSafeAreaEnabled) =
+        rememberPreference(HorizontalSafeAreaEnabledKey, true)
     val (bottomFloatingExtraSpacing, setBottomFloatingExtraSpacing) =
         rememberPreference(BottomFloatingContentExtraSpacingKey, DefaultBottomFloatingContentExtraSpacing)
     val (liquidGlassEnabled, setLiquidGlassEnabled) = rememberPreference(LiquidGlassEnabledKey, true)
@@ -190,6 +193,13 @@ fun AppearanceSettings(
         }
         item {
             SettingsGroup(stringResource(R.string.appearance_interface)) {
+                AppearanceToggle(
+                    R.string.appearance_horizontal_safe_area,
+                    null,
+                    "arrow.left.and.right",
+                    horizontalSafeAreaEnabled,
+                    setHorizontalSafeAreaEnabled,
+                )
                 AppearanceToggle(
                     R.string.appearance_fixed_bottom_bar,
                     R.string.appearance_fixed_bottom_bar_description,

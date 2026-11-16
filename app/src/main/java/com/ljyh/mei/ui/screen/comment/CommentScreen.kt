@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
+import io.github.neoruaa.glasmio.core.glasmioSafeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.only
@@ -206,7 +206,7 @@ fun CommentScreen(songId: String, viewModel: CommentViewModel = hiltViewModel())
         }
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().glasmioAdaptiveContent()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .windowInsetsPadding(WindowInsets.glasmioSafeDrawing.only(WindowInsetsSides.Horizontal))
                 .padding(horizontal = 20.dp)
                 .padding(bottom = bottomPadding + 8.dp)
                 .onSizeChanged { composerHeight = with(density) { it.height.toDp() } },

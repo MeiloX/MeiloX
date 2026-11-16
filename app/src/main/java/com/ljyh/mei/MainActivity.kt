@@ -56,7 +56,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -183,6 +182,7 @@ import com.ljyh.mei.constants.CloudMusicTabEnabledKey
 import com.ljyh.mei.constants.ListeningHistoryTabEnabledKey
 import com.ljyh.mei.constants.NavigationTabOrderKey
 import com.ljyh.mei.constants.KeepBottomBarExpandedKey
+import com.ljyh.mei.constants.HorizontalSafeAreaEnabledKey
 import com.ljyh.mei.constants.BottomFloatingContentExtraSpacingKey
 import com.ljyh.mei.constants.BottomBarHorizontalPadding
 import com.ljyh.mei.constants.MiniPlayerInlineVerticalTravel
@@ -259,6 +259,8 @@ import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.core.GlassAppearance
 import io.github.neoruaa.glasmio.core.LocalGlassAppearance
+import io.github.neoruaa.glasmio.core.LocalGlasmioHorizontalSafeAreaEnabled
+import io.github.neoruaa.glasmio.core.glasmioSafeDrawing
 import io.github.neoruaa.glasmio.glass.LocalBlurBackdrop
 import io.github.neoruaa.glasmio.core.defaultGlassColors
 import io.github.neoruaa.glasmio.icons.SfIcon
@@ -413,6 +415,7 @@ class MainActivity : ComponentActivity() {
                 it[com.ljyh.mei.constants.ColorfulDetailBackgroundsKey] ?: true
             } ?: false
             val keepBottomBarExpanded = navigationPreferences?.get(KeepBottomBarExpandedKey) ?: false
+            val horizontalSafeAreaEnabled = navigationPreferences?.get(HorizontalSafeAreaEnabledKey) ?: true
             val bottomFloatingContentExtraSpacing =
                 (navigationPreferences?.get(BottomFloatingContentExtraSpacingKey)
                     ?: DefaultBottomFloatingContentExtraSpacing)
@@ -636,6 +639,7 @@ class MainActivity : ComponentActivity() {
                     LocalAccentSeedColor provides accentSeedColor,
                     LocalPageAppearance provides registerPageAppearance,
                     LocalColorfulPageBackgrounds provides colorfulPageBackgrounds,
+                    LocalGlasmioHorizontalSafeAreaEnabled provides horizontalSafeAreaEnabled,
                 ) {
                     GlasmioTextSelectionHost(
                         backdrop = bottomControlsBackdrop,
@@ -666,6 +670,8 @@ class MainActivity : ComponentActivity() {
                     val density = LocalDensity.current
                     val navigationLayoutDirection = LocalLayoutDirection.current
                     val windowsInsets = WindowInsets.systemBars
+                    val pageWindowInsets = if (horizontalSafeAreaEnabled) windowsInsets
+                        else windowsInsets.only(WindowInsetsSides.Vertical)
                     val navigationInsets = WindowInsets.navigationBars
                     val currentRoute = navController.currentRoute
                     val handlesKeyboardInsets = active || currentRoute == Screen.Search.route ||
@@ -1027,7 +1033,7 @@ class MainActivity : ComponentActivity() {
                         LocalDatabase provides database,
                         LocalNavController provides navController,
                         LocalPlayerConnection provides playerConnection,
-                        LocalPlayerAwareWindowInsets provides windowsInsets,
+                        LocalPlayerAwareWindowInsets provides pageWindowInsets,
                         LocalUserData provides userData,
                     ) {
                     GlasmioAdaptiveNavigationScaffold(
@@ -1238,6 +1244,8 @@ class MainActivity : ComponentActivity() {
                                             ) {
                                                 // Retained entries must observe preferences loaded after recreation.
                                                 val entryNavigationItems = currentNavigationItems.value
+                                                val entryWindowInsets = if (LocalGlasmioHorizontalSafeAreaEnabled.current) windowsInsets
+                                                    else windowsInsets.only(WindowInsetsSides.Vertical)
                                                 val entryTopAppBarScrollBehavior = rememberGlasmioAppBarScrollBehavior(
                                                     canScroll = {
                                                         !meiRoute.route.startsWith("search_result/") &&
@@ -1264,7 +1272,7 @@ class MainActivity : ComponentActivity() {
                                                     entryNavigationItems,
                                                     navigationBarExpanded,
                                                     playerDismissed,
-                                                    windowsInsets,
+                                                    entryWindowInsets,
                                                     isLandscape,
                                                 ) {
                                                     playerAwareWindowInsetsForRoute(
@@ -1273,7 +1281,7 @@ class MainActivity : ComponentActivity() {
                                                         navigationItems = entryNavigationItems,
                                                         navigationBarVisible = navigationBarExpanded,
                                                         playerDismissed = playerDismissed,
-                                                        windowsInsets = windowsInsets,
+                                                        windowsInsets = entryWindowInsets,
                                                         bottomInset = bottomInset,
                                                         navigationBottomMargin = navigationBottomMargin,
                                                     )
@@ -1452,7 +1460,7 @@ class MainActivity : ComponentActivity() {
                                                         modifier = Modifier
                                                             .fillMaxSize()
                                                             .glasmioAdaptiveContent()
-                                                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                                            .windowInsetsPadding(WindowInsets.glasmioSafeDrawing.only(WindowInsetsSides.Horizontal))
                                                             .padding(top = windowsInsets.asPaddingValues().calculateTopPadding() + if (isLandscape) com.ljyh.mei.constants.LandscapeSearchTopPadding + 56.dp else 0.dp)
                                                             .padding(searchResultsBottomPadding),
                                                     )
@@ -1483,7 +1491,7 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .glasmioAdaptiveContent()
-                                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                        .windowInsetsPadding(WindowInsets.glasmioSafeDrawing.only(WindowInsetsSides.Horizontal))
                                         .padding(horizontal = bottomNavigationHorizontalMargin)
                                         .then(if (isLandscape) Modifier
                                             .padding(windowsInsets.only(WindowInsetsSides.Top).asPaddingValues())

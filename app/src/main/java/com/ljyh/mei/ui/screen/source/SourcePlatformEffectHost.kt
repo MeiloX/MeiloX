@@ -42,6 +42,7 @@ import com.ljyh.mei.ui.component.sheet.rememberMeiloXSheetDismissal
 import com.ljyh.mei.ui.component.sheet.rememberMeiloXSheetScrollEdge
 import io.github.neoruaa.glasmio.core.IosTypography
 import io.github.neoruaa.glasmio.core.LocalGlassColors
+import io.github.neoruaa.glasmio.core.glasmioSafeDrawing
 import io.github.neoruaa.glasmio.glass.GlassEmphasis
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.ui.*
@@ -171,7 +172,9 @@ private fun SourceQrScanner(request: SourcePlatformRequest) {
     }
     Dialog(onDismissRequest = { request.fail(SourceErrorCode.CANCELLED) },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Column(Modifier.fillMaxSize().background(Color.Black).systemBarsPadding()) {
+        Column(Modifier.fillMaxSize().background(Color.Black)
+            .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Vertical)
+                .union(WindowInsets.glasmioSafeDrawing.only(WindowInsetsSides.Horizontal)))) {
             GlasmioSheetTopToolbar("扫描二维码", actions = {
                 GlasmioSheetToolbarButton(onClick = { request.fail(SourceErrorCode.CANCELLED) }) { SfIcon("xmark", "关闭") }
             })

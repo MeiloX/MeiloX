@@ -32,6 +32,7 @@ import androidx.media3.common.util.UnstableApi
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.kyant.shapes.Capsule
 import com.ljyh.mei.R
+import io.github.neoruaa.glasmio.core.glasmioSafeDrawing
 import com.ljyh.mei.constants.LoopPlaybackKey
 import com.ljyh.mei.utils.rememberPreference
 import com.ljyh.mei.constants.LandscapeMiniPlayerHeight
@@ -96,7 +97,7 @@ internal fun LandscapeMiniPlayer(
     val transitioning by remember(sheet) { derivedStateOf { sheet?.isTransitioning == true } }
     Box(
         modifier.widthIn(max = 768.dp).fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .windowInsetsPadding(WindowInsets.glasmioSafeDrawing.only(WindowInsetsSides.Horizontal))
             .padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center,
     ) {
