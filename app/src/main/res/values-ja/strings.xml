@@ -218,7 +218,7 @@
   <string name="clipboard_view_invitation">招待を表示</string>
   <string name="clipboard_song_not_found">NetEase からこの曲が返されませんでした。</string>
   <string name="clipboard_open_failed">クリップボードのリンクを開けませんでした: %1$s</string>
-  <string name="settings_extensions">拡張機能</string>
+  <string name="settings_extensions">拡張</string>
   <string name="settings_information">情報</string>
   <string name="settings_appearance">外観</string>
   <string name="appearance_settings">外観</string>
@@ -229,7 +229,7 @@
   <string name="appearance_bottom_floating_extra_spacing_value">%1$d dp</string>
   <string name="appearance_bottom_floating_extra_spacing_description">下部ナビゲーション、検索、ミニプレーヤーを画面の端から離します。</string>
   <string name="appearance_dynamic_theme">曲に合わせた動的テーマカラー</string>
-  <string name="appearance_dynamic_theme_description">現在の曲のアートワークからアクセントカラーを動的に変更します</string>
+  <string name="appearance_dynamic_theme_description">現在の曲のアートワークからアクセントカラーを動的に変更します。</string>
   <string name="appearance_colorful_detail_backgrounds">カラフルなページ背景</string>
   <string name="appearance_colorful_detail_backgrounds_description">プレイリスト、アルバム、ポッドキャスト、アーティストのページに適用されます。</string>
   <string name="appearance_accent_color">アクセントカラー</string>
@@ -241,10 +241,10 @@
   <string name="color_picker_sliders">スライダー</string>
   <string name="color_picker_opacity">不透明度</string>
   <string name="appearance_playlist">プレイリスト</string>
-  <string name="appearance_playlist_cover">プレイリストのカバースタイル</string>
-  <string name="appearance_cover_playlist">プレイリストのカバー</string>
-  <string name="appearance_cover_first_song">最初の曲のアートワーク</string>
-  <string name="appearance_cover_combination">アートワークのコラージュ</string>
+  <string name="appearance_playlist_cover">カバースタイル</string>
+  <string name="appearance_cover_playlist">プレイリスト</string>
+  <string name="appearance_cover_first_song">最初の曲</string>
+  <string name="appearance_cover_combination">コラージュ</string>
   <string name="appearance_playlist_header">プレイリストの表ヘッダーを表示</string>
   <string name="appearance_playlist_header_description">大画面で表ヘッダーを表示します。</string>
   <string name="appearance_player">プレーヤー</string>
@@ -309,7 +309,7 @@
   <string name="about_acknowledgements">オープンソースに関する謝辞</string>
   <string name="about_upstream_description">Mei のアップストリームリポジトリ</string>
   <string name="about_melox_description">iOS のリファレンス実装</string>
-  <string name="about_glasmio_description">高品質な iOS 向けアニメーションと UI ライブラリ</string>
+  <string name="about_glasmio_description">iOS のアニメーションとライブラリ</string>
   <string name="about_amll_description">単語と同期する高品質な歌詞表示</string>
   <string name="about_lyrics_ui_description">表現力豊かな歌詞表示コンポーネント</string>
   <string name="about_developer_debug">開発者向け診断</string>
@@ -631,10 +631,10 @@
   <string name="storage_network_cache">ネットワークと画像キャッシュ</string>
   <string name="storage_temporary_files">一時再生ファイル</string>
   <string name="storage_database">ローカルデータベース</string>
-  <string name="storage_cache_cleanup">キャッシュを削除</string>
-  <string name="storage_clear_all_caches">キャッシュをすべて削除して再構築</string>
-  <string name="storage_clear_network_cache">ネットワークと画像キャッシュを削除</string>
-  <string name="storage_clear_temporary">一時再生ファイルを削除</string>
+  <string name="storage_cache_cleanup">キャッシュの削除</string>
+  <string name="storage_clear_all_caches">すべて削除して再構築</string>
+  <string name="storage_clear_network_cache">ネットワークと画像キャッシュ</string>
+  <string name="storage_clear_temporary">一時再生ファイル</string>
   <string name="storage_maintenance">メンテナンス</string>
   <string name="storage_repair_downloads">ダウンロードストレージを修復</string>
   <string name="storage_reset_auto_cache">自動キャッシュ数をリセット</string>
@@ -792,7 +792,7 @@
   <string name="bluetooth_lyrics_enabled">外部デバイス向け Bluetooth 歌詞</string>
   <string name="system_lyrics_enabled">歌詞の共有を有効化</string>
   <string name="system_lyrics_description">Lyricon Provider、SuperLyricApi、ColorOS Live Lyrics Bridge を通じて歌詞と再生状態を共有します。</string>
-  <string name="system_lyrics_usage">Lyricon Provider、SuperLyricApi、ColorOS Live Lyrics Bridge のインターフェースに対応します。</string>
+  <string name="system_lyrics_usage">Lyricon Provider、SuperLyricApi、ColorOS Live Lyrics Bridge のインターフェースに対応させます。</string>
   <string name="artist_all_albums_count">全 %1$d 個のアルバム</string>
   <string name="artist_all_albums">すべてのアルバム</string>
   <string name="artist_albums_empty">利用できるアルバムはありません</string>
@@ -861,7 +861,7 @@
   <string name="private_fm_named_scene_mode">%1$sモード</string>
   <string name="private_fm_no_scenes">利用可能なシーンはありません</string>
   <string name="netease_musician">NetEase Musician</string>
-  <string name="account_security">アカウントをセキュリティ</string>
+  <string name="account_security">アカウントのセキュリティ</string>
   <string name="account_phone_binding">電話番号</string>
   <string name="account_third_party_binding">リンク済みのアカウント</string>
   <string name="account_login_protection">ログインの保護</string>
