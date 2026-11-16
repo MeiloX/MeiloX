@@ -437,8 +437,8 @@
   <string name="notification_like_login_required">曲にスキをつけるにはサインインしてください。</string>
   <string name="notification_like_failed">スキした曲を更新できませんでした。再度お試しください。</string>
   <string name="music_quality">音質</string>
-  <string name="automix">自動ミックス</string>
-  <string name="automix_enabled">自動ミックスを有効</string>
+  <string name="automix">AutoMix</string>
+  <string name="automix_enabled">AutoMix を有効</string>
   <string name="automix_smart">スマートミックス</string>
   <string name="automix_fixed">固定クロスフェード</string>
   <string name="automix_duration">クロスフェード · %1$d 秒</string>
