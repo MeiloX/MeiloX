@@ -632,7 +632,7 @@
   <string name="storage_temporary_files">一時再生ファイル</string>
   <string name="storage_database">ローカルデータベース</string>
   <string name="storage_cache_cleanup">キャッシュの削除</string>
-  <string name="storage_clear_all_caches">キャッシュをすべて削除して再構築</string>
+  <string name="storage_clear_all_caches">すべて削除して再構築</string>
   <string name="storage_clear_network_cache">ネットワークと画像キャッシュ</string>
   <string name="storage_clear_temporary">一時再生ファイル</string>
   <string name="storage_maintenance">メンテナンス</string>
