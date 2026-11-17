@@ -1457,6 +1457,58 @@ class SourceResolutionTest {
         assertEquals("standard", result.resource.quality)
         assertEquals(0, a.calls)
     }
+    @Test fun unavailableRuntimeStopsProviderFallbackAndDoesNotCacheTheFailure() = runTest {
+        val origin = Provider("original", original)
+        val alternate = Provider("a", track("a"))
+        val resolver = resolver(listOf(origin, alternate))
+        val failure = SourceRuntimeUnavailableException(outcomeUnknown = true)
+        var calls = 0
+
+        repeat(2) {
+            try {
+                resolver.resolve(original, "exhigh", originalResolver = {
+                    calls++
+                    throw failure
+                })
+                fail("Runtime availability must be retried on the same source")
+            } catch (error: PlaybackResolutionException) {
+                assertSame(failure, error.cause)
+                assertTrue(error.outcomeUnknown)
+                assertEquals(SourceErrorCode.UNAVAILABLE, error.code)
+                assertEquals(listOf("original"), error.attempts.map { it.instanceId.value })
+            }
+        }
+
+        assertEquals(2, calls)
+        assertEquals(0, alternate.calls)
+        assertEquals(SourceErrorCode.UNAVAILABLE, resolver.lastAttempts.value.single().error)
+    }
+    @Test fun ordinaryUnavailableResourceStillAllowsConfiguredProviderFallback() = runTest {
+        val origin = Provider("original", original)
+        val alternate = Provider("a", track("a"))
+        val result = resolver(listOf(origin, alternate)).resolve(original, "exhigh", originalResolver = {
+            throw SourceException(SourceErrorCode.UNAVAILABLE)
+        })
+
+        assertEquals(listOf("original", "a"), result.attempts.map { it.instanceId.value })
+        assertEquals("a", result.actualAudioProviderId)
+        assertEquals(1, alternate.calls)
+    }
+    @Test fun finalNetworkAndTimeoutCausesRemainAvailableToPlaybackRecovery() = runTest {
+        for (code in listOf(SourceErrorCode.NETWORK, SourceErrorCode.TIMEOUT)) {
+            val origin = Provider("original", original)
+            val failure = SourceException(code)
+            try {
+                resolver(listOf(origin), SourceSettings()).resolve(original, "exhigh", originalResolver = {
+                    throw failure
+                })
+                fail("The source transport failure must reach playback recovery")
+            } catch (error: PlaybackResolutionException) {
+                assertEquals(code, error.code)
+                assertSame(failure, error.cause)
+            }
+        }
+    }
     @Test fun cancellationDoesNotBecomeFallbackFailure() = runTest {
         val origin = Provider("original", original)
         val a = Provider("a", track("a"))

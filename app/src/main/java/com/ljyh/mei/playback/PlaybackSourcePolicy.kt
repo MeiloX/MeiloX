@@ -3,6 +3,7 @@ package com.ljyh.mei.playback
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.StuckPlayerException
+import androidx.media3.datasource.HttpDataSource
 import com.ljyh.mei.constants.MusicQuality
 import java.util.Locale
 import java.util.Base64
@@ -12,7 +13,11 @@ import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.source.api.ProviderInstanceId
 import com.ljyh.mei.source.api.AudioResource
 import com.ljyh.mei.source.api.MusicProvider
+import com.ljyh.mei.source.api.SourceErrorCode
+import com.ljyh.mei.source.api.SourceException
+import com.ljyh.mei.source.api.SourceRuntimeUnavailableException
 import com.ljyh.mei.source.core.audioResourceIdentity
+import com.ljyh.mei.source.core.PlaybackResolutionException
 
 private const val PLAYBACK_CACHE_KEY_VERSION = "meilox-media-v3"
 
@@ -196,6 +201,24 @@ internal fun shouldRetryOnlinePlaybackSource(errorCode: Int): Boolean = when (er
     PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
     PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> true
     else -> false
+}
+
+/** Shared runtime and network outages must not reject resources or advance the queue. */
+internal fun isTemporaryPlaybackFailure(errorCode: Int, cause: Throwable?): Boolean {
+    // Script audio wraps HTTP failures as NETWORK while retaining the HTTP cause.
+    if (generateSequence(cause) { it.cause }.take(16).any { it is HttpDataSource.InvalidResponseCodeException }) {
+        return false
+    }
+    if (errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+        errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+    ) return true
+    return generateSequence(cause) { it.cause }.take(16).any {
+        it is SourceRuntimeUnavailableException ||
+            it is SourceException && it.code in setOf(SourceErrorCode.NETWORK, SourceErrorCode.TIMEOUT) ||
+            it is PlaybackResolutionException && it.attempts.any { attempt ->
+                attempt.error == SourceErrorCode.NETWORK || attempt.error == SourceErrorCode.TIMEOUT
+            }
+    }
 }
 
 /** Recovers only Media3's confirmed loading or playback stalls, not generic runtime failures. */

@@ -110,6 +110,136 @@ class ScriptPluginPolicyTest {
         assertEquals(2, closes)
     }
 
+    @Test fun sandboxConnectionRetriesOnceBeforeExecutingTheInvocation() = runTest {
+        val pool = ScriptSandboxPool<java.io.Closeable>(ScriptConnectionGate(), this, idleTimeoutMs = 10)
+        var connections = 0
+        var invocations = 0
+        var closes = 0
+        val pending = async {
+            pool.withSandbox(
+                create = {
+                    connections++
+                    if (connections == 1) {
+                        com.google.common.util.concurrent.Futures.immediateFailedFuture(QuickJsSandboxDeadException())
+                    } else {
+                        com.google.common.util.concurrent.Futures.immediateFuture(java.io.Closeable { closes++ })
+                    }
+                },
+                isClosed = { false },
+            ) { _, _ -> invocations++; "resolved" }
+        }
+        runCurrent()
+        assertEquals(1, connections)
+        assertEquals(0, invocations)
+        assertFalse(pending.isCompleted)
+        advanceUntilIdle()
+        assertEquals("resolved", pending.await())
+        assertEquals(2, connections)
+        assertEquals(1, invocations)
+        assertEquals(1, closes)
+    }
+
+    @Test fun unavailableBindingsAreBoundedAndUnsupportedBindingsAreNotRetried() = runTest {
+        for ((failure, expectedConnections) in listOf(
+            QuickJsSandboxDeadException() to 2,
+            QuickJsSandboxUnsupportedException() to 1,
+        )) {
+            val pool = ScriptSandboxPool<java.io.Closeable>(ScriptConnectionGate(), this, idleTimeoutMs = 10)
+            var connections = 0
+            var invocations = 0
+            val pending = async {
+                runCatching {
+                    pool.withSandbox(
+                        create = {
+                            connections++
+                            com.google.common.util.concurrent.Futures.immediateFailedFuture<java.io.Closeable>(failure)
+                        },
+                        isClosed = { false },
+                    ) { _, _ -> invocations++ }
+                }
+            }
+            advanceUntilIdle()
+            assertTrue(pending.await().isFailure)
+            assertEquals(expectedConnections, connections)
+            assertEquals(0, invocations)
+        }
+    }
+
+    @Test fun concurrentInvocationsShareTheReplacementAfterAConnectionFailure() = runTest {
+        val pool = ScriptSandboxPool<java.io.Closeable>(ScriptConnectionGate(), this, idleTimeoutMs = 10)
+        val binding = com.google.common.util.concurrent.SettableFuture.create<java.io.Closeable>()
+        val replacement = java.io.Closeable { }
+        var connections = 0
+        var invocations = 0
+        val create = {
+            connections++
+            if (connections == 1) binding
+            else com.google.common.util.concurrent.Futures.immediateFuture(replacement)
+        }
+        val pending = List(2) {
+            async {
+                pool.withSandbox(create, isClosed = { false }) { value, _ -> invocations++; value }
+            }
+        }
+        runCurrent()
+        assertEquals(1, connections)
+        binding.setException(QuickJsSandboxDeadException())
+        advanceUntilIdle()
+        pending.forEach { assertSame(replacement, it.await()) }
+        assertEquals(2, connections)
+        assertEquals(2, invocations)
+    }
+
+    @Test fun cancellingASandboxConnectionDoesNotRetryOrRunTheInvocation() = runTest {
+        val pool = ScriptSandboxPool<java.io.Closeable>(ScriptConnectionGate(), this, idleTimeoutMs = 10)
+        val binding = com.google.common.util.concurrent.SettableFuture.create<java.io.Closeable>()
+        var connections = 0
+        var invocations = 0
+        var closes = 0
+        val pending = async {
+            pool.withSandbox(
+                create = { connections++; binding },
+                isClosed = { false },
+            ) { _, _ -> invocations++ }
+        }
+        runCurrent()
+        pending.cancelAndJoin()
+        binding.set(java.io.Closeable { closes++ })
+        advanceUntilIdle()
+        assertTrue(pending.isCancelled)
+        assertEquals(1, connections)
+        assertEquals(0, invocations)
+        assertEquals(1, closes)
+    }
+
+    @Test fun aClosedLeaseReconnectsButAnInvocationFailureIsNeverReplayed() = runTest {
+        val closed = java.io.Closeable { }
+        val replacement = java.io.Closeable { }
+        val pool = ScriptSandboxPool<java.io.Closeable>(ScriptConnectionGate(), this, idleTimeoutMs = 10)
+        var connections = 0
+        var invocations = 0
+        val result = pool.withSandbox(
+            create = {
+                connections++
+                com.google.common.util.concurrent.Futures.immediateFuture(if (connections == 1) closed else replacement)
+            },
+            isClosed = { it === closed },
+        ) { value, _ -> invocations++; value }
+        assertSame(replacement, result)
+        assertEquals(2, connections)
+        assertEquals(1, invocations)
+        val failure = runCatching {
+            pool.withSandbox(
+                create = { connections++; com.google.common.util.concurrent.Futures.immediateFuture(replacement) },
+                isClosed = { false },
+            ) { _, _ -> invocations++; throw QuickJsSandboxDeadException() }
+        }.exceptionOrNull()
+        assertTrue(failure is QuickJsSandboxDeadException)
+        assertEquals(2, connections)
+        assertEquals(2, invocations)
+        advanceUntilIdle()
+    }
+
     @Test fun apiAdmissionHasAnEndToEndDeadlineAndCallerCancellationDoesNotConsumeASlot() = runTest {
         val policy = ScriptNetworkPolicy(listOf("api.example.com"))
         val field = ScriptNetworkPolicy::class.java.getDeclaredField("apiConcurrency").apply { isAccessible = true }
@@ -578,6 +708,7 @@ class ScriptPluginPolicyTest {
             assertFalse(result.message.orEmpty().contains(secret))
             assertNull(result.cause)
             assertFalse(result.outcomeUnknown)
+            assertEquals(code == SourceErrorCode.UNAVAILABLE, result is SourceRuntimeUnavailableException)
         }
         val evaluation = QuickJsEvaluationFailedException(secret)
         assertEquals(SourceErrorCode.PLUGIN, scriptRuntimeFailure(evaluation, ScriptRuntimePhase.SCRIPT).code)
@@ -589,6 +720,7 @@ class ScriptPluginPolicyTest {
         val explicitBusinessFailure = SourceException(SourceErrorCode.UNAVAILABLE)
         assertSame(explicitBusinessFailure, scriptRuntimeFailure(explicitBusinessFailure, ScriptRuntimePhase.OPERATION, requestSent = true))
         assertFalse(explicitBusinessFailure.outcomeUnknown)
+        assertFalse(explicitBusinessFailure is SourceRuntimeUnavailableException)
         val denied = SourceException(SourceErrorCode.PLUGIN)
         assertSame(denied, scriptRuntimeFailure(denied, ScriptRuntimePhase.REQUEST))
     }

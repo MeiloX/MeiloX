@@ -268,6 +268,7 @@ class MediaUriProvider @Inject constructor(
             }
             val resource = try { capability.resolve(ref, attemptedQuality) }
             catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: SourceRuntimeUnavailableException) { throw error }
             catch (error: SourceException) {
                 if (error.code == SourceErrorCode.UNAVAILABLE) continue else throw error
             }
@@ -334,6 +335,7 @@ class MediaUriProvider @Inject constructor(
                 MusicQuality.entries.firstOrNull { it.text == normalizePlaybackQuality(value) }
             }
         } catch (cancelled: CancellationException) { throw cancelled
+        } catch (error: SourceRuntimeUnavailableException) { throw error
         } catch (_: Exception) { emptyList() }
             .distinct().filter { supportDolby || it != MusicQuality.DOLBY }
         ensureOwner(owner, account)
@@ -428,6 +430,7 @@ class MediaUriProvider @Inject constructor(
                 MusicQuality.entries.firstOrNull { it.text == entry.actualQuality }
             }
         } catch (cancelled: CancellationException) { throw cancelled
+        } catch (error: SourceRuntimeUnavailableException) { throw error
         } catch (_: Exception) { null }
     }
 

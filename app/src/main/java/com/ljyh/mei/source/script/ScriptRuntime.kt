@@ -9,6 +9,7 @@ import com.google.gson.JsonParser
 import com.ljyh.mei.source.api.SourceErrorCode
 import com.ljyh.mei.source.api.SourceException
 import com.ljyh.mei.source.api.SourceResponseSizeException
+import com.ljyh.mei.source.api.SourceRuntimeUnavailableException
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -41,6 +42,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import timber.log.Timber
 
 data class ScriptInvocation(val result: JsonElement, val storage: Map<String, String>? = null)
 
@@ -95,13 +97,16 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
         return try {
             withTimeout(20_000) {
                 invocationSlots.withPermit {
-                    withSandbox { sandbox, shared ->
+                    sandboxes.withSandbox(
+                        create = { QuickJsSandbox.createConnectedInstanceAsync(context.applicationContext) },
+                        isClosed = { it.isClosed },
+                    ) { sandbox, shared ->
                         val invocationJob = currentCoroutineContext()[Job]
                         val guard = {
                             invocationJob?.ensureActive()
                             ensureCurrent()
                             if (terminated.isCompleted || shared.retired.isCompleted == true) {
-                                throw SourceException(SourceErrorCode.UNAVAILABLE, outcomeUnknown = requestSent)
+                                throw SourceRuntimeUnavailableException(outcomeUnknown = requestSent)
                             }
                         }
                         guard()
@@ -209,6 +214,12 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
         } catch (error: SourceException) {
             ensureCurrent()
             if (memoryLimited.get()) throw SourceException(SourceErrorCode.PLUGIN, outcomeUnknown = requestSent)
+            if (error is SourceRuntimeUnavailableException) {
+                Timber.tag("ScriptRuntime").w(
+                    "Sandbox failure plugin=%s operation=%s code=%s phase=%s requestSent=%s kind=%s",
+                    manifest.id, operation, error.code, phase, requestSent, error.javaClass.simpleName,
+                )
+            }
             throw error
         } catch (error: Exception) {
             ensureCurrent()
@@ -221,31 +232,13 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
             if (failure.code in setOf(SourceErrorCode.UNAVAILABLE, SourceErrorCode.PLUGIN, SourceErrorCode.INVALID_RESPONSE)) {
                 // Engine exception messages may contain script data. Record fixed metadata only.
                 val kind = (error as? java.util.concurrent.ExecutionException)?.cause?.javaClass?.simpleName ?: error.javaClass.simpleName
-                android.util.Log.w("ScriptRuntime", "Sandbox failure code=${failure.code.name} phase=${phase.name} kind=$kind")
+                Timber.tag("ScriptRuntime").w(
+                    "Sandbox failure plugin=%s operation=%s code=%s phase=%s requestSent=%s kind=%s",
+                    manifest.id, operation, failure.code, phase, requestSent, kind,
+                )
             }
             throw failure
         }
-    }
-
-    private suspend fun <T> withSandbox(
-        block: suspend (QuickJsSandbox, ScriptSandboxPool.Lease<QuickJsSandbox>) -> T,
-    ): T {
-        repeat(2) { attempt ->
-            val lease = sandboxes.acquire { QuickJsSandbox.createConnectedInstanceAsync(context.applicationContext) }
-            try {
-                if (lease.value.isClosed) {
-                    sandboxes.invalidate(lease)
-                    // Reconnect only before executing any plugin code or sending any requests.
-                    if (attempt == 0) return@repeat
-                    throw QuickJsSandboxDeadException()
-                }
-                return block(lease.value, lease)
-            } finally {
-                if (lease.value.isClosed) sandboxes.invalidate(lease)
-                withContext(NonCancellable) { sandboxes.release(lease) }
-            }
-        }
-        throw QuickJsSandboxDeadException()
     }
 
     private suspend fun requestWhileAlive(
@@ -256,8 +249,8 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
         val pending = async { request() }
         try {
             select {
-                terminated.onAwait { throw SourceException(SourceErrorCode.UNAVAILABLE, outcomeUnknown = true) }
-                lease.retired.onAwait { throw SourceException(SourceErrorCode.UNAVAILABLE, outcomeUnknown = true) }
+                terminated.onAwait { throw SourceRuntimeUnavailableException(outcomeUnknown = true) }
+                lease.retired.onAwait { throw SourceRuntimeUnavailableException(outcomeUnknown = true) }
                 pending.onAwait { it }
             }
         } finally { pending.cancel() }
@@ -370,7 +363,8 @@ internal fun scriptRuntimeFailure(error: Throwable, phase: ScriptRuntimePhase,
             cause !is QuickJsException && cause !is android.os.RemoteException -> SourceErrorCode.INVALID_RESPONSE
         else -> SourceErrorCode.UNAVAILABLE
     }
-    return SourceException(code, outcomeUnknown = requestSent && (code == SourceErrorCode.UNAVAILABLE || memoryFailure))
+    return if (code == SourceErrorCode.UNAVAILABLE) SourceRuntimeUnavailableException(outcomeUnknown = requestSent)
+    else SourceException(code, outcomeUnknown = requestSent && memoryFailure)
 }
 
 /** A cancelled caller retires its late binding before another acquisition proceeds. */
@@ -429,6 +423,41 @@ internal class ScriptSandboxPool<T : AutoCloseable>(
     private val scope: CoroutineScope,
     private val idleTimeoutMs: Long = 15_000,
 ) {
+    /** Only connection setup may be retried, before the invocation has executed any plugin code. */
+    suspend fun <R> withSandbox(
+        create: () -> ListenableFuture<T>,
+        isClosed: (T) -> Boolean,
+        block: suspend (T, Lease<T>) -> R,
+    ): R {
+        repeat(2) { attempt ->
+            val lease = try {
+                acquire(create)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                if (attempt != 0 ||
+                    scriptRuntimeFailure(error, ScriptRuntimePhase.CONNECTION) !is SourceRuntimeUnavailableException
+                ) throw error
+                Timber.tag("ScriptRuntime").w("Retrying sandbox connection attempt=2")
+                delay(250)
+                return@repeat
+            }
+            try {
+                if (!isClosed(lease.value)) return block(lease.value, lease)
+                invalidate(lease)
+            } finally {
+                if (isClosed(lease.value)) invalidate(lease)
+                withContext(NonCancellable) { release(lease) }
+            }
+            if (attempt == 0) {
+                Timber.tag("ScriptRuntime").w("Retrying closed sandbox connection attempt=2")
+                delay(250)
+            }
+        }
+        throw QuickJsSandboxDeadException()
+    }
+
     internal class Entry<T : AutoCloseable>(val connection: ScriptConnectionLease<T>) {
         val retired = CompletableDeferred<Unit>()
         var references = 0

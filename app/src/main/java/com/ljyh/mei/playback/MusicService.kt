@@ -217,6 +217,7 @@ class MusicService : MediaLibraryService(),
     private var sourceRecoveryAttempts = 0
     private var rangeRecoveryAttempts = 0
     private var stallRecoveryAttempts = 0
+    private var temporaryRecoveryAttempts = 0
 
     private val binder = MusicBinder()
 
@@ -674,6 +675,7 @@ class MusicService : MediaLibraryService(),
         sourceRecoveryAttempts = 0
         rangeRecoveryAttempts = 0
         stallRecoveryAttempts = 0
+        temporaryRecoveryAttempts = 0
         mediaUriProvider.resetRejectedSources()
         resetCurrentQualityState(player.currentMediaItem?.mediaId)
     }
@@ -806,6 +808,10 @@ class MusicService : MediaLibraryService(),
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         if (playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
             playbackFailures.reset()
+            if (!isRefreshingPlaybackSource) {
+                temporaryRecoveryAttempts = 0
+                stallRecoveryAttempts = 0
+            }
         }
         updateAudioEffectSession()
         if (!::audioPlayer.isInitialized) return
@@ -1470,7 +1476,18 @@ class MusicService : MediaLibraryService(),
                 player.currentPosition, player.bufferedPosition, stuck.stuckType, stuck.timeoutMs,
             )
         }
-        if (stalled && scheduleSourceRecovery(preserveCache = true)) return
+        if (isTemporaryPlaybackFailure(error.errorCode, error.cause)) {
+            if (!scheduleSourceRecovery(preserveCache = true, temporaryFailure = true)) {
+                pauseFailedPlayback("播放源暂时不可用，请稍后重试")
+            }
+            return
+        }
+        if (stalled) {
+            if (!scheduleSourceRecovery(preserveCache = true)) {
+                pauseFailedPlayback("播放暂时卡住，请重试")
+            }
+            return
+        }
 
         if (shouldRefreshPlaybackSource(error.errorCode)) {
             if (!scheduleSourceRecovery()) {
@@ -1479,7 +1496,7 @@ class MusicService : MediaLibraryService(),
             return
         }
 
-        if (stalled || shouldTryLowerPlaybackQuality(error.errorCode)) {
+        if (shouldTryLowerPlaybackQuality(error.errorCode)) {
             val mediaId = player.currentMediaItem?.mediaId
             val failedQuality = currentMusicQuality.value
             val failedCacheKey = mediaId?.let { mediaUriProvider.resolvedMediaSource(it)?.cacheKey }
@@ -1490,11 +1507,9 @@ class MusicService : MediaLibraryService(),
                 currentMusicQuality.value = null
                 availableMusicQualities.value = availableMusicQualities.value - listOfNotNull(failedQuality).toSet()
                 isLoadingMusicQualities.value = false
-                // A timeout can justify a lower bitrate without proving the cached bytes corrupt.
                 if (scheduleSourceRecovery(
                         qualityFallback = true,
                         failedCacheKey = failedCacheKey,
-                        preserveCache = stalled,
                     )
                 ) return
             }
@@ -1535,10 +1550,20 @@ class MusicService : MediaLibraryService(),
         }
     }
 
+    private fun pauseFailedPlayback(message: String) {
+        availableQualitiesJob?.cancel()
+        availableQualitiesJob = null
+        qualityGeneration++
+        isLoadingMusicQualities.value = false
+        player.pause()
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    }
+
     private fun scheduleSourceRecovery(
         qualityFallback: Boolean = false,
         failedCacheKey: String? = null,
         preserveCache: Boolean = false,
+        temporaryFailure: Boolean = false,
     ): Boolean {
         val mediaItem = player.currentMediaItem ?: return false
         val mediaId = mediaItem.mediaId.takeIf(String::isNotBlank) ?: return false
@@ -1550,10 +1575,16 @@ class MusicService : MediaLibraryService(),
             sourceRecoveryAttempts = 0
             rangeRecoveryAttempts = 0
             stallRecoveryAttempts = 0
+            temporaryRecoveryAttempts = 0
         }
         if (sourceRecoveryJob?.isActive == true) return true
-        val attemptLimit = if (qualityFallback) MusicQuality.entries.size else MAX_SOURCE_RECOVERY_ATTEMPTS
+        val attemptLimit = when {
+            temporaryFailure -> MAX_TEMPORARY_RECOVERY_ATTEMPTS
+            qualityFallback -> MusicQuality.entries.size
+            else -> MAX_SOURCE_RECOVERY_ATTEMPTS
+        }
         val attempts = when {
+            temporaryFailure -> temporaryRecoveryAttempts
             qualityFallback -> sourceRecoveryAttempts
             preserveCache -> stallRecoveryAttempts
             else -> rangeRecoveryAttempts
@@ -1561,6 +1592,7 @@ class MusicService : MediaLibraryService(),
         if (attempts >= attemptLimit) return false
 
         when {
+            temporaryFailure -> temporaryRecoveryAttempts++
             qualityFallback -> sourceRecoveryAttempts++
             preserveCache -> stallRecoveryAttempts++
             else -> rangeRecoveryAttempts++
@@ -1569,17 +1601,22 @@ class MusicService : MediaLibraryService(),
         sourceRecoveryJob = scope.launch {
             try {
                 Timber.tag("MusicService").w(
-                    "Refreshing playback source: id=%s position=%s attempt=%s qualityFallback=%s preserveCache=%s",
+                    "Refreshing playback source: id=%s position=%s attempt=%s qualityFallback=%s preserveCache=%s temporaryFailure=%s",
                     mediaId,
                     recoveryPositionMs,
                     attempts + 1,
                     qualityFallback,
                     preserveCache,
+                    temporaryFailure,
                 )
+                if (temporaryFailure) delay(TEMPORARY_RECOVERY_DELAY_MS * (attempts + 1))
+                if (player.currentMediaItem?.mediaId != mediaId ||
+                    player.currentMediaItem?.queueEntryId != entryId ||
+                    player.currentMediaItemIndex != index
+                ) return@launch
                 mediaUriProvider.invalidate(mediaId)
                 resetPlaybackSourcesForQualityChange()
-                // A stalled loader or decoder does not prove that cached media is corrupt.
-                // Retry the selected quality once before rejecting its exact source bytes.
+                // Runtime, transport, and output stalls do not prove that cached media is corrupt.
                 val removedEntries = if (preserveCache) 0 else withContext(Dispatchers.IO) {
                     val cache = CacheManager.getSimpleCache(context)
                     if (qualityFallback) {
@@ -1636,9 +1673,11 @@ class MusicService : MediaLibraryService(),
             sourceRecoveryAttempts = 0
             rangeRecoveryAttempts = 0
             stallRecoveryAttempts = 0
+            temporaryRecoveryAttempts = 0
         } else if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
             // A completed loop allows one fresh retry without reopening rejected source bytes.
             stallRecoveryAttempts = 0
+            temporaryRecoveryAttempts = 0
         }
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
             reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
@@ -1676,6 +1715,8 @@ class MusicService : MediaLibraryService(),
         private const val FLOATING_LYRICS_NOTIFICATION_ID = 889
         private const val PLAYBACK_SNAPSHOT_DEBOUNCE_MS = 500L
         private const val MAX_SOURCE_RECOVERY_ATTEMPTS = 1
+        private const val MAX_TEMPORARY_RECOVERY_ATTEMPTS = 2
+        private const val TEMPORARY_RECOVERY_DELAY_MS = 1_000L
         private const val STUCK_BUFFERING_TIMEOUT_MS = 30_000
         private const val PLAYBACK_SNAPSHOT_INTERVAL_MS = 5_000L
         private const val FAILURE_PROGRESS_SAMPLE_MS = 500L

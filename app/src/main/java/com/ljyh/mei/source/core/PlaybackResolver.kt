@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
+import timber.log.Timber
 
 fun audioResourceIdentity(instanceId: ProviderInstanceId, ref: TrackRef, resource: AudioResource): String {
     val fields = listOf(instanceId.value, ref.providerId, ref.trackId, resource.quality, resource.contentId ?: resource.uri, resource.contentLength?.toString().orEmpty())
@@ -27,7 +28,13 @@ fun audioResourceIdentity(instanceId: ProviderInstanceId, ref: TrackRef, resourc
 fun audioResourceIdentity(resolution: PlaybackResolution): String = audioResourceIdentity(resolution.instanceId, resolution.resolvedTrackRef, resolution.resource)
 
 data class PendingSourceMatch(val origin: TrackRef, val instanceId: ProviderInstanceId, val candidates: List<MatchCandidate>, val originTitle: String = "")
-class PlaybackResolutionException(val attempts: List<ResolutionAttempt>) : SourceException(attempts.lastOrNull()?.error ?: SourceErrorCode.UNAVAILABLE)
+class PlaybackResolutionException(
+    val attempts: List<ResolutionAttempt>,
+    cause: SourceException? = null,
+) : SourceException(attempts.lastOrNull()?.error ?: SourceErrorCode.UNAVAILABLE,
+    outcomeUnknown = cause?.outcomeUnknown ?: false) {
+    init { if (cause != null) initCause(cause) }
+}
 
 @Singleton
 class PlaybackResolver(
@@ -98,6 +105,7 @@ class PlaybackResolver(
 
     private suspend fun perform(track: Track, quality: String, settings: SourceSettings, excluded: Set<String>, originalResolver: (suspend () -> AudioResource)?, version: Long): PlaybackResolution {
         val attempts = mutableListOf<ResolutionAttempt>()
+        var lastFailure: SourceException? = null
         val original = registry.provider(track.ref.providerId)
         val mayFallback = settings.autoFallbackEnabled && TrackRefCodec.encode(track.ref) !in settings.disabledTrackFallbacks
         val fallbacks = if (mayFallback) settings.fallbackOrder.distinct().mapNotNull { registry.instance(ProviderInstanceId(it)) }
@@ -126,15 +134,32 @@ class PlaybackResolver(
             } catch (_: TimeoutCancellationException) {
                 currentCoroutineContext().ensureActive()
                 ensureCurrent(version)
+                val failure = SourceException(SourceErrorCode.TIMEOUT)
+                lastFailure = failure
                 attempts += ResolutionAttempt(provider.instanceId, candidate?.ref, SourceErrorCode.TIMEOUT)
+                logResolutionFailure(provider, candidate?.ref ?: track.ref, quality, failure)
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (error: Exception) {
                 currentCoroutineContext().ensureActive()
                 ensureCurrent(version)
-                attempts += ResolutionAttempt(provider.instanceId, candidate?.ref, (error as? SourceException)?.code ?: SourceErrorCode.NETWORK)
+                val failure = error as? SourceException ?: SourceException(SourceErrorCode.NETWORK)
+                lastFailure = failure
+                attempts += ResolutionAttempt(provider.instanceId, candidate?.ref, failure.code)
+                logResolutionFailure(provider, candidate?.ref ?: track.ref, quality, failure)
+                if (failure is SourceRuntimeUnavailableException) {
+                    throw PlaybackResolutionException(attempts.toList(), failure)
+                }
             }
         }
-        throw PlaybackResolutionException(attempts)
+        throw PlaybackResolutionException(attempts, lastFailure)
+    }
+
+    private fun logResolutionFailure(provider: MusicProvider, ref: TrackRef, quality: String, error: SourceException) {
+        Timber.tag("PlaybackResolver").w(
+            "Playback resolution failed provider=%s instance=%s track=%s quality=%s code=%s exceptionType=%s",
+            provider.id, provider.instanceId.value, TrackRefCodec.encode(ref).take(512), quality, error.code,
+            error.javaClass.simpleName,
+        )
     }
 
     private suspend fun match(origin: Track, provider: MusicProvider, settings: SourceSettings, version: Long): Track? {
