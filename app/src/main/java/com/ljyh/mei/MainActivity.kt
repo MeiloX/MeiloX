@@ -117,6 +117,7 @@ import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.zIndex
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.Preferences
+import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.ViewCompat
@@ -347,7 +348,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) readRecognitionIntent(intent)
         enableEdgeToEdge()
         val contentRoot = findViewById<android.view.View>(android.R.id.content)
-        fun pageInsets(insets: WindowInsetsCompat) = retainLandscapeStatusBarSpace(
+        fun pageInsets(insets: WindowInsetsCompat) = applyPageTopInsets(
             insets, resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE,
         )
         // Preserve the status bar's layout space in both final dispatch and animation
@@ -1705,12 +1706,16 @@ private fun Preferences.glassHdrOutputEnabled(): Boolean =
         (this[LiquidGlassEnabledKey] ?: true) &&
         !(this[ReduceTransparencyKey] ?: false)
 
-/** Hide the system chrome without changing the retained landscape page viewport. */
-internal fun retainLandscapeStatusBarSpace(insets: WindowInsetsCompat, landscape: Boolean): WindowInsetsCompat {
-    if (!landscape) return insets
-    val type = WindowInsetsCompat.Type.statusBars()
+/** Keep status-bar-based page chrome below the floating window controls. */
+internal fun applyPageTopInsets(insets: WindowInsetsCompat, landscape: Boolean): WindowInsetsCompat {
+    val statusType = WindowInsetsCompat.Type.statusBars()
+    val visibleStatus = insets.getInsets(statusType)
+    val status = if (landscape) insets.getInsetsIgnoringVisibility(statusType) else visibleStatus
+    val captionTop = insets.getInsets(WindowInsetsCompat.Type.captionBar()).top
+    val top = maxOf(status.top, captionTop)
+    if (status == visibleStatus && top == visibleStatus.top) return insets
     return WindowInsetsCompat.Builder(insets)
-        .setInsets(type, insets.getInsetsIgnoringVisibility(type))
+        .setInsets(statusType, Insets.of(status.left, top, status.right, status.bottom))
         .build()
 }
 

@@ -192,13 +192,38 @@ class GlassBottomBarInteractionTest {
                 .setInsets(navigation, bottom)
                 .setInsets(ime, keyboard)
                 .build()
-            val output = com.ljyh.mei.retainLandscapeStatusBarSpace(input, landscape = true)
+            val output = com.ljyh.mei.applyPageTopInsets(input, landscape = true)
             assertEquals(reserved, output.getInsets(status))
             assertEquals(input.isVisible(status), output.isVisible(status))
             assertEquals(bottom, output.getInsets(navigation))
             assertEquals(keyboard, output.getInsets(ime))
-            assertSame(input, com.ljyh.mei.retainLandscapeStatusBarSpace(input, landscape = false))
+            assertSame(input, com.ljyh.mei.applyPageTopInsets(input, landscape = false))
         }
+    }
+
+    @Test
+    fun floatingWindowCaptionSharesThePageTopInsetWithTheStatusBar() {
+        val status = androidx.core.view.WindowInsetsCompat.Type.statusBars()
+        val caption = androidx.core.view.WindowInsetsCompat.Type.captionBar()
+        val statusInsets = androidx.core.graphics.Insets.of(0, 24, 0, 0)
+        val captionInsets = androidx.core.graphics.Insets.of(0, 40, 0, 0)
+        val fullscreen = androidx.core.view.WindowInsetsCompat.Builder()
+            .setInsets(status, statusInsets)
+            .setInsetsIgnoringVisibility(status, statusInsets)
+            .build()
+        for (statusHeight in listOf(0, 24)) {
+            val floating = androidx.core.view.WindowInsetsCompat.Builder(fullscreen)
+                .setInsets(status, androidx.core.graphics.Insets.of(0, statusHeight, 0, 0))
+                .setInsets(caption, captionInsets)
+                .build()
+            for (landscape in listOf(false, true)) {
+                val output = com.ljyh.mei.applyPageTopInsets(floating, landscape)
+                assertEquals(captionInsets, output.getInsets(status))
+                assertEquals(captionInsets, output.getInsets(caption))
+                assertEquals(captionInsets, output.getInsets(status or caption))
+            }
+        }
+        assertSame(fullscreen, com.ljyh.mei.applyPageTopInsets(fullscreen, landscape = false))
     }
 
     @Test
