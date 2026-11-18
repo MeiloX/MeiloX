@@ -47,6 +47,8 @@ class SourceRouter @Inject constructor(
     }
     private val mutableContentRevision = MutableStateFlow(0L)
     val contentRevision = mutableContentRevision.asStateFlow()
+    private val mutableTrackLikeRevision = MutableStateFlow(0L)
+    internal val trackLikeRevision = mutableTrackLikeRevision.asStateFlow()
     private val accountReads = mutableMapOf<String, AccountRead>()
     fun searchTypes(providerId: String): Set<ContentType> {
         val provider = registry.provider(providerId) ?: return emptySet()
@@ -193,7 +195,7 @@ class SourceRouter @Inject constructor(
         val owner = mutations.capture(ref.providerId, expectedProvider, expectedAccountRevision)
         val provider = ownedCapability<LikeCapability>(owner, SourceCapability.LIKE)
         if (!provider.canWriteLikes) unsupported()
-        write(owner, likeKey(ref), "liked:$liked") {
+        write(owner, likeKey(ref), "liked:$liked", affectsTrackLikes = true) {
             applyLiked(owner, provider, ref, liked)
             mutations.ensureCurrent(owner)
             mutations.confirm(owner, likeKey(ref), liked)
@@ -205,7 +207,7 @@ class SourceRouter @Inject constructor(
         val provider = ownedCapability<LikeCapability>(owner, SourceCapability.LIKE)
         if (!provider.canReadLikes || !provider.canWriteLikes) unsupported()
         var writeStarted = false
-        return write(owner, likeKey(ref), canReconcile = { writeStarted }) {
+        return write(owner, likeKey(ref), canReconcile = { writeStarted }, affectsTrackLikes = true) {
             val liked = mutations.confirmed(owner, likeKey(ref)) ?: provider.liked(ref)
             mutations.ensureCurrent(owner)
             writeStarted = true
@@ -230,7 +232,7 @@ class SourceRouter @Inject constructor(
         val owner = mutations.capture(ref.providerId, expectedProvider, expectedAccountRevision)
         val provider = ownedCapability<CollectionCapability>(owner, SourceCapability.COLLECTIONS)
         if (!provider.canWriteCollections || ref.type !in provider.collectionTypes) unsupported()
-        write(owner, mutationKey(ref), "saved:$saved") {
+        write(owner, mutationKey(ref), "saved:$saved", affectsTrackLikes = ref is TrackRef) {
             provider.setSaved(ref, saved)
             mutations.ensureCurrent(owner)
             mutations.confirm(owner, mutationKey(ref), saved)
@@ -253,7 +255,7 @@ class SourceRouter @Inject constructor(
     suspend fun deletePlaylist(ref: PlaylistRef, expectedAccountRevision: String? = null, expectedProvider: MusicProvider? = null) {
         val owner = mutations.capture(ref.providerId, expectedProvider, expectedAccountRevision)
         val editor = ownedEditor(owner, PlaylistEditAction.DELETE)
-        write(owner, mutationKey(ref), uncertain = { it == mutationKey(ref) || it.startsWith("like:") }) {
+        write(owner, mutationKey(ref), uncertain = { it == mutationKey(ref) || it.startsWith("like:") }, affectsTrackLikes = true) {
             editor.deletePlaylist(ref)
             mutations.ensureCurrent(owner)
             mutations.invalidate(owner) { it.startsWith("like:") }
@@ -274,7 +276,7 @@ class SourceRouter @Inject constructor(
         val owner = mutations.capture(ref.providerId, expectedProvider, expectedAccountRevision)
         val editor = ownedEditor(owner, action)
         val affected = selected.map(::likeKey).toSet()
-        write(owner, mutationKey(ref), uncertain = { it == mutationKey(ref) || it in affected }) {
+        write(owner, mutationKey(ref), uncertain = { it == mutationKey(ref) || it in affected }, affectsTrackLikes = true) {
             if (expectedContentRevision != null && mutableContentRevision.value != expectedContentRevision) {
                 throw SourceException(SourceErrorCode.CANCELLED, "Playlist content changed before reorder")
             }
@@ -291,9 +293,10 @@ class SourceRouter @Inject constructor(
         }
     }
     private suspend fun <T> write(owner: SourceMutationOwner, key: String, signature: String? = null,
-        uncertain: (String) -> Boolean = { it == key }, canReconcile: () -> Boolean = { true }, action: suspend () -> T): T =
+        uncertain: (String) -> Boolean = { it == key }, canReconcile: () -> Boolean = { true },
+        affectsTrackLikes: Boolean = false, action: suspend () -> T): T =
         mutations.mutate(owner, key, signature) {
-            try { action().also { mutations.ensureCurrent(owner); contentChanged() } }
+            try { action().also { mutations.ensureCurrent(owner); contentChanged(affectsTrackLikes) } }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (error: Exception) {
                 val ambiguous = if (error is SourceException) error.outcomeUnknown || error.code in setOf(
@@ -302,7 +305,7 @@ class SourceRouter @Inject constructor(
                 if (ambiguous && canReconcile()) {
                     mutations.ensureCurrent(owner)
                     mutations.invalidate(owner, uncertain)
-                    contentChanged()
+                    contentChanged(affectsTrackLikes)
                 }
                 throw error
             }
@@ -369,5 +372,8 @@ class SourceRouter @Inject constructor(
     }
     private fun unsupported(): Nothing = throw SourceException(SourceErrorCode.UNSUPPORTED)
     private fun invalid(): Nothing = throw SourceException(SourceErrorCode.INVALID_RESPONSE)
-    private fun contentChanged() { mutableContentRevision.update { it + 1 } }
+    private fun contentChanged(affectsTrackLikes: Boolean) {
+        mutableContentRevision.update { it + 1 }
+        if (affectsTrackLikes) mutableTrackLikeRevision.update { it + 1 }
+    }
 }

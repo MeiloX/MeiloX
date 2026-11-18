@@ -217,7 +217,8 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
     val contentRevision by viewModel.contentRevision.collectAsState()
     val nav = LocalNavController.current
     var menu by remember(ref) { mutableStateOf<Pair<Track, Rect>?>(null) }
-    var saved by remember(ref, state.providerVersion, state.accountRevision, contentRevision) { mutableStateOf<Boolean?>(null) }
+    val savedResetRevision = contentRevision.takeUnless { ref is ArtistRef }
+    var saved by remember(ref, state.providerVersion, state.accountRevision, savedResetRevision) { mutableStateOf<Boolean?>(null) }
     var savedLoading by remember(ref, state.providerVersion, state.accountRevision, contentRevision) { mutableStateOf(false) }
     var savedError by remember(ref, state.providerVersion, state.accountRevision, contentRevision) { mutableStateOf<SourceErrorCode?>(null) }
     var savedAttempt by remember(ref) { mutableIntStateOf(0) }
@@ -236,12 +237,16 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
         SourceCapability.COLLECTIONS in provider.capabilities && ref.type in it.collectionTypes
     }
     LaunchedEffect(ref, state.detail, provider, state.accountRevision, contentRevision, savedAttempt) {
-        saved = null
+        if (ref !is ArtistRef) saved = null
         savedError = null
-        savedLoading = collections?.canReadCollections == true
-        if (savedLoading) try { saved = viewModel.saved(ref) }
+        val canReadCollection = collections?.canReadCollections == true
+        savedLoading = canReadCollection && saved == null
+        if (canReadCollection) try { saved = viewModel.saved(ref) }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { savedError = error.sourceCode() }
+        catch (error: Exception) {
+            saved = null
+            savedError = error.sourceCode()
+        }
         finally { savedLoading = false }
     }
     val toggleCollection: () -> Unit = {
@@ -263,8 +268,8 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
         is PlaylistRef -> "歌单"; is AlbumRef -> "专辑"; is ArtistRef -> "歌手"; is TrackRef -> "歌曲"
     } }
     if (ref is ArtistRef) {
-        SourceArtistDetail(ref, state, provider, busy || savedLoading, saved, viewModel,
-            onFollow = toggleCollection, selection = menu, onDismissMenu = { menu = null },
+        SourceArtistDetail(ref, state, provider, savedLoading, saved, viewModel,
+            onFollow = { if (!busy) toggleCollection() }, selection = menu, onDismissMenu = { menu = null },
             onInformation = { Screen.ArtistInfo.navigate(nav) { addPath(Uri.encode(ref.contentId)); addQuery("providerId", ref.providerId) } }, onPlay = play,
             onMore = { track, anchor -> menu = track to anchor })
     } else {
@@ -592,7 +597,7 @@ private fun SourceArtistDetail(
     ref: ArtistRef,
     state: SourceContentState,
     provider: MusicProvider?,
-    busy: Boolean,
+    followLoading: Boolean,
     followed: Boolean?,
     viewModel: SourceContentViewModel,
     onInformation: () -> Unit,
@@ -700,7 +705,7 @@ private fun SourceArtistDetail(
                 if (showHeaderShimmer) ArtistHeaderShimmer(landscape) else ArtistDetailHeader(
                     name = state.title, subtitle = subtitle, cover = state.artworkUrl, accent = accent,
                     canPlayHotSongs = tracks.isNotEmpty() && player != null,
-                    isFollowed = followed == true, isFollowLoading = busy,
+                    isFollowed = followed == true, isFollowLoading = followLoading,
                     onInfoClick = onInformation,
                     onPlayHotSongs = { if (tracks.isNotEmpty()) onPlay(tracks, 0) },
                     onFollowClick = onFollow,
@@ -728,7 +733,7 @@ private fun SourceArtistFeaturedAlbum(
     var loading by remember(album.ref, provider, revision, contentRevision) { mutableStateOf(false) }
     var error by remember(album.ref, provider, revision, contentRevision) { mutableStateOf<SourceErrorCode?>(null) }
     var attempt by remember(album.ref) { mutableIntStateOf(0) }
-    var saved by remember(album.ref, provider, revision, contentRevision) { mutableStateOf<Boolean?>(null) }
+    var saved by remember(album.ref, provider, revision) { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(album.ref, provider, revision, contentRevision, attempt) {
         loading = canSave
         error = null

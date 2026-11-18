@@ -97,7 +97,7 @@ class PlayerViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            sourceRouter.contentRevision.drop(1).collect {
+            sourceRouter.trackLikeRevision.drop(1).collect {
                 if (sourceLikeWriteJob?.isActive != true) {
                     invalidateFavoriteCache()
                     selectedLikeRef?.let(::getSourceLike)

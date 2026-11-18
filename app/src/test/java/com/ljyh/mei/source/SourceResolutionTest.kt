@@ -1324,12 +1324,17 @@ class SourceResolutionTest {
     }
 
     @Test fun contentRevisionOnlyChangesAfterSuccessfulPermittedMutations() = runTest {
-        val provider = ContentProvider()
+        val provider = object : ContentProvider() {
+            override val collectionTypes = super.collectionTypes + ContentType.ALBUM
+        }
         val router = SourceRouter(ProviderRegistry(listOf(provider)))
         val ref = provider.playlist.ref
         val tracks = listOf(provider.track.ref)
         router.setLiked(provider.track.ref, true)
-        router.setSaved(ref, true)
+        val trackLikeRevision = router.trackLikeRevision.value
+        assertEquals(1L, trackLikeRevision)
+        router.setSaved(AlbumRef(provider.id, "featured"), true)
+        assertEquals(trackLikeRevision, router.trackLikeRevision.value)
         router.createPlaylist(provider.id, "New")
         router.updatePlaylist(ref, "Renamed")
         router.addTracks(ref, tracks)
@@ -1337,6 +1342,7 @@ class SourceResolutionTest {
         router.reorderTracks(ref, tracks)
         router.deletePlaylist(ref)
         assertEquals(8L, router.contentRevision.value)
+        assertEquals(5L, router.trackLikeRevision.value)
         provider.canWriteLikes = false
         try { router.setLiked(provider.track.ref, false); fail() } catch (error: SourceException) { assertEquals(SourceErrorCode.UNSUPPORTED, error.code) }
         provider.canWriteLikes = true
@@ -1345,6 +1351,7 @@ class SourceResolutionTest {
         try { router.addTracks(ref, listOf(TrackRef("foreign", "42"))); fail() } catch (error: SourceException) { assertEquals(SourceErrorCode.UNSUPPORTED, error.code) }
         assertEquals(8, provider.writes.size)
         assertEquals(8L, router.contentRevision.value)
+        assertEquals(5L, router.trackLikeRevision.value)
     }
 
     @Test fun queuedTrackOrderRejectsAContentChangeBeforeItsSerializedWrite() = runTest {
