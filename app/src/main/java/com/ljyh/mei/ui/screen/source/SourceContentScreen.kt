@@ -30,7 +30,10 @@ import com.ljyh.mei.ui.screen.playlist.component.DetailTrackDivider
 import com.ljyh.mei.ui.screen.playlist.component.TrackItemShimmer
 import com.ljyh.mei.ui.component.shimmer.ShimmerHost
 import com.ljyh.mei.ui.component.utils.rememberDeviceInfo
+import com.ljyh.mei.ui.component.playlist.AddToPlaylistSheet
+import com.ljyh.mei.ui.component.playlist.CreatePlaylistSheet
 import com.ljyh.mei.ui.component.playlist.rememberFavoriteTrackIds
+import com.ljyh.mei.ui.component.sheet.rememberMeiloXSheetDismissal
 import com.ljyh.mei.ui.component.item.LandscapeMediaRow
 import com.ljyh.mei.utils.color.ColorExtractionUtils
 import io.github.neoruaa.glasmio.core.IosTypography
@@ -939,6 +942,25 @@ fun SourcePlaylistEditorScreen(providerId: String, playlistId: String? = null, v
 @Composable
 fun SourcePlaylistPickerScreen(track: TrackRef, viewModel: SourceContentViewModel = hiltViewModel()) {
     val nav = LocalNavController.current
+    SourcePlaylistPicker(track, viewModel, onDismiss = { nav.navigateUp() }, asSheet = false)
+}
+
+@Composable
+internal fun SourcePlaylistPickerSheet(
+    track: TrackRef,
+    onDismiss: () -> Unit,
+    viewModel: SourceContentViewModel = hiltViewModel(key = "player-playlist-picker"),
+) {
+    SourcePlaylistPicker(track, viewModel, onDismiss, asSheet = true)
+}
+
+@Composable
+private fun SourcePlaylistPicker(
+    track: TrackRef,
+    viewModel: SourceContentViewModel,
+    onDismiss: () -> Unit,
+    asSheet: Boolean,
+) {
     val state by viewModel.state.collectAsState()
     val message by viewModel.message.collectAsState()
     val busy by viewModel.busy.collectAsState()
@@ -947,26 +969,46 @@ fun SourcePlaylistPickerScreen(track: TrackRef, viewModel: SourceContentViewMode
     var showCreate by remember(track.providerId, provider, state.accountRevision) { mutableStateOf(false) }
     val canCreate = SourceCapability.PLAYLIST_EDIT in provider?.capabilities.orEmpty() &&
         PlaylistEditAction.CREATE in (provider as? PlaylistEditCapability)?.playlistEditActions.orEmpty()
-    LaunchedEffect(track) { viewModel.open(SourceContentRequest.Library(LibraryCollection.CREATED_PLAYLISTS, track.providerId)) }
-    val editable = state.items.filterIsInstance<SourceItem.PlaylistItem>()
+    LaunchedEffect(track) {
+        if (asSheet) viewModel.dismissMessage()
+        viewModel.open(SourceContentRequest.Library(LibraryCollection.CREATED_PLAYLISTS, track.providerId))
+    }
+    // A player overlay can reopen for another source while its previous library is still loaded.
+    val pickerState = if (asSheet && state.providerId != track.providerId) {
+        SourceContentState(loading = true)
+    } else state
+    val editable = pickerState.items.filterIsInstance<SourceItem.PlaylistItem>()
         .filter { PlaylistEditAction.ADD_TRACKS in it.playlist.editableActions }
-    MeiloXPinnedListPage("添加到歌单", onNavigateBack = nav::navigateUp,
-        bottomPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues().calculateBottomPadding(),
-        verticalArrangement = Arrangement.spacedBy(0.dp)) {
+    val dismissal = if (asSheet) rememberMeiloXSheetDismissal(onDismiss) else null
+    val onAdded: () -> Unit = if (dismissal != null) {
+        { dismissal.requestDismiss() }
+    } else onDismiss
+    val rows: LazyListScope.() -> Unit = {
         if (canCreate) item("create-playlist") {
-            GlasmioGroupedList(Modifier.padding(top = 10.dp, bottom = 24.dp)) {
+            GlasmioGroupedList(Modifier.padding(top = if (asSheet) 0.dp else 10.dp, bottom = 24.dp)) {
                 GlasmioListRow(stringResource(R.string.create_playlist_title), systemName = "plus.circle",
-                    showTopSeparator = false, enabled = !busy && !state.loading && state.account != null,
+                    showTopSeparator = false, enabled = !busy && !pickerState.loading && pickerState.account != null,
                     onClick = { showCreate = true })
             }
         }
-        groupedLazyItems(editable, key = { it.ref.playlistId }, firstItemTopPadding = if (canCreate) 0.dp else 10.dp) { item, index ->
-            GlasmioListRow(item.title, showTopSeparator = index > 0, enabled = !busy,
-                onClick = { viewModel.addTracks(item.ref, listOf(track)) { nav.navigateUp() } })
+        groupedLazyItems(editable, key = { it.ref.playlistId }, firstItemTopPadding = if (asSheet || canCreate) 0.dp else 10.dp) { item, index ->
+            GlasmioListRow(item.title, showTopSeparator = index > 0, enabled = !busy && dismissal?.isDismissing != true,
+                onClick = { viewModel.addTracks(item.ref, listOf(track), onAdded) })
         }
-        sourceContentStatus(state.copy(items = editable), viewModel::refresh, viewModel::loadMore)
+        sourceContentStatus(pickerState.copy(items = editable), viewModel::refresh, viewModel::loadMore)
     }
-    if (showCreate && canCreate) com.ljyh.mei.ui.component.playlist.CreatePlaylistSheet(
+    if (dismissal != null) {
+        AddToPlaylistSheet(stringResource(R.string.add_to_playlist_title), dismissal, content = rows)
+    } else {
+        MeiloXPinnedListPage(
+            "添加到歌单",
+            onNavigateBack = onDismiss,
+            bottomPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues().calculateBottomPadding(),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+            content = rows,
+        )
+    }
+    if (showCreate && canCreate) CreatePlaylistSheet(
         onDismiss = { showCreate = false },
         onConfirm = { name, privacy ->
             showCreate = false

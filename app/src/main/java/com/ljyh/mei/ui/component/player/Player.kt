@@ -36,7 +36,6 @@ import io.github.neoruaa.glasmio.scaffold.GlasmioBottomSheetState
 import io.github.neoruaa.glasmio.ui.GlasmioSheetGroupedListStyle
 import io.github.neoruaa.glasmio.ui.LocalGlasmioSheetGroupedListStyle
 import com.ljyh.mei.ui.component.utils.rememberDeviceInfo
-import com.ljyh.mei.ui.local.LocalNavController
 import com.ljyh.mei.ui.local.LocalPlayerConnection
 import io.github.neoruaa.glasmio.glass.LocalBlurBackdrop
 import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
@@ -73,7 +72,6 @@ fun BottomSheetPlayer(
     playerViewModel: PlayerViewModel = hiltViewModel(),
 ) {
     val playerConnection = LocalPlayerConnection.current ?: return
-    val navController = LocalNavController.current
     val device = rememberDeviceInfo()
     val collapsedBackdrop = LocalGlassBackdrop.current
     // Record the mesh background directly so glass shares the same live Compose layer.
@@ -124,11 +122,7 @@ fun BottomSheetPlayer(
 
     // 创建弹窗处理器
     val sheetLayers = rememberPlayerSheetLayers(state)
-    val overlayHandler = rememberOverlayHandler(
-        stateContainer = stateContainer,
-        navController = navController,
-        onNavigateFromPlayer = sheetLayers::collapse,
-    )
+    val overlayHandler = rememberOverlayHandler(stateContainer)
 
     val currentMetadata by playerConnection.mediaMetadata.collectAsState()
     val context = LocalContext.current
