@@ -677,10 +677,12 @@ private fun SourceArtistDetail(
                     latestArtworkHeight, landscape, onOpen = { navigateSourceContent(nav, album.ref) })
             }
         }
+        val showHeaderShimmer = state.detail == null && state.loading
         ArtistDetailPageLayout(title = state.title, background = background, scrollState = scroll,
+            coverUrl = state.artworkUrl.takeUnless { showHeaderShimmer }.orEmpty(),
             landscape = landscape, popularSongsHeightPx = popularHeightPx, onBack = nav::navigateUp,
             header = { _ ->
-                if (state.detail == null && state.loading) ArtistHeaderShimmer(landscape) else ArtistDetailHeader(
+                if (showHeaderShimmer) ArtistHeaderShimmer(landscape) else ArtistDetailHeader(
                     name = state.title, subtitle = subtitle, cover = state.artworkUrl, accent = accent,
                     canPlayHotSongs = tracks.isNotEmpty() && player != null,
                     isFollowed = followed == true, isFollowLoading = busy,

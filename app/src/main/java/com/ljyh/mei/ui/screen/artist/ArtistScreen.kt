@@ -40,6 +40,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -47,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
@@ -54,11 +56,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.nativePaint
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onLayoutRectChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -107,6 +111,7 @@ private val ArtistPopularSongsHeight = ArtistSongCoverSize * 3 + HomeSongRowSpac
 internal fun ArtistDetailPageLayout(
     title: String,
     background: CoverBackground,
+    coverUrl: String,
     scrollState: androidx.compose.foundation.lazy.LazyListState,
     landscape: Boolean,
     popularSongsHeightPx: Int,
@@ -136,6 +141,9 @@ internal fun ArtistDetailPageLayout(
         val latestTextWidth = with(LocalDensity.current) { 120.sp.toDp() }
         val latestMinimumWidth = latestArtworkHeight + DetailPageHorizontalPadding * 2 + 16.dp + latestTextWidth
         val latestPaneWidth = maxOf(maxWidth * 0.31f, latestMinimumWidth.coerceAtMost(maxWidth * 0.55f))
+        val showPortraitCover = !landscape && coverUrl.isNotBlank() && !isArtistUnavailable
+        var viewportTop by remember { mutableIntStateOf(0) }
+        var headerTop by remember { mutableIntStateOf(0) }
             MeiloXPinnedPage(
                 title = title,
                 bottomPadding =
@@ -157,18 +165,48 @@ internal fun ArtistDetailPageLayout(
                                 ),
                     )
                 } else {
+                    val listPadding = PaddingValues(
+                        top = if (landscape) contentPadding.calculateTopPadding() else 0.dp,
+                        bottom = contentPadding.calculateBottomPadding(),
+                    )
+                    if (showPortraitCover) {
+                        // The list's overscroll layer clips at its translated edges.
+                        Box(
+                            Modifier.matchParentSize().clipToBounds()
+                                .onLayoutRectChanged(throttleMillis = 0, debounceMillis = 0) {
+                                    viewportTop = it.positionInRoot.y
+                                },
+                        ) {
+                            ArtistPortraitCover(
+                                cover = coverUrl,
+                                modifier = Modifier.graphicsLayer {
+                                    val offset = (headerTop - viewportTop).toFloat()
+                                    alpha = if (scrollState.firstVisibleItemIndex == 0) 1f else 0f
+                                    translationY = offset
+                                    transformOrigin = TransformOrigin(0.5f, 1f)
+                                    val scale = 1f + offset.coerceAtLeast(0f) / size.height.coerceAtLeast(1f)
+                                    scaleX = scale
+                                    scaleY = scale
+                                },
+                            )
+                        }
+                    }
                     LazyColumn(
                         state = scrollState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding =
-                            PaddingValues(
-                                top = if (landscape) contentPadding.calculateTopPadding() else 0.dp,
-                                bottom = contentPadding.calculateBottomPadding(),
-                            ),
+                        contentPadding = listPadding,
                     ) {
                         // --- 1. Hero + Info Header ---
                         item {
-                            header(contentPadding)
+                            if (showPortraitCover) {
+                                Box(
+                                    Modifier.onLayoutRectChanged(throttleMillis = 0, debounceMillis = 0) {
+                                        headerTop = it.positionInRoot.y
+                                    },
+                                ) { header(contentPadding) }
+                            } else {
+                                header(contentPadding)
+                            }
                         }
 
                         if (landscape) {
@@ -291,6 +329,31 @@ private fun ArtistUnavailableState(
 // ─── Artist Hero ─────────────────────────────────────────────────────────────
 
 @Composable
+private fun ArtistPortraitCover(cover: String, modifier: Modifier) {
+    AsyncImage(
+        model = cover,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+            .then(modifier)
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                // Fade into the same artwork-derived gradient as the rest of the page.
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Black,
+                        0.45f to Color.Black,
+                        0.70f to Color.Black.copy(alpha = 0.45f),
+                        1f to Color.Transparent,
+                    ),
+                    blendMode = BlendMode.DstIn,
+                )
+            },
+    )
+}
+
+@Composable
 internal fun ArtistDetailHeader(
     name: String,
     subtitle: String = "",
@@ -311,33 +374,16 @@ internal fun ArtistDetailHeader(
     ArtistHeroLayout(
         landscape = landscape,
         image = { imageModifier ->
-            AsyncImage(
-                model = cover,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier =
-                    if (landscape) imageModifier
-                    else
-                        imageModifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                            .drawWithContent {
-                                drawContent()
-                                // Reveal the same page gradient beneath the image to avoid a solid
-                                // seam.
-                                drawRect(
-                                    brush =
-                                        Brush.verticalGradient(
-                                            0f to Color.Black,
-                                            0.45f to Color.Black,
-                                            0.70f to Color.Black.copy(alpha = 0.45f),
-                                            1f to Color.Transparent,
-                                        ),
-                                    blendMode = BlendMode.DstIn,
-                                )
-                            },
-            )
+            if (landscape) {
+                AsyncImage(
+                    model = cover,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = imageModifier,
+                )
+            } else {
+                Spacer(imageModifier.fillMaxWidth().aspectRatio(1f))
+            }
         },
         information = {
             Column(
