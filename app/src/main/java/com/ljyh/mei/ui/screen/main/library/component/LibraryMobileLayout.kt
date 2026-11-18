@@ -34,10 +34,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.pulltorefresh.pullToRefresh
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.material3.HorizontalDivider
@@ -121,7 +117,7 @@ import com.ljyh.mei.ui.screen.podcast.PodcastViewModel
 import com.ljyh.mei.ui.screen.podcast.PodcastUiState
 import com.ljyh.mei.ui.screen.podcast.PodcastTab
 import com.ljyh.mei.utils.rememberPreference
-import io.github.neoruaa.glasmio.scaffold.pullToRefreshRebound
+import io.github.neoruaa.glasmio.scaffold.GlasmioPullToRefreshBox
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
@@ -336,7 +332,7 @@ fun LibraryMobileLayout(
         (showsAlbums && albumState.isLoading) || (showsPodcasts && podcastState?.isSubscriptionsLoading == true)
     }
     var isPullRefreshing by remember(selectedPage, mergeAlbumPodcasts) { mutableStateOf(false) }
-    LaunchedEffect(collectionLoading) {
+    LaunchedEffect(isPullRefreshing, collectionLoading) {
         if (!collectionLoading) isPullRefreshing = false
     }
 
@@ -348,25 +344,25 @@ fun LibraryMobileLayout(
         onNavigateBack = if (isNavigationTab) null else ({ navController.navigateUp() }),
         actions = { listOfNotNull(sourceAction?.invoke(), if (isNavigationTab) globalProfileHeaderAction() else null) },
     ) { contentPadding ->
-        LibraryCollectionRefresh(
-            enabled = showsAlbums || showsPodcasts || selectedPage == LibraryPage.Playlists,
-            isRefreshing = isPullRefreshing && collectionLoading,
-            topPadding = contentPadding.calculateTopPadding(),
-            onRefresh = {
-                isPullRefreshing = true
-                if (selectedPage == LibraryPage.Playlists) onRefreshPlaylists()
-                if (showsAlbums) onRefreshAlbums()
-                if (showsPodcasts) {
-                    podcastViewModel?.selectTab(PodcastTab.Subscriptions)
-                    podcastViewModel?.refresh()
-                }
-            },
-        ) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-                val albumColumns = (maxWidth / 180.dp).toInt().coerceAtLeast(2)
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val albumColumns = (maxWidth / 180.dp).toInt().coerceAtLeast(2)
+            LibraryCollectionRefresh(
+                enabled = showsAlbums || showsPodcasts || selectedPage == LibraryPage.Playlists,
+                isRefreshing = isPullRefreshing && collectionLoading,
+                topPadding = contentPadding.calculateTopPadding(),
+                onRefresh = {
+                    isPullRefreshing = true
+                    if (selectedPage == LibraryPage.Playlists) onRefreshPlaylists()
+                    if (showsAlbums) onRefreshAlbums()
+                    if (showsPodcasts) {
+                        podcastViewModel?.selectTab(PodcastTab.Subscriptions)
+                        podcastViewModel?.refresh()
+                    }
+                },
+            ) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize().glasmioHorizontalEdgeToEdge().trackPressViewport(),
+                    modifier = Modifier.fillMaxSize().trackPressViewport(),
                     contentPadding = glasmioHorizontalContentPadding(PaddingValues(
                         start = if (isLandscape) 32.dp else 16.dp,
                         top = contentPadding.calculateTopPadding() + if (isLandscape) com.ljyh.mei.constants.LandscapeSearchTopAdjustment else 0.dp,
@@ -647,7 +643,6 @@ fun LibraryMobileLayout(
 
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LibraryCollectionRefresh(
     enabled: Boolean,
@@ -656,23 +651,16 @@ internal fun LibraryCollectionRefresh(
     onRefresh: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val state = rememberPullToRefreshState()
-    Box(
-        modifier = Modifier.fillMaxSize().pullToRefresh(
-            isRefreshing = enabled && isRefreshing,
-            enabled = enabled,
+    val modifier = Modifier.fillMaxSize().glasmioHorizontalEdgeToEdge()
+    if (enabled) {
+        GlasmioPullToRefreshBox(
+            modifier = modifier,
+            isRefreshing = isRefreshing,
             onRefresh = onRefresh,
-            state = state,
-        ),
-    ) {
-        Box(Modifier.fillMaxSize().pullToRefreshRebound(state, isRefreshing, enabled)) { content() }
-        if (enabled) {
-            PullToRefreshDefaults.Indicator(
-                isRefreshing = isRefreshing,
-                state = state,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = topPadding),
-            )
-        }
+            indicatorPadding = glasmioHorizontalContentPadding(PaddingValues(top = topPadding)),
+        ) { content() }
+    } else {
+        Box(modifier) { content() }
     }
 }
 

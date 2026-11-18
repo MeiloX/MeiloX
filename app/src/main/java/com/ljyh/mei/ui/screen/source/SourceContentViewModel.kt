@@ -230,6 +230,21 @@ class SourceContentViewModel internal constructor(
     fun open(value: SourceContentRequest) { request.value = value }
     fun prepareEditor(providerId: String) { request.value = SourceContentRequest.Editor(providerId) }
     fun refresh() { refreshVersion.value++ }
+
+    internal fun refreshOnPull(expected: SourceContentRequest, providerId: String): Boolean {
+        val current = mutableState.value
+        if (request.value != expected || displayedRequest != expected ||
+            providerId.isBlank() || providerId != current.providerId ||
+            providerId != expected.providerId(selectedProviderId.value) ||
+            current.loading || current.refreshing
+        ) return false
+
+        // Hold the pull indicator open while the request flow starts the refresh.
+        mutableState.value = current.copy(refreshing = true)
+        refresh()
+        return true
+    }
+
     fun selectProvider(id: String) { viewModelScope.launch { preferences.update { it.copy(preferredBrowseProvider = id) } } }
     fun dismissMessage() { mutableMessage.value = null }
     fun provider(id: String = state.value.providerId): MusicProvider? = registry.provider(id)
