@@ -3,7 +3,7 @@ package com.ljyh.mei.ui.screen.artist
 import com.ljyh.mei.ui.component.item.FixedCardCaption
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.onSizeChanged
-import com.ljyh.mei.ui.component.item.ThreeRowSongList
+import com.ljyh.mei.ui.component.item.HomeSongColumn
 import com.ljyh.mei.constants.HomeSongRowSpacing
 import com.ljyh.mei.ui.component.item.HomeSongListRow
 import com.ljyh.mei.constants.homePlaylistCardSize
@@ -14,6 +14,8 @@ import com.ljyh.mei.data.model.MediaMetadata
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -95,6 +97,9 @@ import com.ljyh.mei.ui.navigation.MeiloXPinnedPage
 import com.ljyh.mei.ui.theme.LocalAccentSeedColor
 import com.ljyh.mei.ui.theme.MusicTheme
 import io.github.neoruaa.glasmio.core.IosTypography
+import io.github.neoruaa.glasmio.core.swipeBackExcluded
+import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalEdgeToEdge
+import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalContentPadding
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.core.defaultGlassColors
 import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
@@ -105,6 +110,8 @@ import kotlinx.coroutines.CancellationException
 
 private val ArtistSongCoverSize = com.ljyh.mei.constants.LandscapeSongCoverSize
 private val ArtistPopularSongsHeight = ArtistSongCoverSize * 3 + HomeSongRowSpacing * 2
+private val ArtistCardStrokeWidth = 0.5.dp
+private val ArtistCardStrokeColor = Color.White.copy(alpha = 0.15f)
 
 /** The original artist detail layout, shared by every source. */
 @Composable
@@ -117,9 +124,9 @@ internal fun ArtistDetailPageLayout(
     popularSongsHeightPx: Int,
     onBack: () -> Unit,
     header: @Composable (PaddingValues) -> Unit,
-    latestRelease: @Composable () -> Unit,
+    latestRelease: (@Composable () -> Unit)?,
     songSection: @Composable () -> Unit,
-    popularSongs: @Composable () -> Unit,
+    popularSongs: (@Composable (Dp) -> Unit)?,
     albumSection: @Composable () -> Unit,
     isArtistUnavailable: Boolean = false,
     footer: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {},
@@ -141,6 +148,7 @@ internal fun ArtistDetailPageLayout(
         val latestTextWidth = with(LocalDensity.current) { 120.sp.toDp() }
         val latestMinimumWidth = latestArtworkHeight + DetailPageHorizontalPadding * 2 + 16.dp + latestTextWidth
         val latestPaneWidth = maxOf(maxWidth * 0.31f, latestMinimumWidth.coerceAtMost(maxWidth * 0.55f))
+        val popularViewportWidth = if (latestRelease != null) maxWidth - latestPaneWidth else maxWidth
         val showPortraitCover = !landscape && coverUrl.isNotBlank() && !isArtistUnavailable
         var viewportTop by remember { mutableIntStateOf(0) }
         var headerTop by remember { mutableIntStateOf(0) }
@@ -193,8 +201,10 @@ internal fun ArtistDetailPageLayout(
                     }
                     LazyColumn(
                         state = scrollState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = listPadding,
+                        // Keep the vertical list's cross-axis clip at the screen edges too.
+                        modifier = if (landscape) Modifier.fillMaxSize().glasmioHorizontalEdgeToEdge()
+                            else Modifier.fillMaxSize(),
+                        contentPadding = if (landscape) glasmioHorizontalContentPadding(listPadding) else listPadding,
                     ) {
                         // --- 1. Hero + Info Header ---
                         item {
@@ -210,17 +220,26 @@ internal fun ArtistDetailPageLayout(
                         }
 
                         if (landscape) {
-                            item(key = "artist-landscape-sections") {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                                    Column(Modifier.width(latestPaneWidth)) { latestRelease() }
-                                    Column(Modifier.weight(1f)) { popularSongs() }
+                            if (latestRelease != null || popularSongs != null) {
+                                item(key = "artist-landscape-sections") {
+                                    Row(
+                                        Modifier.fillMaxWidth().glasmioHorizontalEdgeToEdge().swipeBackExcluded()
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(glasmioHorizontalContentPadding(PaddingValues(0.dp))),
+                                        verticalAlignment = Alignment.Top,
+                                    ) {
+                                        if (latestRelease != null) {
+                                            Column(Modifier.width(latestPaneWidth)) { latestRelease() }
+                                        }
+                                        popularSongs?.invoke(popularViewportWidth)
+                                    }
                                 }
                             }
                             item(key = "artist-albums") {
                                 Column(Modifier.padding(top = 16.dp)) { albumSection() }
                             }
                         } else {
-                            item(key = "artist-latest-release") { latestRelease() }
+                            if (latestRelease != null) item(key = "artist-latest-release") { latestRelease() }
                             item(key = "artist-songs") { songSection() }
                             item(key = "artist-albums") { albumSection() }
                         }
@@ -493,6 +512,7 @@ private fun ArtistActionButton(
                 alpha = if (enabled) 1f else 0.4f
             }
             .clip(Capsule())
+            .then(if (prominent) Modifier else Modifier.border(ArtistCardStrokeWidth, ArtistCardStrokeColor, Capsule()))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -674,13 +694,13 @@ internal fun ArtistFeaturedAlbumLayout(
             .padding(top = if (landscape) 0.dp else 12.dp, bottom = if (landscape) 0.dp else 4.dp)
             .then(if (landscape) Modifier else Modifier.clip(shape)
                 .background(colors.content.copy(alpha = 0.10f))
-                .border(0.5.dp, Color.White.copy(alpha = 0.15f), shape))
+                .border(ArtistCardStrokeWidth, ArtistCardStrokeColor, shape))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .then(if (landscape) Modifier else Modifier.padding(12.dp)),
         horizontalArrangement = Arrangement.spacedBy(if (landscape) 16.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        artwork(Modifier.size(coverSize).clip(ContinuousRoundedRectangle(8.dp)))
+        artwork(Modifier.size(coverSize).clip(ContinuousRoundedRectangle(if (landscape) 8.dp else 10.dp)))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (landscape) 4.dp else 0.dp)) {
             information()
             if (landscape) Box(Modifier.padding(top = 4.dp)) { action() }
@@ -707,60 +727,41 @@ private fun ArtistFeaturedAlbumPlaceholder(artworkHeight: Dp = ArtistPopularSong
 internal fun ArtistPopularSongs(
     tracks: List<MediaMetadata>,
     favoriteIds: Set<String>,
-    currentTrackId: String?,
-    playing: Boolean,
+    viewportWidth: Dp,
     onClick: (Int) -> Unit,
     onMore: (MediaMetadata, Rect) -> Unit,
-    onHeightChanged: (Int) -> Unit = {},
+    onHeightChanged: (Int) -> Unit,
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val spacing = homeCardSpacing(true)
-        val columnWidth =
-            minOf(
-                homePlaylistCardSize(true) * 2 + spacing,
-                (maxWidth - DetailPageHorizontalPadding * 2 - HomeSongNextPagePeek).coerceAtLeast(
-                    220.dp
-                ),
-            )
-        ThreeRowSongList(
-            tracks.size,
-            columnWidth,
-            spacing,
-            PaddingValues(horizontal = DetailPageHorizontalPadding),
-            coverSize = ArtistSongCoverSize,
-            modifier = Modifier.onSizeChanged { onHeightChanged(it.height) }
-                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                .drawWithContent {
-                    drawContent()
-                    drawRect(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(Color.Transparent, Color.Black),
-                            endX = DetailPageHorizontalPadding.toPx(),
-                        ),
-                        blendMode = BlendMode.DstIn,
-                    )
-                },
-        ) { index ->
-            val track = tracks[index]
-            Box {
-                if (track.mediaId in favoriteIds) {
-                    FavoriteTrackStar(
-                        Modifier.align(Alignment.CenterStart)
-                            .offset(x = (-14).dp)
-                            .testTag("ArtistSongFavorite:${track.id}"),
-                        tint = LocalGlassColors.current.secondaryContent,
+    val spacing = homeCardSpacing(true)
+    val columnWidth = minOf(
+        homePlaylistCardSize(true) * 2 + spacing,
+        (viewportWidth - DetailPageHorizontalPadding * 2 - HomeSongNextPagePeek).coerceAtLeast(220.dp),
+    )
+    Row(
+        Modifier.padding(horizontal = DetailPageHorizontalPadding)
+            .onSizeChanged { onHeightChanged(it.height) },
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+    ) {
+        repeat((tracks.size + 2) / 3) { column ->
+            val start = column * 3
+            HomeSongColumn(minOf(3, tracks.size - start), Modifier.width(columnWidth), ArtistSongCoverSize) { row ->
+                val index = start + row
+                val track = tracks[index]
+                Box {
+                    if (track.mediaId in favoriteIds) {
+                        FavoriteTrackStar(Modifier.align(Alignment.CenterStart).offset(x = (-14).dp)
+                            .testTag("ArtistSongFavorite:${track.id}"))
+                    }
+                    HomeSongListRow(
+                        track.coverUrl,
+                        track.title,
+                        track.artists.joinToString(" / ") { it.name },
+                        onClick = { onClick(index) },
+                        onMore = { onMore(track, it) },
+                        moreModifier = Modifier.testTag("ArtistSongMore:${track.id}"),
+                        coverSize = ArtistSongCoverSize,
                     )
                 }
-                HomeSongListRow(
-                    track.coverUrl,
-                    track.title,
-                    track.artists.joinToString(" / ") { it.name },
-                    onClick = { onClick(index) },
-                    onMore = { anchor -> onMore(track, anchor) },
-                    moreModifier = Modifier.testTag("ArtistSongMore:${track.id}"),
-                    coverSize = ArtistSongCoverSize,
-                )
-
             }
         }
     }
@@ -776,32 +777,33 @@ fun SectionTitle(
     landscape: Boolean = false,
     topPadding: Dp = 20.dp,
 ) {
-    Row(
-        Modifier.fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(
-                start = if (landscape) DetailPageHorizontalPadding else 20.dp,
-                end = if (landscape) DetailPageHorizontalPadding else 20.dp,
-                top = topPadding,
-                bottom = bottomPadding,
-            ),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        Modifier.fillMaxWidth().padding(
+            start = if (landscape) DetailPageHorizontalPadding else 20.dp,
+            end = if (landscape) DetailPageHorizontalPadding else 20.dp,
+            top = topPadding,
+            bottom = bottomPadding,
+        ),
     ) {
-        Text(
-            title,
-            modifier = if (onClick != null) Modifier.weight(1f, fill = false) else Modifier,
-            style = if (landscape) MaterialTheme.typography.titleMedium.copy(fontSize = 20.sp, lineHeight = 24.sp) else MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        if (onClick != null)
-            SfIcon(
-                "chevron.forward",
-                null,
-                size = if (landscape) 18.dp else 16.dp,
-                weight = FontWeight.SemiBold,
-                tint = LocalGlassColors.current.secondaryContent,
+        Row(
+            if (onClick != null) Modifier.clickable(interactionSource = null, indication = null, onClick = onClick)
+            else Modifier,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title,
+                style = if (landscape) MaterialTheme.typography.titleMedium.copy(fontSize = 20.sp, lineHeight = 24.sp)
+                    else MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
             )
+            if (onClick != null) {
+                SfIcon(
+                    "chevron.forward", null, size = if (landscape) 18.dp else 16.dp,
+                    weight = FontWeight.SemiBold, tint = LocalGlassColors.current.secondaryContent,
+                )
+            }
+        }
     }
 }
 

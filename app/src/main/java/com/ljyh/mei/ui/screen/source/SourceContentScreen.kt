@@ -670,11 +670,26 @@ private fun SourceArtistDetail(
                 }
             }
         }
-        val latestRelease: @Composable () -> Unit = {
-            albums.maxByOrNull { it.publishedAtMs ?: Long.MIN_VALUE }?.let { album ->
-                if (landscape) SectionTitle(stringResource(R.string.artist_latest_release), bottomPadding = 12.dp, landscape = true)
-                SourceArtistFeaturedAlbum(album, provider, state.accountRevision, viewModel,
-                    latestArtworkHeight, landscape, onOpen = { navigateSourceContent(nav, album.ref) })
+        val latestAlbum = albums.maxByOrNull { it.publishedAtMs ?: Long.MIN_VALUE }
+        val latestRelease: (@Composable () -> Unit)? = if (latestAlbum == null) null else {
+            {
+                val onOpen = { navigateSourceContent(nav, latestAlbum.ref) }
+                if (landscape) {
+                    SectionTitle(stringResource(R.string.artist_latest_release), onClick = onOpen, landscape = true)
+                }
+                SourceArtistFeaturedAlbum(latestAlbum, provider, state.accountRevision, viewModel,
+                    latestArtworkHeight, landscape, onOpen = onOpen)
+            }
+        }
+        val popularSongs: (@Composable (Dp) -> Unit)? = if (tracks.isEmpty()) null else {
+            { viewportWidth ->
+                Column {
+                    SectionTitle(stringResource(R.string.artist_hot_songs), onClick = onAllSongs, landscape = true)
+                    ArtistPopularSongs(tracks.take(10).map { it.toMediaMetadata() }, favoriteIds, viewportWidth,
+                        onClick = { onPlay(tracks, it) },
+                        onMore = { metadata, bounds -> tracks.firstOrNull { it.ref == metadata.trackRef }?.let { onMore(it, bounds) } },
+                        onHeightChanged = { popularHeightPx = it })
+                }
             }
         }
         val showHeaderShimmer = state.detail == null && state.loading
@@ -691,15 +706,7 @@ private fun SourceArtistDetail(
                     onFollowClick = onFollow,
                     landscape = landscape, canFollow = canFollow)
             }, latestRelease = latestRelease, songSection = songSection, albumSection = albumSection,
-            popularSongs = {
-                if (tracks.isNotEmpty()) {
-                    SectionTitle(stringResource(R.string.artist_hot_songs), onClick = onAllSongs, landscape = true)
-                    ArtistPopularSongs(tracks.take(10).map { it.toMediaMetadata() }, favoriteIds, currentId, playing,
-                        onClick = { onPlay(tracks, it) },
-                        onMore = { metadata, bounds -> tracks.firstOrNull { it.ref == metadata.trackRef }?.let { onMore(it, bounds) } },
-                        onHeightChanged = { popularHeightPx = it })
-                }
-            }, footer = {
+            popularSongs = popularSongs, footer = {
                 state.error?.let { error -> item("artist-error") {
                     GlasmioListRow(sourceErrorMessage(error), trailing = { Text("重试") }, onClick = viewModel::refresh)
                 } }

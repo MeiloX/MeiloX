@@ -315,7 +315,14 @@ class SongListRenderingTest {
             CompositionLocalProvider(LocalDensity provides Density(0.5f, 1f)) {
                 GlasmioTheme {
                     Box(Modifier.requiredWidth(900.dp)) {
-                        ArtistPopularSongs(tracks, setOf("4"), null, false, {}, { _, _ -> })
+                        ArtistPopularSongs(
+                            tracks = tracks,
+                            favoriteIds = setOf("4"),
+                            viewportWidth = 900.dp,
+                            onClick = {},
+                            onMore = { _, _ -> },
+                            onHeightChanged = {},
+                        )
                     }
                 }
             }
