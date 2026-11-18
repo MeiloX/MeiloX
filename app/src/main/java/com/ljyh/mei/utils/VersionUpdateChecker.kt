@@ -35,8 +35,8 @@ sealed interface VersionUpdateResult {
 
 /** Checks GitHub release assets off the Compose thread. */
 object VersionUpdateChecker {
-    private const val Repository = "NEORUAA/MeiloX"
-    private val AcceptedRepositories = setOf(Repository, "MeiloX/MeiloX")
+    private const val Repository = "MeiloX/MeiloX"
+    private val AcceptedRepositories = setOf(Repository, "NEORUAA/MeiloX")
     private const val RepositoryUrl = "https://github.com/$Repository"
     private const val ApiUrl = "https://api.github.com/repos/$Repository"
     private const val ReleasesEndpoint = "$ApiUrl/releases?per_page=100"

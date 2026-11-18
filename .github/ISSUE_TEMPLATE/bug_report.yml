@@ -9,9 +9,9 @@ body:
         感谢你为 MeiloX 反馈问题！
         
         > [!IMPORTANT]
-        > 1. **先搜索再提交**：请先在 [已有的 Issues](https://github.com/NEORUAA/MeiloX/issues) 中搜索，确认是否已有相同或相似问题。
+        > 1. **先搜索再提交**：请先在 [已有的 Issues](https://github.com/MeiloX/MeiloX/issues) 中搜索，确认是否已有相同或相似问题。
         > 2. **歌曲试听 20~30 秒或 VIP 歌曲播放失败**：MeiloX 依赖网易云官方接口，未登录或无有效黑胶 VIP 的账号无法播放完整 VIP 歌曲/高解析音质，此为账号权限限制而非软件缺陷。
-        > 3. **最新构建排查**：请先安装 [GitHub Actions 最新构建](https://github.com/NEORUAA/MeiloX/actions/workflows/main.yml)，确认问题仍然存在。
+        > 3. **最新构建排查**：请先安装 [GitHub Actions 最新构建](https://github.com/MeiloX/MeiloX/actions/workflows/main.yml)，确认问题仍然存在。
 
   - type: dropdown
     id: category
@@ -121,9 +121,9 @@ body:
     attributes:
       label: 确认清单
       options:
-        - label: 我已安装并检查 [GitHub Actions 最新构建](https://github.com/NEORUAA/MeiloX/actions/workflows/main.yml)，确认该问题仍然存在
+        - label: 我已安装并检查 [GitHub Actions 最新构建](https://github.com/MeiloX/MeiloX/actions/workflows/main.yml)，确认该问题仍然存在
           required: true
-        - label: 我已在 [Issues](https://github.com/NEORUAA/MeiloX/issues) 中搜索过，确认没有相同或类似的未解决反馈
+        - label: 我已在 [Issues](https://github.com/MeiloX/MeiloX/issues) 中搜索过，确认没有相同或类似的未解决反馈
           required: true
         - label: 我已知晓无 VIP 账号可能受到网易云接口试听时长限制
           required: false

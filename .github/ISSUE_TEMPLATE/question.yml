@@ -64,7 +64,7 @@ body:
     attributes:
       label: 确认清单
       options:
-        - label: 我已安装并检查 [GitHub Actions 最新构建](https://github.com/NEORUAA/MeiloX/actions/workflows/main.yml)，确认该问题仍然存在
+        - label: 我已安装并检查 [GitHub Actions 最新构建](https://github.com/MeiloX/MeiloX/actions/workflows/main.yml)，确认该问题仍然存在
           required: true
         - label: 我已阅读上方常见疑问解答以及 README 中的免责声明
           required: true

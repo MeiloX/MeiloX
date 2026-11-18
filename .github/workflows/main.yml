@@ -50,6 +50,7 @@ jobs:
         with:
           gradle-version: current
           arguments: >-
+            testDebugUnitTest
             assembleRelease
             -Pglasmio.source=true
             -Pmei.buildCommitSha=${{ github.sha }}

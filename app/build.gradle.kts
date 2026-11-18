@@ -66,10 +66,13 @@ val buildCommitSha = sourceBuildMetadata[1].ifBlank {
     providers.gradleProperty("mei.buildCommitSha").orElse("").get().trim()
 }.takeIf { it.matches(Regex("[0-9a-fA-F]{40}|[0-9a-fA-F]{64}")) }.orEmpty().lowercase()
 val buildSourceDirty = sourceBuildMetadata[2].toBoolean()
-val isCanonicalCi = providers.environmentVariable("GITHUB_REPOSITORY").orElse("").get()
-    .equals("NEORUAA/MeiloX", ignoreCase = true) &&
-    providers.environmentVariable("GITHUB_WORKFLOW_REF").orElse("").get().substringBefore('@')
-        .equals("NEORUAA/MeiloX/.github/workflows/main.yml", ignoreCase = true)
+val canonicalRepositories = setOf("MeiloX/MeiloX", "NEORUAA/MeiloX")
+val githubRepository = providers.environmentVariable("GITHUB_REPOSITORY").orElse("").get()
+val githubWorkflowPath = providers.environmentVariable("GITHUB_WORKFLOW_REF").orElse("").get().substringBefore('@')
+val isCanonicalCi = canonicalRepositories.any { repo ->
+    githubRepository.equals(repo, ignoreCase = true) &&
+        githubWorkflowPath.equals("$repo/.github/workflows/main.yml", ignoreCase = true)
+}
 val ciRunNumber = if (isCanonicalCi) providers.gradleProperty("mei.ciRunNumber")
     .orElse(providers.environmentVariable("GITHUB_RUN_NUMBER"))
     .orElse("0")

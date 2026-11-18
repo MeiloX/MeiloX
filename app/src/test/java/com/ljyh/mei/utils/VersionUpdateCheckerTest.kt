@@ -24,7 +24,7 @@ class VersionUpdateCheckerTest {
 
         assertEquals("beta #35.1", result.latestTag)
         assertEquals("beta #34.1", result.currentBuildLabel)
-        assertEquals("https://github.com/NEORUAA/MeiloX/actions/runs/1035#artifacts", result.releaseUrl)
+        assertEquals("https://github.com/MeiloX/MeiloX/actions/runs/1035#artifacts", result.releaseUrl)
         assertTrue(result.isBeta)
         assertEquals(2, requests.size)
         assertTrue(requests.first().contains("/workflows/main.yml/runs?branch=main&status=success"))
@@ -166,7 +166,7 @@ class VersionUpdateCheckerTest {
     fun renamedCanonicalRepositoryRunsRemainEligibleForBetaUpdates() = runBlocking {
         val result = checkBeta(
             number = 34,
-            runs = runs(run(35, repository = "MeiloX/MeiloX", headRepository = "MeiloX/MeiloX")),
+            runs = runs(run(35, repository = "NEORUAA/MeiloX", headRepository = "NEORUAA/MeiloX")),
             artifacts = mapOf(35L to artifacts(artifact(35))),
         )
 
@@ -256,10 +256,10 @@ class VersionUpdateCheckerTest {
         } as VersionUpdateResult.UpdateAvailable
 
         assertEquals("v1.54.7", result.latestTag)
-        assertEquals("https://github.com/NEORUAA/MeiloX/releases/tag/v1.54.7", result.releaseUrl)
+        assertEquals("https://github.com/MeiloX/MeiloX/releases/tag/v1.54.7", result.releaseUrl)
         assertFalse(result.isBeta)
         assertEquals(null, result.currentBuildLabel)
-        assertEquals(listOf("https://api.github.com/repos/NEORUAA/MeiloX/releases?per_page=100"), requests)
+        assertEquals(listOf("https://api.github.com/repos/MeiloX/MeiloX/releases?per_page=100"), requests)
         assertEquals(
             VersionUpdateResult.UpToDate,
             VersionUpdateChecker.checkWithFetcher("1.54.7", false, localBuild()) { tags },
@@ -270,13 +270,13 @@ class VersionUpdateCheckerTest {
     fun stableReleaseUsesItsApkAssetUrl() = runBlocking {
         val result = VersionUpdateChecker.checkWithFetcher("1.54.6", false, localBuild()) {
             JsonParser.parseString(
-                """[{"tag_name":"v1.55.0","draft":false,"prerelease":false,"assets":[{"name":"MeiloX-1.55.0-42.1.apk","browser_download_url":"https://github.com/NEORUAA/MeiloX/releases/download/v1.55.0/MeiloX-1.55.0-42.1.apk"}]}]""",
+                """[{"tag_name":"v1.55.0","draft":false,"prerelease":false,"assets":[{"name":"MeiloX-1.55.0-42.1.apk","browser_download_url":"https://github.com/MeiloX/MeiloX/releases/download/v1.55.0/MeiloX-1.55.0-42.1.apk"}]}]""",
             )
         } as VersionUpdateResult.UpdateAvailable
 
         assertEquals("v1.55.0", result.latestTag)
         assertEquals(
-            "https://github.com/NEORUAA/MeiloX/releases/download/v1.55.0/MeiloX-1.55.0-42.1.apk",
+            "https://github.com/MeiloX/MeiloX/releases/download/v1.55.0/MeiloX-1.55.0-42.1.apk",
             result.releaseUrl,
         )
     }
@@ -285,13 +285,13 @@ class VersionUpdateCheckerTest {
     fun betaUsesTheRollingPrereleaseApkAsset() = runBlocking {
         val result = VersionUpdateChecker.checkWithFetcher("1.54.6", true, ciBuild(34)) {
             JsonParser.parseString(
-                """{"tag_name":"prerelease","draft":false,"prerelease":true,"target_commitish":"${commitSha(35)}","assets":[{"name":"MeiloX-1.55.0-35.1.apk","browser_download_url":"https://github.com/NEORUAA/MeiloX/releases/download/prerelease/MeiloX-1.55.0-35.1.apk"}]}""",
+                """{"tag_name":"prerelease","draft":false,"prerelease":true,"target_commitish":"${commitSha(35)}","assets":[{"name":"MeiloX-1.55.0-35.1.apk","browser_download_url":"https://github.com/MeiloX/MeiloX/releases/download/prerelease/MeiloX-1.55.0-35.1.apk"}]}""",
             )
         } as VersionUpdateResult.UpdateAvailable
 
         assertEquals("beta #35.1", result.latestTag)
         assertEquals(
-            "https://github.com/NEORUAA/MeiloX/releases/download/prerelease/MeiloX-1.55.0-35.1.apk",
+            "https://github.com/MeiloX/MeiloX/releases/download/prerelease/MeiloX-1.55.0-35.1.apk",
             result.releaseUrl,
         )
         assertTrue(result.isBeta)
@@ -340,7 +340,7 @@ class VersionUpdateCheckerTest {
         assertTrue(result.isBeta)
         assertEquals(3, requests.size)
         assertEquals(
-            "https://api.github.com/repos/NEORUAA/MeiloX/compare/" +
+            "https://api.github.com/repos/MeiloX/MeiloX/compare/" +
                 "${installed.commitSha}...${commitSha(35)}?per_page=1",
             requests.last(),
         )
@@ -374,7 +374,7 @@ class VersionUpdateCheckerTest {
 
         assertFalse(result.comparisonKnown)
         assertEquals("beta #35.1", result.latestTag)
-        assertEquals("https://github.com/NEORUAA/MeiloX/actions/runs/1035#artifacts", result.releaseUrl)
+        assertEquals("https://github.com/MeiloX/MeiloX/actions/runs/1035#artifacts", result.releaseUrl)
     }
 
     @Test
@@ -514,8 +514,8 @@ class VersionUpdateCheckerTest {
         status: String = "completed",
         conclusion: String = "success",
         path: String = ".github/workflows/main.yml",
-        headRepository: String = "NEORUAA/MeiloX",
-        repository: String = "NEORUAA/MeiloX",
+        headRepository: String = "MeiloX/MeiloX",
+        repository: String = "MeiloX/MeiloX",
         event: String = "push",
     ): String = """{
         "id":${1000 + number}, "run_number":$number, "run_attempt":$attempt,
