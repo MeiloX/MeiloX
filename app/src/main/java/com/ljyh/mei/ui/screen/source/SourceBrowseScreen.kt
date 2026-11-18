@@ -1,5 +1,7 @@
 package com.ljyh.mei.ui.screen.source
 
+import com.ljyh.mei.ui.component.item.trackPressViewport
+import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -523,7 +525,8 @@ private fun SourceDiscoverCard(item: SourceItem, featured: Boolean, onClick: () 
             }
         }
     } else Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(ContinuousRoundedRectangle(16.dp))) {
+        val shape = ContinuousRoundedRectangle(16.dp)
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(shape).homeArtworkBorder(shape)) {
             AsyncImage(item.artworkUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             (item as? SourceItem.PlaylistItem)?.playlist?.playCount?.let { count ->
                 Row(Modifier.align(Alignment.TopEnd).padding(6.dp)
@@ -818,10 +821,12 @@ fun SourceLibraryScreen(
             }) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val columns = (maxWidth / 180.dp).toInt().coerceAtLeast(2)
-            LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(
+            LazyColumn(state = listState,
+                modifier = Modifier.fillMaxSize().glasmioHorizontalEdgeToEdge().trackPressViewport(),
+                contentPadding = glasmioHorizontalContentPadding(PaddingValues(
                 start = if (landscape) 32.dp else 16.dp, end = if (landscape) 32.dp else 16.dp,
                 top = contentPadding.calculateTopPadding() + if (landscape) LandscapeSearchTopAdjustment else 0.dp,
-                bottom = contentPadding.calculateBottomPadding()), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                bottom = contentPadding.calculateBottomPadding())), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                 if (!landscape) item("source-library-large-title") { Text(title, style = IosTypography.largeTitle, color = colors.content,
                     modifier = Modifier.offset(y = (-10).dp).padding(vertical = 6.dp).padding(bottom = 12.dp)) }
                 item("source-library-search") { GlasmioSearchBar(query = query, onQueryChange = { query = it }, active = searchActive,
@@ -881,7 +886,7 @@ fun SourceLibraryScreen(
                         is SourceItem.TrackItem -> LandscapeMediaRow(modifier = Modifier.padding(horizontal = if (landscape) 0.dp else 4.dp), landscape = landscape,
                             image = item.artworkUrl, title = item.title, artist = item.track.artists.joinToString(" / ") { it.name },
                             detail = if (landscape) formatDuration(item.track.durationMs) else "", album = item.track.album.title,
-                            isCurrentTrack = item.ref == playingLikedTrack,
+                            isCurrentTrack = item.ref == playingLikedTrack, fullWidthTrackPress = true,
                             favorite = true, showDivider = item.ref != filtered.lastOrNull()?.ref,
                             onClick = { val tracks = filtered.filterIsInstance<SourceItem.TrackItem>().map { it.track }; playVisible(tracks, tracks.indexOf(item.track)) },
                             onMore = { selection = item.track to it })

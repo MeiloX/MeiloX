@@ -1,5 +1,7 @@
 package com.ljyh.mei.ui.screen.artist
 
+import com.ljyh.mei.ui.component.item.trackPressViewport
+import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.component.item.FixedCardCaption
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.onSizeChanged
@@ -23,20 +25,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -167,10 +164,6 @@ internal fun ArtistDetailPageLayout(
                 backgroundColor = background.color,
                 backgroundBrush = background.brush,
             ) { contentPadding ->
-                // The portrait artwork normally ignores the page's toolbar padding.
-                val viewport = if (!landscape) {
-                    Modifier.windowInsetsPadding(WindowInsets.captionBar.only(WindowInsetsSides.Top))
-                } else Modifier
                 if (isArtistUnavailable) {
                     ArtistUnavailableState(
                         onNavigateBack = onBack,
@@ -181,7 +174,8 @@ internal fun ArtistDetailPageLayout(
                                     bottom = contentPadding.calculateBottomPadding(),
                                 ),
                     )
-                } else Box(Modifier.fillMaxSize().then(viewport)) {
+                } else {
+                    // Keep the portrait artwork full bleed, including behind the window caption.
                     val listPadding = PaddingValues(
                         top = if (landscape) contentPadding.calculateTopPadding() else 0.dp,
                         bottom = contentPadding.calculateBottomPadding(),
@@ -211,8 +205,8 @@ internal fun ArtistDetailPageLayout(
                     LazyColumn(
                         state = scrollState,
                         // Keep the vertical list's cross-axis clip at the screen edges too.
-                        modifier = if (landscape) Modifier.fillMaxSize().glasmioHorizontalEdgeToEdge()
-                            else Modifier.fillMaxSize(),
+                        modifier = (if (landscape) Modifier.fillMaxSize().glasmioHorizontalEdgeToEdge()
+                            else Modifier.fillMaxSize()).trackPressViewport(),
                         contentPadding = if (landscape) glasmioHorizontalContentPadding(listPadding) else listPadding,
                     ) {
                         // --- 1. Hero + Info Header ---
@@ -420,7 +414,8 @@ internal fun ArtistDetailHeader(
             ) {
                 Text(
                     text = name,
-                    style = if (landscape) IosTypography.title2.copy(fontSize = 32.sp, lineHeight = 36.sp) else IosTypography.title2,
+                    style = if (landscape) IosTypography.title2.copy(fontSize = 32.sp, lineHeight = 36.sp)
+                    else IosTypography.title2.copy(fontSize = 24.sp),
                     color = colors.content,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
@@ -538,13 +533,15 @@ private fun ArtistActionButton(
 
 @Composable
 internal fun ArtistAlbumCard(title: String, cover: String, trackCount: Int, artworkSize: Dp = 116.dp, onClick: () -> Unit) {
+    val coverShape = ContinuousRoundedRectangle(8.dp)
     Column(modifier = Modifier.width(artworkSize).clickable(interactionSource = null, indication = null, onClick = onClick)) {
         AsyncImage(
             model = cover,
             contentDescription = title,
             modifier =
                 Modifier.size(artworkSize)
-                    .clip(ContinuousRoundedRectangle(8.dp))
+                    .clip(coverShape)
+                    .homeArtworkBorder(coverShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant),
             contentScale = ContentScale.Crop,
         )
@@ -709,7 +706,8 @@ internal fun ArtistFeaturedAlbumLayout(
         horizontalArrangement = Arrangement.spacedBy(if (landscape) 16.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        artwork(Modifier.size(coverSize).clip(ContinuousRoundedRectangle(if (landscape) 8.dp else 10.dp)))
+        val coverShape = ContinuousRoundedRectangle(if (landscape) 8.dp else 10.dp)
+        artwork(Modifier.size(coverSize).clip(coverShape).homeArtworkBorder(coverShape))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (landscape) 4.dp else 0.dp)) {
             information()
             if (landscape) Box(Modifier.padding(top = 4.dp)) { action() }

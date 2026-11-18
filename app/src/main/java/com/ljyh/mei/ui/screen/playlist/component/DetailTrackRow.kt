@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.playlist.component
 
+import com.ljyh.mei.ui.component.item.trackRowPressIndication
 import com.ljyh.mei.ui.component.playlist.songListDividerColor
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -95,17 +96,27 @@ internal fun DetailTrackRow(
             suffixColor = null, favorite = isFavorite, showDivider = false,
             onMore = onMoreClick, navigationArrow = false, footer = null,
             isCurrentTrack = highlightTitle,
+            fullWidthTrackPress = true,
         )
         return
     }
 
+    val rowIndication = trackRowPressIndication()
     val numberWidth = if (showArtwork) 0.dp else albumTrackNumberWidth()
     val numberColumnWidth = maxOf(numberWidth, DetailTrackIndicatorWidth)
     val favoriteOffset = -(DetailPageHorizontalPadding + DetailTrackFavoriteSize) / 2 +
         if (compactRows) 0.dp else 2.dp
     val moreButtonOffset = if (compactRows) -8.dp else 8.dp
     var menuAnchor by remember { mutableStateOf(Rect.Zero) }
-    Box(Modifier.fillMaxWidth()) {
+    Box(
+        Modifier.fillMaxWidth().then(
+            if (selected == null) Modifier.clickable(interactionSource = null, indication = rowIndication, onClick = onClick)
+            else Modifier.selectable(
+                selected = selected, interactionSource = null, indication = rowIndication,
+                role = Role.Checkbox, onClick = onClick,
+            )
+        ),
+    ) {
         if (isFavorite) {
             FavoriteTrackStar(
                 modifier = Modifier.align(Alignment.CenterStart).offset(x = favoriteOffset),
@@ -116,13 +127,6 @@ internal fun DetailTrackRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = if (showArtwork) { 56.dp } else 52.dp)
-                .then(
-                    if (selected == null) Modifier.clickable(interactionSource = null, indication = null, onClick = onClick)
-                    else Modifier.selectable(
-                        selected = selected, interactionSource = null, indication = null,
-                        role = Role.Checkbox, onClick = onClick,
-                    )
-                )
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

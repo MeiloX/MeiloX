@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.playlist
 
+import com.ljyh.mei.ui.component.item.trackPressViewport
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -468,7 +469,7 @@ internal fun SongListDetailPage(
             }
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxHeight().testTag("DetailTrackPane"),
+                modifier = Modifier.weight(1f).fillMaxHeight().testTag("DetailTrackPane").trackPressViewport(),
                 contentPadding = panePadding,
             ) {
                 // Preserve the hero slot so list indices survive orientation changes.

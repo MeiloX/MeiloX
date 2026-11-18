@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.navigation
 
+import com.ljyh.mei.ui.component.item.trackPressViewport
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -378,7 +379,7 @@ fun MeiloXPinnedListPage(
                     modifier = Modifier.fillMaxSize().then(
                         if (parentProvidesEdgeToEdge) Modifier
                         else Modifier.glasmioHorizontalEdgeToEdge(),
-                    ),
+                    ).trackPressViewport(),
                     contentPadding = glasmioHorizontalContentPadding(listPadding),
                     verticalArrangement = verticalArrangement,
                 ) {

@@ -851,7 +851,8 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
                     detail = if (landscape) com.ljyh.mei.utils.TimeUtils.formatDuration(track.durationMs) else "",
                     onClick = { play(tracks, indexed.index) },
                     modifier = Modifier.padding(horizontal = if (landscape) 32.dp else 20.dp),
-                    album = track.album.title, favorite = track.toMediaMetadata().mediaId in favoriteIds, showDivider = indexed != visibleTracks.lastOrNull(),
+                    album = track.album.title, favorite = track.toMediaMetadata().mediaId in favoriteIds,
+                    showDivider = indexed != visibleTracks.lastOrNull(), fullWidthTrackPress = true,
                     onMore = { menu = track to it })
             }
             sourceDetailPagingStatus(state, viewModel::refresh, {

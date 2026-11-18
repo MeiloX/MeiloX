@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.podcast
 
+import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.component.item.FixedCardCaption
 import io.github.neoruaa.glasmio.core.swipeBackExcluded
 import com.ljyh.mei.ui.component.utils.rememberAlertContent
@@ -347,6 +348,7 @@ private fun PodcastRecommendationCard(
     cardSize: Dp,
     onClick: (Podcast) -> Unit,
 ) {
+    val coverShape = ContinuousRoundedRectangle(8.dp)
     Column(
         modifier = Modifier.width(cardSize).clickable { onClick(podcast) },
     ) {
@@ -357,7 +359,7 @@ private fun PodcastRecommendationCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(ContinuousRoundedRectangle(8.dp)),
+                .clip(coverShape).homeArtworkBorder(coverShape),
         )
         val subtitle = podcast.recommendation?.takeIf(String::isNotBlank)
             ?: podcast.host?.nickname?.takeIf(String::isNotBlank)

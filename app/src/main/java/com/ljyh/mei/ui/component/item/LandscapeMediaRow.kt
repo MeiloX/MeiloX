@@ -68,6 +68,7 @@ internal fun LandscapeMediaRow(
     landscape: Boolean = rememberDeviceInfo().isLandscape,
     isCurrentTrack: Boolean = false,
     showPressIndication: Boolean = false,
+    fullWidthTrackPress: Boolean = false,
 ) {
     val colors = LocalGlassColors.current
     var anchor by remember(title, image) { mutableStateOf(Rect.Zero) }
@@ -89,25 +90,28 @@ internal fun LandscapeMediaRow(
             footer = footer,
             isCurrentTrack = isCurrentTrack,
             showPressIndication = showPressIndication,
+            fullWidthTrackPress = fullWidthTrackPress,
         )
         return
     }
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val showAlbum = album != null && maxWidth >= 1000.dp
         Column {
-            Box {
+            Box(Modifier.then(if (onClick != null) Modifier.clickable(
+                interactionSource = null,
+                indication = when {
+                    fullWidthTrackPress -> trackRowPressIndication()
+                    showPressIndication -> LocalIndication.current
+                    else -> null
+                },
+                onClick = onClick,
+            ) else Modifier)) {
                 if (favorite) FavoriteTrackStar(
                     Modifier.align(Alignment.CenterStart).offset(x = (-18).dp),
                     tint = colors.secondaryContent,
                 )
                 Row(
-                    Modifier.fillMaxWidth()
-                        .then(if (onClick != null) Modifier.clickable(
-                            interactionSource = null,
-                            indication = LocalIndication.current.takeIf { showPressIndication },
-                            onClick = onClick,
-                        ) else Modifier)
-                        .padding(vertical = 4.dp),
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -165,24 +169,27 @@ internal fun PortraitMediaRow(
     footer: (@Composable () -> Unit)?,
     isCurrentTrack: Boolean = false,
     showPressIndication: Boolean = false,
+    fullWidthTrackPress: Boolean = false,
 ) {
     val colors = LocalGlassColors.current
     var anchor by remember(title, image) { mutableStateOf(Rect.Zero) }
     Box(modifier.fillMaxWidth()) {
         Column {
-            Box {
+            Box(Modifier.then(if (onClick != null) Modifier.clickable(
+                interactionSource = null,
+                indication = when {
+                    fullWidthTrackPress -> trackRowPressIndication()
+                    showPressIndication -> LocalIndication.current
+                    else -> null
+                },
+                onClick = onClick,
+            ) else Modifier)) {
                 if (favorite) FavoriteTrackStar(
                     Modifier.align(Alignment.CenterStart).offset(x = (-16).dp),
                     tint = colors.secondaryContent,
                 )
                 Row(
-                    Modifier.fillMaxWidth()
-                        .then(if (onClick != null) Modifier.clickable(
-                            interactionSource = null,
-                            indication = LocalIndication.current.takeIf { showPressIndication },
-                            onClick = onClick,
-                        ) else Modifier)
-                        .padding(vertical = 4.dp),
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

@@ -1,5 +1,8 @@
 package com.ljyh.mei.ui.screen.main.library.component
 
+import com.ljyh.mei.ui.component.item.trackPressViewport
+import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalEdgeToEdge
+import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalContentPadding
 import com.ljyh.mei.ui.component.playlist.songListDividerColor
 import io.github.neoruaa.glasmio.scaffold.rememberGlasmioHeaderScrollEdge
 import androidx.compose.ui.geometry.Rect
@@ -363,13 +366,13 @@ fun LibraryMobileLayout(
                 val albumColumns = (maxWidth / 180.dp).toInt().coerceAtLeast(2)
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
+                    modifier = Modifier.fillMaxSize().glasmioHorizontalEdgeToEdge().trackPressViewport(),
+                    contentPadding = glasmioHorizontalContentPadding(PaddingValues(
                         start = if (isLandscape) 32.dp else 16.dp,
                         top = contentPadding.calculateTopPadding() + if (isLandscape) com.ljyh.mei.constants.LandscapeSearchTopAdjustment else 0.dp,
                         end = if (isLandscape) 32.dp else 16.dp,
                         bottom = contentPadding.calculateBottomPadding(),
-                    ),
+                    )),
                     verticalArrangement = if (usesGroupedLazyRows || catalogRows) Arrangement.spacedBy(0.dp) else Arrangement.spacedBy(12.dp),
                 ) {
                     if (!isLandscape) item(key = "ios-large-title:$title") {
@@ -719,6 +722,7 @@ internal fun LibraryLandscapeSongRow(
         onClick = onClick,
         album = song.album.title,
         favorite = true,
+        fullWidthTrackPress = true,
         showDivider = showDivider,
         onMore = onMoreClick,
     )
@@ -740,6 +744,7 @@ private fun LibrarySongRow(
         onClick = onClick,
         album = song.album.title,
         favorite = true,
+        fullWidthTrackPress = true,
         showDivider = showDivider,
         onMore = onMoreClick,
     )

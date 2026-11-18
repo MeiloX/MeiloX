@@ -392,6 +392,7 @@ internal fun DownloadLibraryRow(entry: DownloadLibraryEntry, onPlay: () -> Unit,
             suffix = detail,
             suffixColor = if (task?.status == DownloadStatus.FAILED) colors.destructive else colors.secondaryContent,
             onClick = if (entry.canPlay) onPlay else null,
+            fullWidthTrackPress = true,
             onMore = onMore,
             showDivider = showDivider,
             footer = {

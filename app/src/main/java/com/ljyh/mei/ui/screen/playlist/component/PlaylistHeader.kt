@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.playlist.component
 
+import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -439,6 +440,7 @@ private fun PlaylistCover(
                         ),
                 )
                 .clip(shape)
+                .homeArtworkBorder(shape)
     ) {
         if (isLoading) {
             Box(

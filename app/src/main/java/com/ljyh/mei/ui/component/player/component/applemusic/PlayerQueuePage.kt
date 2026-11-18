@@ -1,5 +1,9 @@
 package com.ljyh.mei.ui.component.player.component.applemusic
 
+import com.ljyh.mei.ui.component.item.trackPressViewport
+import com.ljyh.mei.ui.component.item.trackRowPressIndication
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.Animatable
@@ -1346,7 +1350,7 @@ fun PlayerQueuePage(
                     top = 0.dp,
                     bottom = 0.dp,
                 ),
-                modifier = Modifier.fillMaxSize().graphicsLayer { translationY = topPull.offset }
+                modifier = Modifier.fillMaxSize().graphicsLayer { translationY = topPull.offset }.trackPressViewport()
                     .then(headerAnchor).onGloballyPositioned {
                     // Global placement has completed; a raw correction remeasures before drawing
                     // and preserves the drag/fling owner instead of requesting a new scroll.
@@ -1730,7 +1734,11 @@ internal fun QueueSongRow(
     val coverSize = if (landscapeSongListStyle) songListCoverSize(true) else 46.dp
     val coverCorner = if (landscapeSongListStyle) songListCoverCornerRadius(true) else 5.dp
     val dividerColor = if (landscapeSongListStyle) songListDividerColor() else Color.Transparent
-    Box(modifier) {
+    val rowInteraction = if (interactive) remember(entry.key) { MutableInteractionSource() } else null
+    val press = if (rowInteraction != null) {
+        Modifier.indication(rowInteraction, trackRowPressIndication(tint = Color.White))
+    } else Modifier
+    Box(modifier.then(press)) {
         if (selected) {
             Box(
                 Modifier.matchParentSize().then(normalFade)
@@ -1748,7 +1756,7 @@ internal fun QueueSongRow(
                     .onGloballyPositioned { entryCoordinates = it }
                     .then(if (interactive) Modifier.combinedClickable(
                         enabled = enabled,
-                        interactionSource = null,
+                        interactionSource = rowInteraction,
                         indication = null,
                         onClick = onClick,
                         onLongClick = {

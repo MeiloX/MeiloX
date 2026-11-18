@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.playlist.component
 
+import com.ljyh.mei.ui.component.item.trackPressViewport
 import com.kyant.capsule.ContinuousRoundedRectangle
 import androidx.compose.ui.geometry.Rect
 
@@ -73,7 +74,7 @@ fun PlaylistTrackList(
 
         LazyColumn(
             state = lazyListState,
-            modifier = Modifier.weight(1f), // 占据剩余空间
+            modifier = Modifier.weight(1f).trackPressViewport(),
             contentPadding = contentPadding
         ) {
             if (headerContent != null) {

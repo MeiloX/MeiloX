@@ -66,7 +66,7 @@ fun Track(
     showPressIndication: Boolean = false,
 ) {
     var menuAnchor by remember { mutableStateOf(Rect.Zero) }
-    val indication = LocalIndication.current.takeIf { showPressIndication }
+    val indication = if (showPressIndication) LocalIndication.current else trackRowPressIndication()
     Row(
         modifier = Modifier
             .fillMaxWidth()

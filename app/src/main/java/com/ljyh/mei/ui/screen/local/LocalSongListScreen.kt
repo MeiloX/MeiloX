@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.local
 
+import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.navigation.MeiloXLoadingPage
 import androidx.compose.ui.geometry.Rect
 
@@ -274,10 +275,11 @@ private fun LocalSongListHeader(
     ) {
         Spacer(Modifier.height(24.dp))
 
+        val coverShape = ContinuousRoundedRectangle(16.dp)
         Card(
-            shape = ContinuousRoundedRectangle(16.dp),
+            shape = coverShape,
             elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
-            modifier = Modifier.size(220.dp)
+            modifier = Modifier.size(220.dp).homeArtworkBorder(coverShape)
         ) {
             if (coverList.size >= 5) {
                 FinalPerfectCollage(imageUrls = coverList, modifier = Modifier.fillMaxSize())
