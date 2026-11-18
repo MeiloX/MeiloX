@@ -98,7 +98,11 @@ fun SourcePlatformEffectHost(effects: SourcePlatformEffects) {
     if (page != null) Dialog(
         onDismissRequest = { page?.fail(SourceErrorCode.CANCELLED) },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) { SourceWebEffectHost(effects.web, Modifier.fillMaxSize()) }
+    ) {
+        com.ljyh.mei.ui.navigation.MeiloXStandalonePageScope {
+            SourceWebEffectHost(effects.web, Modifier.fillMaxSize())
+        }
+    }
 }
 
 /** The shared effect keeps the original outgoing-SMS instructions and explicit confirmation. */

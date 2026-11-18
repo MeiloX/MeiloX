@@ -33,8 +33,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.datastore.preferences.core.edit
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.BuildConfig
 import com.ljyh.mei.R
@@ -53,12 +53,6 @@ import com.ljyh.mei.ui.local.LocalPlayerAwareWindowInsets
 import com.ljyh.mei.ui.screen.Screen
 import com.ljyh.mei.ui.component.VersionUpdateAlert
 import com.ljyh.mei.utils.rememberPreference
-import com.ljyh.mei.utils.dataStore
-import com.ljyh.mei.utils.VersionUpdateChecker
-import com.ljyh.mei.utils.VersionUpdateResult
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 @Composable
@@ -69,48 +63,9 @@ fun AboutScreen(viewModel: AboutViewModel = hiltViewModel()) {
     val (devMode, onDevModeChange) = rememberPreference(DevModeKey, false)
     val betaUpdatesEnabled by rememberPreference(BetaUpdatesEnabledKey, false)
     var clickCount by remember { mutableIntStateOf(0) }
-    val updateCheckScope = rememberCoroutineScope()
-    var isCheckingUpdate by remember { mutableStateOf(false) }
-    var isSavingBetaPreference by remember { mutableStateOf(false) }
-    var updateResult by remember { mutableStateOf<VersionUpdateResult?>(null) }
-
-    fun setBetaUpdatesEnabled(enabled: Boolean) {
-        if (isCheckingUpdate || isSavingBetaPreference) return
-        isSavingBetaPreference = true
-        updateCheckScope.launch {
-            try {
-                context.dataStore.edit { preferences ->
-                    preferences[BetaUpdatesEnabledKey] = enabled
-                }
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                updateResult = VersionUpdateResult.Failed
-            } finally {
-                isSavingBetaPreference = false
-            }
-        }
-    }
-
-    fun checkForUpdates() {
-        if (isCheckingUpdate || isSavingBetaPreference) return
-        isCheckingUpdate = true
-        updateCheckScope.launch {
-            try {
-                val checkBetaUpdates = context.dataStore.data.first()[BetaUpdatesEnabledKey] ?: false
-                updateResult = VersionUpdateChecker.check(
-                    BuildConfig.VERSION_NAME,
-                    betaUpdatesEnabled = checkBetaUpdates,
-                )
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                updateResult = VersionUpdateResult.Failed
-            } finally {
-                isCheckingUpdate = false
-            }
-        }
-    }
+    val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsStateWithLifecycle()
+    val isSavingBetaPreference by viewModel.isSavingBetaPreference.collectAsStateWithLifecycle()
+    val updateResult by viewModel.updateResult.collectAsStateWithLifecycle()
 
     MeiloXPinnedListPage(
         title = stringResource(R.string.settings_about),
@@ -160,17 +115,16 @@ fun AboutScreen(viewModel: AboutViewModel = hiltViewModel()) {
                     } else {
                         stringResource(R.string.about_check_updates)
                     },
-//                    stringResource(R.string.about_check_updates_description),
-                ) { checkForUpdates() }
+                ) { viewModel.checkForUpdates() }
                 GlasmioListRow(
                     title = stringResource(R.string.about_check_beta_updates),
                     systemName = "moon",
                     enabled = !isCheckingUpdate && !isSavingBetaPreference,
-                    onClick = { setBetaUpdatesEnabled(!betaUpdatesEnabled) },
+                    onClick = { viewModel.setBetaUpdatesEnabled(!betaUpdatesEnabled) },
                     trailing = {
                         MeiloXSwitch(
                             checked = betaUpdatesEnabled,
-                            onCheckedChange = ::setBetaUpdatesEnabled,
+                            onCheckedChange = viewModel::setBetaUpdatesEnabled,
                             enabled = !isCheckingUpdate && !isSavingBetaPreference,
                         )
                     },
@@ -212,7 +166,7 @@ fun AboutScreen(viewModel: AboutViewModel = hiltViewModel()) {
 
     VersionUpdateAlert(
         result = updateResult,
-        onDismiss = { updateResult = null },
+        onDismiss = viewModel::dismissUpdateResult,
     )
 }
 

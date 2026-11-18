@@ -85,6 +85,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -102,6 +103,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -378,7 +380,6 @@ class MainActivity : ComponentActivity() {
             val backStack = rememberNavBackStack(MeiRoute(Screen.Home.route))
             val pageHeaders = remember { MeiloXPageHeaders() }
             val adaptiveNavigation = rememberGlasmioAdaptiveNavigationState()
-            var sidebarQuery by rememberSaveable { mutableStateOf("") }
             var sidebarLibraryExpanded by rememberSaveable { mutableStateOf(true) }
             val navController = remember(backStack) {
                 MeiNavigator(context = context, backStack = backStack)
@@ -1023,11 +1024,14 @@ class MainActivity : ComponentActivity() {
                         currentRoute == "${Screen.LibraryCategory.route}/${it.name}"
                     }
                     val selectNavigationItem: (Index) -> Unit = { screen ->
+                        focusManager.clearFocus()
                         setLastSelectedTab(screen.name)
                         if (currentRoute == screen.route) {
                             navController.currentBackStackEntry?.savedStateHandle?.set("scrollToTop", true)
                         } else navController.navigateTopLevel(screen.route)
                     }
+                    val searchToolbarVisible = active && !(isLandscape && adaptiveNavigation.sidebarExpanded)
+                    val landscapeTopSearchOverlay = isLandscape && searchToolbarVisible
                     CompositionLocalProvider(
                         com.ljyh.mei.ui.local.LocalSelectionToolbar provides selectionToolbar,
                         LocalDatabase provides database,
@@ -1058,20 +1062,33 @@ class MainActivity : ComponentActivity() {
                                     },
                                 )
                                 GlasmioSidebarSearchField(
-                                    query = sidebarQuery,
-                                    onQueryChange = { sidebarQuery = it },
+                                    query = query.text,
+                                    onQueryChange = { next ->
+                                        onQueryChange(TextFieldValue(next, TextRange(next.length)))
+                                        if (navController.currentRoute != Screen.Search.route) {
+                                            navController.navigate(Screen.Search.route)
+                                        }
+                                    },
                                     onSearch = {
-                                        onSearch(sidebarQuery)
-                                        adaptiveNavigation.sidebarExpanded = false
+                                        if (query.text.isNotEmpty()) {
+                                            onSearch(query.text)
+                                        } else if (navController.currentRoute != Screen.Search.route) {
+                                            navController.navigate(Screen.Search.route)
+                                        }
                                     },
                                     placeholder = stringResource(R.string.search_bar_search),
+                                    modifier = Modifier.onFocusChanged { focusState ->
+                                        if (focusState.isFocused && navController.currentRoute != Screen.Search.route) {
+                                            navController.navigate(Screen.Search.route)
+                                        }
+                                    },
                                 )
                                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                                     navigationItems.forEach { item ->
                                         GlasmioSidebarRow(
                                             title = stringResource(item.labelRes),
                                             symbol = item.symbol,
-                                            selected = selectedLibraryPage == null && item == selectedNavigationItem,
+                                            selected = selectedLibraryPage == null && !active && item == selectedNavigationItem,
                                             onClick = { selectNavigationItem(item) },
                                         )
                                     }
@@ -1086,6 +1103,7 @@ class MainActivity : ComponentActivity() {
                                             symbol = page.symbol,
                                             selected = page == selectedLibraryPage,
                                             onClick = {
+                                                focusManager.clearFocus()
                                                 if (page != selectedLibraryPage) {
                                                     if (Index.Library in navigationItems) {
                                                         setLastSelectedTab(Index.Library.name)
@@ -1288,7 +1306,7 @@ class MainActivity : ComponentActivity() {
                                                 }
                                                 CompositionLocalProvider(
                                                     com.ljyh.mei.ui.navigation.LocalMeiloXSearchTopPadding provides
-                                                        if (isLandscape && meiRoute.route == Screen.Search.route) 56.dp + com.ljyh.mei.constants.LandscapeSearchTopAdjustment else 0.dp,
+                                                        if (landscapeTopSearchOverlay && meiRoute.route == Screen.Search.route) 56.dp + com.ljyh.mei.constants.LandscapeSearchTopAdjustment else 0.dp,
                                                     LocalPlayerAwareWindowInsets provides
                                                         if (meiRoute.route == Screen.Search.route) entryPlayerAwareWindowInsets.union(imeInsets)
                                                         else entryPlayerAwareWindowInsets,
@@ -1461,7 +1479,7 @@ class MainActivity : ComponentActivity() {
                                                             .fillMaxSize()
                                                             .glasmioAdaptiveContent()
                                                             .windowInsetsPadding(WindowInsets.glasmioSafeDrawing.only(WindowInsetsSides.Horizontal))
-                                                            .padding(top = windowsInsets.asPaddingValues().calculateTopPadding() + if (isLandscape) com.ljyh.mei.constants.LandscapeSearchTopPadding + 56.dp else 0.dp)
+                                                            .padding(top = windowsInsets.asPaddingValues().calculateTopPadding() + if (landscapeTopSearchOverlay) com.ljyh.mei.constants.LandscapeSearchTopPadding + 56.dp else 0.dp)
                                                             .padding(searchResultsBottomPadding),
                                                     )
                                                 }
@@ -1471,7 +1489,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         AnimatedVisibility(
-                            visible = active,
+                            visible = searchToolbarVisible,
                             enter = fadeIn(),
                             exit = fadeOut(),
                             modifier = Modifier.align(if (isLandscape) Alignment.TopCenter else Alignment.BottomCenter),

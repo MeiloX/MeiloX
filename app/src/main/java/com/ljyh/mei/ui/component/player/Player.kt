@@ -85,17 +85,17 @@ fun BottomSheetPlayer(
     // The expanded cover is intentionally rendered above the player content. Record it in a
     // separate source so sheets can sample it without changing that visual z-order.
     val playerCoverBackdrop = rememberLayerBackdrop()
+    val progressUpdatesEnabled by remember(state) { derivedStateOf { state.isContentVisible } }
     val playerBackdrop = rememberCombinedBackdrop(
-        rememberRasterizedBackdrop(playerBackgroundBackdrop),
-        rememberRasterizedBackdrop(playerContentBackdrop),
-        rememberRasterizedBackdrop(playerCoverBackdrop),
+        rememberRasterizedBackdrop(playerBackgroundBackdrop, enabled = progressUpdatesEnabled),
+        rememberRasterizedBackdrop(playerContentBackdrop, enabled = progressUpdatesEnabled),
+        rememberRasterizedBackdrop(playerCoverBackdrop, enabled = progressUpdatesEnabled),
     )
 
     // 获取播放器样式
     val playerStyle by rememberEnumPreference(PlayerStyleKey, defaultValue = PlayerStyle.AppleMusic)
 
     // 创建公共状态容器
-    val progressUpdatesEnabled by remember(state) { derivedStateOf { state.isContentVisible } }
     val stateContainer = rememberPlayerStateContainer(
         playerViewModel = playerViewModel,
         playerConnection = playerConnection,

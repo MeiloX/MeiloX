@@ -334,9 +334,9 @@ internal fun PlayerLyricsView(
                             }
                         }
 
-                        val dynamicStiffness by remember(distanceWeightState.value) {
+                        val dynamicStiffness by remember(distanceWeightState) {
                             derivedStateOf {
-                                (120f - (distanceWeightState.value * 20f)).coerceAtLeast(20f)
+                                (240f - (distanceWeightState.value * 26f)).coerceAtLeast(65f)
                             }
                         }
 

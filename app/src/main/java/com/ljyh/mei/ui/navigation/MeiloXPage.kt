@@ -56,6 +56,17 @@ internal class MeiloXPageHeaders {
 internal val LocalMeiloXSearchTopPadding = compositionLocalOf { 0.dp }
 private val LocalMeiloXPageHeader = staticCompositionLocalOf<MeiloXPageHeader?> { null }
 
+/** Detach full-screen dialog pages from the underlying route's navigation header and sidebar state. */
+@Composable
+fun MeiloXStandalonePageScope(content: @Composable () -> Unit) {
+    CompositionLocalProvider(
+        LocalMeiloXPageHeader provides null,
+        LocalMeiloXSearchTopPadding provides 0.dp,
+        LocalGlasmioSidebarExpanded provides false,
+        content = content,
+    )
+}
+
 @Composable
 internal fun registerMeiloXNavigationViewport(listState: LazyListState) {
     val viewport = remember(listState) {
@@ -197,7 +208,7 @@ fun MeiloXPinnedPage(
         ) { SfIcon(SfSymbol.ChevronBack, null, mirrored = true) })))
     }.orEmpty()
     val isLandscape = rememberDeviceInfo().isLandscape
-    val hidesHeading = isLandscape && !LocalGlasmioSidebarExpanded.current
+    val hidesHeading = header != null && isLandscape && !LocalGlasmioSidebarExpanded.current
     val trailingActions = actions()
     val locatorHost = LocalPlaylistLocateHost.current
     val locatorRegistration = locatorHost?.registrationFor(LocalPlaylistLocateOwner.current)

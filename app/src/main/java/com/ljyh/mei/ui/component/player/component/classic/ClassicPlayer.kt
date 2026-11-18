@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -63,7 +64,8 @@ fun ClassicPlayer(
 ) {
 
     val device = rememberDeviceInfo()
-    val queueBackdrop = rememberRasterizedBackdrop(playerBackgroundBackdrop)
+    val playerVisible by remember(state) { derivedStateOf { state.isContentVisible } }
+    val queueBackdrop = rememberRasterizedBackdrop(playerBackgroundBackdrop, enabled = playerVisible)
 
     val playerStyle by rememberEnumPreference(PlayerStyleKey, PlayerStyle.AppleMusic)
     val sheetLayers = LocalPlayerSheet.current
