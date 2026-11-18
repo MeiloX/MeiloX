@@ -1,6 +1,7 @@
 package com.ljyh.mei.ui.component.item
 
 import com.ljyh.mei.ui.component.playlist.songListDividerColor
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import io.github.neoruaa.glasmio.icons.SfIcon
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +55,7 @@ import com.ljyh.mei.constants.HomeSongCoverSize
 import com.ljyh.mei.constants.HomeSongRowSpacing
 import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.component.playlist.PlayingImageView
+import com.ljyh.mei.ui.component.playlist.TrackPlaybackWave
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalContentPadding
 import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalEdgeToEdge
@@ -120,8 +123,12 @@ internal fun HomeSongListRow(
     onMore: (Rect) -> Unit,
     moreModifier: Modifier = Modifier,
     coverSize: Dp = songListCoverSize(rememberDeviceInfo().isLandscape),
+    isPlaying: Boolean = false,
 ) {
     var anchor by remember(coverUrl, title) { mutableStateOf(Rect.Zero) }
+    val landscape = rememberDeviceInfo().isLandscape
+    val shape = ContinuousRoundedRectangle(songListCoverCornerRadius(landscape))
+    val moreLabel = stringResource(R.string.more_actions_title)
     val configuration = LocalViewConfiguration.current
     val actionConfiguration =
         remember(configuration) {
@@ -131,25 +138,28 @@ internal fun HomeSongListRow(
         }
     Row(
         Modifier.fillMaxWidth()
-            .clip(ContinuousRoundedRectangle(songListCoverCornerRadius(rememberDeviceInfo().isLandscape)))
+            .clip(shape)
             .clickable(onClick = onClick),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PlayingImageView(
-            imageUrl = coverUrl,
-            isPlaying = false,
-            modifier =
-                Modifier.size(coverSize)
-                    .clip(ContinuousRoundedRectangle(songListCoverCornerRadius(rememberDeviceInfo().isLandscape)))
-                    .homeArtworkBorder(ContinuousRoundedRectangle(songListCoverCornerRadius(rememberDeviceInfo().isLandscape))),
-        )
+        Box(Modifier.size(coverSize).clip(shape).homeArtworkBorder(shape)) {
+            PlayingImageView(imageUrl = coverUrl, isPlaying = false, modifier = Modifier.matchParentSize())
+            if (isPlaying) {
+                Box(
+                    Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    TrackPlaybackWave(Color.White)
+                }
+            }
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 title,
                 color = MaterialTheme.colorScheme.onSurface,
-                fontSize = if (rememberDeviceInfo().isLandscape) 16.sp else 14.sp,
-                lineHeight = if (rememberDeviceInfo().isLandscape) androidx.compose.ui.unit.TextUnit.Unspecified else 19.sp,
+                fontSize = if (landscape) 16.sp else 14.sp,
+                lineHeight = if (landscape) androidx.compose.ui.unit.TextUnit.Unspecified else 19.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 fontWeight = FontWeight.Normal,
@@ -157,8 +167,8 @@ internal fun HomeSongListRow(
             Text(
                 subtitle,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = if (rememberDeviceInfo().isLandscape) 13.sp else 12.sp,
-                lineHeight = if (rememberDeviceInfo().isLandscape) androidx.compose.ui.unit.TextUnit.Unspecified else 17.sp,
+                fontSize = if (landscape) 13.sp else 12.sp,
+                lineHeight = if (landscape) androidx.compose.ui.unit.TextUnit.Unspecified else 17.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

@@ -56,7 +56,7 @@ import com.ljyh.mei.constants.songListCoverSize
 import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.data.model.supportsNeteaseSongActions
 import com.ljyh.mei.ui.component.playlist.PlayingImageView
-import com.ljyh.mei.ui.component.playlist.AnimatedSoundWave
+import com.ljyh.mei.ui.component.playlist.TrackPlaybackWave
 import com.ljyh.mei.ui.component.playlist.FavoriteTrackStar
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.icons.SfIcon
@@ -152,13 +152,7 @@ internal fun DetailTrackRow(
                             contentAlignment = Alignment.Center,
                         ) {
                             if (isPlaying) {
-                                AnimatedSoundWave(
-                                    modifier = Modifier.size(width = DetailTrackIndicatorWidth, height = 12.dp),
-                                    barCount = 5,
-                                    barColor = colors.secondaryContent,
-                                    barWidth = 2.dp,
-                                    barSpacing = 2.dp,
-                                )
+                                TrackPlaybackWave(colors.secondaryContent)
                             } else {
                                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                     repeat(5) {

@@ -331,7 +331,8 @@ fun SourceFeedScreen(
                                 item(key = "source-feed:${state.providerId}:${section.id}") {
                                     SourceFeedSectionContent(if (index == 0 && section.layout == SourceFeedLayout.HERO) section.copy(title = getGreeting()) else section,
                                         onOpen = { navigateSourceContent(nav, it) }, onPlay = play,
-                                        onMore = { track, anchor -> selection = track to anchor }, onAction = ::openCard, loadingCard = loadingCard)
+                                        onMore = { track, anchor -> selection = track to anchor }, onAction = ::openCard,
+                                        loadingCard = loadingCard, homeTrackRows = kind == FeedKind.HOME)
                                 }
                             }
                             sourceBrowseStatus(state, state.sections.sumOf { if (it.cards.isNotEmpty()) it.cards.size else it.items.size },
@@ -358,6 +359,7 @@ internal fun SourceFeedSectionContent(
     onMore: (Track, Rect) -> Unit,
     onAction: (SourceFeedCard) -> Unit = {},
     loadingCard: String? = null,
+    homeTrackRows: Boolean = false,
 ) {
     val landscape = rememberDeviceInfo().isLandscape
     val spacing = homeCardSpacing(landscape)
@@ -398,6 +400,10 @@ internal fun SourceFeedSectionContent(
             }
         } else if (section.layout == SourceFeedLayout.TRACKS && tracks.isNotEmpty()) {
             val favoriteIds = rememberFavoriteTrackIds(remember(tracks) { tracks.map { it.toMediaMetadata() } })
+            val player = if (homeTrackRows) LocalPlayerConnection.current else null
+            val playingTrack = if (player?.isPlaying?.collectAsState()?.value == true) {
+                player.mediaMetadata.collectAsState().value?.trackRef
+            } else null
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val requestedWidth = homePlaylistCardSize(landscape) * 2 + spacing
                 val columnWidth = if (landscape) minOf(requestedWidth,
@@ -421,6 +427,7 @@ internal fun SourceFeedSectionContent(
                             subtitle = track.artists.joinToString(" / ") { it.name },
                             coverSize = songListCoverSize(landscape),
                             onClick = { onPlay(tracks, index) },
+                            isPlaying = playingTrack == track.ref,
                             moreModifier = Modifier.testTag("HomeSongMore:${track.ref.trackId}"),
                             onMore = { onMore(track, it) },
                         )
