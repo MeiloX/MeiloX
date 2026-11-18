@@ -550,6 +550,7 @@ fun LibraryMobileLayout(
                                     onClick = { onPlaylistClick(playlist.id) },
                                     showDivider = playlist.id != visiblePlaylists.lastOrNull()?.id,
                                     navigationArrow = true,
+                                    showPressIndication = true,
                                 ) else LibraryPlaylistRow(playlist, playlist.id != visiblePlaylists.lastOrNull()?.id) { onPlaylistClick(playlist.id) }
                             }
                             if (playlistState.isLoading || playlistState.isLoadingMore || playlistState.error != null || playlistState.hasMore) {
@@ -754,6 +755,7 @@ private fun LibraryPlaylistRow(playlist: Playlist, showDivider: Boolean, onClick
         detail = stringResource(R.string.playlist_song_count, playlist.count),
         onClick = onClick,
         navigationArrow = true,
+        showPressIndication = true,
         showDivider = showDivider,
     )
 }

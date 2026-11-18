@@ -1377,7 +1377,6 @@ fun PlayerQueuePage(
                             showDivider = index < historyEntries.lastIndex,
                             modifier = (if (rowsTransition == null) Modifier.animateItem() else Modifier).then(liveRows),
                             enabled = rowsTransition == null,
-                            indication = indication,
                             normalFade = normalFade,
                             additiveFade = additiveFade,
                             onClick = { selectEntry(entry.key) },
@@ -1457,7 +1456,6 @@ fun PlayerQueuePage(
                                 showDivider = startIndex + index < endIndex - 1,
                                 modifier = liveRows,
                                 enabled = rowsTransition == null,
-                                indication = indication,
                                 normalFade = normalFade,
                                 additiveFade = additiveFade,
                                 onClick = { selectEntry(entry.key) },
@@ -1533,7 +1531,6 @@ fun PlayerQueuePage(
                                 },
                                 modifier = rowModifier,
                                 interactive = false,
-                                indication = indication,
                                 normalFade = normalFade,
                                 additiveFade = additiveFade,
                                 onClick = { playerConnection.service.queueManager.seekToQueueEntry(entry.key) },
@@ -1712,7 +1709,6 @@ private fun PlayerQueueScrollbar(
 @Composable
 internal fun QueueSongRow(
     entry: PhoneQueueEntry,
-    indication: Indication?,
     normalFade: Modifier,
     additiveFade: Modifier,
     onClick: () -> Unit,
@@ -1753,7 +1749,7 @@ internal fun QueueSongRow(
                     .then(if (interactive) Modifier.combinedClickable(
                         enabled = enabled,
                         interactionSource = null,
-                        indication = indication,
+                        indication = null,
                         onClick = onClick,
                         onLongClick = {
                             entryCoordinates?.takeIf { it.isAttached }?.boundsInWindow()?.let(onLongClick)

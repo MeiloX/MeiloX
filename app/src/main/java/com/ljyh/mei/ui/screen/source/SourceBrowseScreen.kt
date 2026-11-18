@@ -887,7 +887,8 @@ fun SourceLibraryScreen(
                             onMore = { selection = item.track to it })
                         is SourceItem.PlaylistItem -> LandscapeMediaRow(modifier = Modifier.padding(horizontal = if (landscape) 0.dp else 4.dp), image = item.artworkUrl,
                             title = item.title, artist = item.playlist.creatorName, detail = stringResource(R.string.playlist_song_count, item.playlist.trackCount),
-                            onClick = { navigateSourceContent(nav, item.ref) }, navigationArrow = true, showDivider = item.ref != filtered.lastOrNull()?.ref)
+                            onClick = { navigateSourceContent(nav, item.ref) }, navigationArrow = true,
+                            showPressIndication = true, showDivider = item.ref != filtered.lastOrNull()?.ref)
                         else -> Unit
                     }
                 }

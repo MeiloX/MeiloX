@@ -117,8 +117,11 @@ internal fun DetailTrackRow(
                 .fillMaxWidth()
                 .heightIn(min = if (showArtwork) { 56.dp } else 52.dp)
                 .then(
-                    if (selected == null) Modifier.clickable(onClick = onClick)
-                    else Modifier.selectable(selected = selected, role = Role.Checkbox, onClick = onClick)
+                    if (selected == null) Modifier.clickable(interactionSource = null, indication = null, onClick = onClick)
+                    else Modifier.selectable(
+                        selected = selected, interactionSource = null, indication = null,
+                        role = Role.Checkbox, onClick = onClick,
+                    )
                 )
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -222,6 +225,7 @@ internal fun DetailTrackRow(
                             .onGloballyPositioned { menuAnchor = it.boundsInWindow() }
                             .clip(CircleShape)
                             .clickable(
+                                interactionSource = null, indication = null,
                                 role = Role.Button,
                                 onClickLabel = stringResource(R.string.more_actions_title),
                                 onClick = { onMore(menuAnchor) },

@@ -16,9 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +30,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import com.ljyh.mei.R
 import io.github.neoruaa.glasmio.icons.SfIcon
 import androidx.compose.ui.Alignment
@@ -139,7 +138,7 @@ internal fun HomeSongListRow(
     Row(
         Modifier.fillMaxWidth()
             .clip(shape)
-            .clickable(onClick = onClick),
+            .clickable(interactionSource = null, indication = null, onClick = onClick),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -173,17 +172,18 @@ internal fun HomeSongListRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        CompositionLocalProvider(
-            LocalMinimumInteractiveComponentSize provides HomeSongActionSize,
-            LocalViewConfiguration provides actionConfiguration,
-        ) {
-            IconButton(
-                onClick = { onMore(anchor) },
+        CompositionLocalProvider(LocalViewConfiguration provides actionConfiguration) {
+            Box(
                 modifier = moreModifier.size(HomeSongActionSize).offset(x = (-6).dp)
-                    .onGloballyPositioned { anchor = it.boundsInWindow() },
+                    .onGloballyPositioned { anchor = it.boundsInWindow() }
+                    .clip(ContinuousRoundedRectangle(HomeSongActionSize / 2))
+                    .clickable(
+                        interactionSource = null, indication = null, role = Role.Button,
+                        onClick = { onMore(anchor) },
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                SfIcon("ellipsis", stringResource(R.string.more_actions_title), size = 18.dp,
-                    tint = LocalGlassColors.current.secondaryContent)
+                SfIcon("ellipsis", moreLabel, size = 18.dp, tint = LocalGlassColors.current.secondaryContent)
             }
         }
     }

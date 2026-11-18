@@ -529,7 +529,7 @@ private fun ArtistActionButton(
 
 @Composable
 internal fun ArtistAlbumCard(title: String, cover: String, trackCount: Int, artworkSize: Dp = 116.dp, onClick: () -> Unit) {
-    Column(modifier = Modifier.width(artworkSize).clickable { onClick() }) {
+    Column(modifier = Modifier.width(artworkSize).clickable(interactionSource = null, indication = null, onClick = onClick)) {
         AsyncImage(
             model = cover,
             contentDescription = title,
@@ -695,7 +695,7 @@ internal fun ArtistFeaturedAlbumLayout(
             .then(if (landscape) Modifier else Modifier.clip(shape)
                 .background(colors.content.copy(alpha = 0.10f))
                 .border(ArtistCardStrokeWidth, ArtistCardStrokeColor, shape))
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(interactionSource = null, indication = null, onClick = onClick) else Modifier)
             .then(if (landscape) Modifier else Modifier.padding(12.dp)),
         horizontalArrangement = Arrangement.spacedBy(if (landscape) 16.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,

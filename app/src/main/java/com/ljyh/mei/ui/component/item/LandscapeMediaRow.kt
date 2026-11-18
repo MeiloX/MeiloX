@@ -1,6 +1,7 @@
 package com.ljyh.mei.ui.component.item
 
 import com.ljyh.mei.ui.component.playlist.songListDividerColor
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,6 +67,7 @@ internal fun LandscapeMediaRow(
     footer: (@Composable () -> Unit)? = null,
     landscape: Boolean = rememberDeviceInfo().isLandscape,
     isCurrentTrack: Boolean = false,
+    showPressIndication: Boolean = false,
 ) {
     val colors = LocalGlassColors.current
     var anchor by remember(title, image) { mutableStateOf(Rect.Zero) }
@@ -86,6 +88,7 @@ internal fun LandscapeMediaRow(
             navigationArrow = navigationArrow,
             footer = footer,
             isCurrentTrack = isCurrentTrack,
+            showPressIndication = showPressIndication,
         )
         return
     }
@@ -99,7 +102,11 @@ internal fun LandscapeMediaRow(
                 )
                 Row(
                     Modifier.fillMaxWidth()
-                        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                        .then(if (onClick != null) Modifier.clickable(
+                            interactionSource = null,
+                            indication = LocalIndication.current.takeIf { showPressIndication },
+                            onClick = onClick,
+                        ) else Modifier)
                         .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -157,6 +164,7 @@ internal fun PortraitMediaRow(
     navigationArrow: Boolean,
     footer: (@Composable () -> Unit)?,
     isCurrentTrack: Boolean = false,
+    showPressIndication: Boolean = false,
 ) {
     val colors = LocalGlassColors.current
     var anchor by remember(title, image) { mutableStateOf(Rect.Zero) }
@@ -169,7 +177,11 @@ internal fun PortraitMediaRow(
                 )
                 Row(
                     Modifier.fillMaxWidth()
-                        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                        .then(if (onClick != null) Modifier.clickable(
+                            interactionSource = null,
+                            indication = LocalIndication.current.takeIf { showPressIndication },
+                            onClick = onClick,
+                        ) else Modifier)
                         .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,

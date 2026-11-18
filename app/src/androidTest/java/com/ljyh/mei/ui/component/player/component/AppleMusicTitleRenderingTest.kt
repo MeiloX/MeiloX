@@ -1646,14 +1646,14 @@ class AppleMusicTitleRenderingTest {
                         }
                         items(12) { index ->
                             QueueSongRow(
-                                PhoneQueueEntry(index.toString(), MediaItem.EMPTY, index), null, Modifier, Modifier,
+                                PhoneQueueEntry(index.toString(), MediaItem.EMPTY, index), Modifier, Modifier,
                                 onClick = {}, onLongClick = {}, enabled = false,
                             )
                         }
                     }
                     Box(Modifier.matchParentSize()) {
                         QueueSongRow(
-                            PhoneQueueEntry("drawing_copy", MediaItem.EMPTY, 0), null, Modifier, Modifier,
+                            PhoneQueueEntry("drawing_copy", MediaItem.EMPTY, 0), Modifier, Modifier,
                             onClick = { copiedRowClicks++ }, onLongClick = {}, interactive = false,
                             modifier = Modifier.fillMaxWidth().graphicsLayer {
                                 val placement = queueRowPlacement(QueueRowPlacement(104.dp.toPx()), QueueRowPlacement(160.dp.toPx()), progress.value)

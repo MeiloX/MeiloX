@@ -753,7 +753,10 @@ private fun SourceArtistFeaturedAlbum(
         information = {
             ArtistFeaturedAlbumInformation(album.title, album.trackCount, releaseDate, landscape)
         }, action = {
-            if (canSave) Box(Modifier.size(44.dp).clickable(enabled = !busy && !loading, role = androidx.compose.ui.semantics.Role.Button) {
+            if (canSave) Box(Modifier.size(44.dp).clickable(
+                interactionSource = null, indication = null, enabled = !busy && !loading,
+                role = androidx.compose.ui.semantics.Role.Button,
+            ) {
                 when {
                     saved != null -> viewModel.setSaved(album.ref, saved != true)
                     error == SourceErrorCode.AUTH_REQUIRED || error == SourceErrorCode.AUTH_EXPIRED ->
