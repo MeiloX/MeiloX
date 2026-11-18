@@ -29,6 +29,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Semaphore
@@ -54,6 +56,24 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
     val supported: Boolean get() = QuickJsSandbox.isSupported()
     internal val concurrentExecutionSupported: Boolean get() = true
     internal val independentIsolateTerminationSupported: Boolean get() = true
+    private val keepWarmState = MutableStateFlow(false)
+
+    init {
+        sandboxScope.launch {
+            keepWarmState.collectLatest { active ->
+                sandboxes.setKeepWarm(
+                    enabled = active,
+                    create = if (supported) ({ QuickJsSandbox.createConnectedInstanceAsync(context.applicationContext) }) else null,
+                    isClosed = { it.isClosed },
+                )
+            }
+        }
+    }
+
+    /** Retains the isolated engine binding across active playback so background track preloads need not cold-bind. */
+    fun setPlaybackKeepWarm(active: Boolean) {
+        keepWarmState.value = active
+    }
 
     suspend fun invoke(
         script: String,
@@ -473,6 +493,43 @@ internal class ScriptSandboxPool<T : AutoCloseable>(
     private val lifecycle = Mutex()
     private var current: Entry<T>? = null
     private var pending: Opening<T>? = null
+    private var keepWarm = false
+
+    suspend fun setKeepWarm(
+        enabled: Boolean,
+        create: (() -> ListenableFuture<T>)? = null,
+        isClosed: ((T) -> Boolean)? = null,
+    ) {
+        var shouldPrewarm = false
+        lifecycle.withLock {
+            keepWarm = enabled
+            val entry = current
+            if (enabled) {
+                entry?.idle?.cancel()
+                if (entry != null) entry.idle = null
+                if ((entry == null || entry.retired.isCompleted || (isClosed != null && isClosed(entry.connection.value))) &&
+                    pending == null && create != null
+                ) {
+                    shouldPrewarm = true
+                }
+            } else if (entry != null && entry.references == 0 && !entry.retired.isCompleted && entry.idle == null) {
+                scheduleIdleRetirement(entry)
+            }
+        }
+        if (shouldPrewarm && create != null) {
+            try {
+                val lease = acquire(create)
+                withContext(NonCancellable) {
+                    if (isClosed?.invoke(lease.value) == true) invalidate(lease)
+                    release(lease)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Normal invocation retries handle transient connection errors when needed.
+            }
+        }
+    }
 
     private class Opening<T : AutoCloseable> {
         val ready = CompletableDeferred<Entry<T>>()
@@ -548,21 +605,26 @@ internal class ScriptSandboxPool<T : AutoCloseable>(
         val entry = lease.entry
         check(entry.references > 0)
         entry.references--
-        if (entry.references == 0 && current === entry && !entry.retired.isCompleted) {
-            entry.idle = scope.launch {
-                try {
-                    delay(idleTimeoutMs)
-                    lifecycle.withLock {
-                        if (current === entry && entry.references == 0) {
-                            current = null
-                            entry.retired.complete(Unit)
-                            entry.connection.close()
-                        }
+        if (entry.references == 0 && current === entry && !entry.retired.isCompleted && !keepWarm) {
+            scheduleIdleRetirement(entry)
+        }
+    }
+
+    private fun scheduleIdleRetirement(entry: Entry<T>) {
+        entry.idle?.cancel()
+        entry.idle = scope.launch {
+            try {
+                delay(idleTimeoutMs)
+                lifecycle.withLock {
+                    if (!keepWarm && current === entry && entry.references == 0) {
+                        current = null
+                        entry.retired.complete(Unit)
+                        entry.connection.close()
                     }
-                } catch (cancelled: CancellationException) { throw cancelled
-                } catch (_: Throwable) {
-                    // ScriptConnectionGate keeps a failed retirement closed to new bindings.
                 }
+            } catch (cancelled: CancellationException) { throw cancelled
+            } catch (_: Throwable) {
+                // ScriptConnectionGate keeps a failed retirement closed to new bindings.
             }
         }
     }

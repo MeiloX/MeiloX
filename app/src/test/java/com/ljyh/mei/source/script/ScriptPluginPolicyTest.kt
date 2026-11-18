@@ -90,6 +90,36 @@ class ScriptPluginPolicyTest {
         assertEquals(2, closed)
     }
 
+    @Test fun sandboxPoolKeepWarmRetainsBindingDuringPlaybackAndRetiresOncePaused() = runTest {
+        var created = 0
+        var closed = 0
+        val pool = ScriptSandboxPool<java.io.Closeable>(ScriptConnectionGate(), this, idleTimeoutMs = 100)
+        val factory = {
+            created++
+            com.google.common.util.concurrent.Futures.immediateFuture(java.io.Closeable { closed++ })
+        }
+
+        pool.setKeepWarm(enabled = true, create = factory, isClosed = { false })
+        assertEquals(1, created)
+        assertEquals(0, closed)
+
+        advanceTimeBy(5_000)
+        assertEquals("Keep-warm must prevent idle unbind across long songs", 0, closed)
+
+        val preloaded = pool.acquire(factory)
+        assertEquals("Background preload must reuse the warm sandbox without rebinding", 1, created)
+        pool.release(preloaded)
+        advanceTimeBy(500)
+        assertEquals(0, closed)
+
+        pool.setKeepWarm(enabled = false)
+        advanceTimeBy(99)
+        assertEquals(0, closed)
+        advanceTimeBy(10)
+        runCurrent()
+        assertEquals("Turning keep-warm off must schedule normal idle retirement", 1, closed)
+    }
+
     @Test fun retiredSandboxLeasesReleaseWhileAReplacementConnectionIsStillPending() = runTest {
         val pool = ScriptSandboxPool<java.io.Closeable>(ScriptConnectionGate(), this, idleTimeoutMs = 10)
         var closes = 0

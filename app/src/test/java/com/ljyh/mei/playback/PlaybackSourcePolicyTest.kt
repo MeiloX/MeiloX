@@ -134,6 +134,12 @@ class PlaybackSourcePolicyTest {
             listOf("dolby", "sky", "jyeffect", "hires", "lossless", "exhigh", "standard"),
             playbackQualityFallbacks("dolby"),
         )
+        assertEquals(
+            listOf("sky", "jyeffect", "hires", "lossless", "exhigh", "standard"),
+            playbackQualityFallbacks("dolby", allowDolby = false),
+        )
+        assertEquals("standard", normalizePlaybackQuality("higher"))
+        assertEquals("standard", effectivePlaybackQuality("higher", "exhigh"))
     }
 
     @Test

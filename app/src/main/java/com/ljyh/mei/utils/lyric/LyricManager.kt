@@ -261,7 +261,17 @@ class LyricManager @Inject constructor(
             } else providerLyricResult.value = Resource.Error("No additional provider lyric")
 
             val selectionGeneration = sourceSelectionGeneration
-            val localSong = qqSongRepository.getQQSong(songId).firstOrNull()
+            val storedQQSong = qqSongRepository.getQQSong(songId).firstOrNull()
+            val localSong = storedQQSong?.takeIf { song ->
+                preferredSource == LyricSource.QQMusic || QQLyricMatcher.isStoredSongCompatible(metadata, song)
+            }
+            if (storedQQSong != null && localSong == null) {
+                settingsMutex.withLock {
+                    if (isCurrentLoad(songId, generation) && preferredSource != LyricSource.QQMusic) {
+                        qqSongRepository.deleteSongById(songId)
+                    }
+                }
+            }
             if (!isCurrentLoad(songId, generation)) return@launch
             val qqTimeout = try {
                 QqTimeout.valueOf(
@@ -335,42 +345,18 @@ class LyricManager @Inject constructor(
         generation: Long,
     ): SearchResult.Request.Data.Body.ItemSong? {
         val songId = metadata.lyricStorageKey()
-        val targetDurationSec = metadata.duration / 1000
-        val artistName = metadata.artists.firstOrNull()?.name.orEmpty()
-        val title = metadata.title
-        val cleanedTitle = cleanTitle(title)
         val searchToken = searchGeneration
-        val keywords = buildList {
-            add(cleanedTitle)
-            add(title)
-            if (artistName.isNotBlank()) {
-                add("$cleanedTitle $artistName")
-                add("$title $artistName")
-            }
-        }.distinct()
+        val keywords = QQLyricMatcher.searchKeywords(metadata)
         for (keyword in keywords) {
             val result = repository.searchNew(keyword)
             currentCoroutineContext().ensureActive()
             if (!isCurrentLoad(songId, generation)) return null
             if (searchToken == searchGeneration) publishSearchResult(result)
-            val best = (result as? Resource.Success)?.data?.request?.data?.body?.itemSong
-                ?.take(5)?.firstOrNull { abs(targetDurationSec - it.interval) <= 5 }
+            val candidates = (result as? Resource.Success)?.data?.request?.data?.body?.itemSong.orEmpty()
+            val best = QQLyricMatcher.selectBestMatch(metadata, candidates)
             if (best != null) return best
         }
         return null
-    }
-
-    /**
-     * 去除歌名中的括号内容（如 feat./with/remix 等附加信息）
-     *
-     * 处理中文括号（）和英文括号 ()。
-     * 例如 "abc (feat. xxx)" → "abc"
-     */
-    private fun cleanTitle(title: String): String {
-        return title
-            .replace(Regex("""[\(（][^)）]*[\)）]"""), "")
-            .replace(Regex("""\s+"""), " ")
-            .trim()
     }
 
     /**

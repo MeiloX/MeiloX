@@ -159,6 +159,7 @@ class MusicService : MediaLibraryService(),
     private lateinit var mediaSession: MediaLibrarySession
     private var notificationLeftAction = NotificationAction.PlayMode
     private var notificationRightAction = NotificationAction.Like
+    private var skipUnavailableTracks = true
     private var notificationSignedIn = false
     private var notificationLikeOwner: MusicProvider? = null
     private var notificationLikeRef: TrackRef? = null
@@ -240,6 +241,8 @@ class MusicService : MediaLibraryService(),
     lateinit var automaticCacheController: AutomaticCacheController
     @Inject
     lateinit var sourceRouter: SourceRouter
+    @Inject
+    lateinit var scriptRuntime: com.ljyh.mei.source.script.ScriptRuntime
     @Inject
     lateinit var sourceUpdatePlaybackGuard: com.ljyh.mei.source.update.SourceUpdatePlaybackGuard
     private var sourceUpdateRestoreBarrier: kotlinx.coroutines.Deferred<Unit>? = null
@@ -413,7 +416,7 @@ class MusicService : MediaLibraryService(),
                 val quality = context.dataStore[MusicQualityKey]
                     ?.lowercase(getDefault())
                     ?: MusicQuality.EXHIGH.text
-                mediaUriProvider.resolveMediaSource(item.mediaId, quality)
+                mediaUriProvider.resolveMediaSource(item.mediaId, quality, allowDolby = supportsDolby)
             },
         )
         audioPlayer = AudioPlayer(player) {
@@ -456,6 +459,12 @@ class MusicService : MediaLibraryService(),
                 }
         }
         scope.launch {
+            context.dataStore.data
+                .map { it[NoAudioSourceKey] ?: true }
+                .distinctUntilChanged()
+                .collect { skipUnavailableTracks = it }
+        }
+        scope.launch {
             context.dataStore.data.map { preferences ->
                 NotificationAction.fromPreference(preferences[NotificationLeftActionKey], NotificationAction.PlayMode) to
                     NotificationAction.fromPreference(preferences[NotificationRightActionKey], NotificationAction.Like)
@@ -482,12 +491,19 @@ class MusicService : MediaLibraryService(),
                 .collectLatest { (id, provider) ->
                 val revision = (provider as? AccountRevisionCapability)?.accountRevision ?: flowOf(null)
                 revision.collect { account ->
+                    val ownerBecameAvailable = previousOwner == null && provider != null && id != null
+                    val revisionChanged = previousOwner === provider && previousRevision != account
                     val invalidate = shouldInvalidatePlaybackOwner(previousOwner, previousRevision, provider, account,
                         sameSource = previousSourceId == id)
                     previousSourceId = id
                     previousOwner = provider
                     previousRevision = account
-                    if (!invalidate) return@collect
+                    if (!invalidate) {
+                        if (ownerBecameAvailable || revisionChanged) {
+                            refreshNotificationLike(force = true)
+                        }
+                        return@collect
+                    }
                     val mediaId = player.currentMediaItem?.mediaId
                     val hasOpenedSource = player.playbackState == Player.STATE_READY
                     val playingQuality = currentMusicQuality.value
@@ -805,7 +821,16 @@ class MusicService : MediaLibraryService(),
         }
     }
 
+    private fun updateSandboxKeepWarm() {
+        if (!::scriptRuntime.isInitialized) return
+        val hasOnlineTrack = player.currentMediaItem?.let { it.metadata?.isLocal != true } == true
+        val active = player.playWhenReady && hasOnlineTrack &&
+            player.playbackState in setOf(Player.STATE_BUFFERING, Player.STATE_READY)
+        scriptRuntime.setPlaybackKeepWarm(active)
+    }
+
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        updateSandboxKeepWarm()
         if (playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
             playbackFailures.reset()
             if (!isRefreshingPlaybackSource) {
@@ -841,6 +866,15 @@ class MusicService : MediaLibraryService(),
     }
 
     override fun onEvents(player: Player, events: Player.Events) {
+        if (events.containsAny(
+                Player.EVENT_PLAYBACK_STATE_CHANGED,
+                Player.EVENT_PLAY_WHEN_READY_CHANGED,
+                Player.EVENT_MEDIA_ITEM_TRANSITION,
+                Player.EVENT_TIMELINE_CHANGED,
+            )
+        ) {
+            updateSandboxKeepWarm()
+        }
         if (events.contains(Player.EVENT_POSITION_DISCONTINUITY)) playbackFailures.resetProgress()
         if (events.containsAny(Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) {
             monitorFailureRecovery()
@@ -1017,14 +1051,17 @@ class MusicService : MediaLibraryService(),
         notificationLikeJob?.cancel()
         val ref = notificationLikeTrack()
         val owner = ref?.let { sourceRouter.registry.provider(it.providerId) }
-        if (notificationLikeRef != ref || notificationLikeOwner !== owner) {
+        val previousOwner = notificationLikeOwner
+        if (notificationLikeRef != ref || previousOwner !== owner) {
             notificationLikeMutation?.cancel()
             notificationLiked = null
         }
         notificationLikeRef = ref
         notificationLikeOwner = owner
         val generation = ++notificationLikeGeneration
-        notificationSignedIn = false
+        if (owner == null || previousOwner !== owner) {
+            notificationSignedIn = false
+        }
         updateNotificationButtons()
         if (ref == null || owner == null || (!force && notificationLeftAction != NotificationAction.Like &&
             notificationRightAction != NotificationAction.Like)) return
@@ -1299,6 +1336,7 @@ class MusicService : MediaLibraryService(),
 
         closeAudioEffectSession()
         player.release()
+        if (::scriptRuntime.isInitialized) scriptRuntime.setPlaybackKeepWarm(false)
         sourceUpdatePlaybackGuard.release()
         usbAudioOutput.release()
         serviceJob.cancel()
@@ -1326,6 +1364,11 @@ class MusicService : MediaLibraryService(),
             val quality = context.dataStore[MusicQualityKey]
                 ?.let(::normalizePlaybackQuality)
                 ?: MusicQuality.EXHIGH.text
+            val effectiveQuality = if (!supportsDolby && quality == MusicQuality.DOLBY.text) {
+                MusicQuality.SKY.text
+            } else {
+                quality
+            }
             val localSource = runBlocking { mediaUriProvider.resolveLocalSource(mediaId) }
             if (localSource != null) {
                 Timber.tag("ResolvingDataSource").d("Using local source for mediaId: %s", mediaId)
@@ -1334,17 +1377,17 @@ class MusicService : MediaLibraryService(),
                     .setKey(null)
                     .build()
             }
-            val fullyCachedKey = findFullyCachedPlaybackKey(simpleCache, mediaId, quality)
+            val fullyCachedKey = findFullyCachedPlaybackKey(simpleCache, mediaId, effectiveQuality)
             if (fullyCachedKey != null && !mediaUriProvider.isRejectedCachedSource(mediaId, fullyCachedKey)) {
                 Timber.tag("ResolvingDataSource").d("Fully cached on disk: $mediaId")
-                mediaUriProvider.rememberCachedSource(mediaId, quality, fullyCachedKey, dataSpec.uri)
+                mediaUriProvider.rememberCachedSource(mediaId, effectiveQuality, fullyCachedKey, dataSpec.uri)
                 return@Factory dataSpec.buildUpon()
                     .setKey(fullyCachedKey)
                     .build()
             }
 
             runBlocking {
-                val resolved = mediaUriProvider.resolveMediaSource(mediaId, quality)
+                val resolved = mediaUriProvider.resolveMediaSource(mediaId, quality, allowDolby = supportsDolby)
                 resolvedMediaDataSpec(dataSpec, resolved)
             }
         }
@@ -1525,6 +1568,10 @@ class MusicService : MediaLibraryService(),
             if (mediaId != null) {
                 if (scheduleSourceRecovery(preserveCache = true)) return
                 if (mediaUriProvider.rejectCurrentSource(mediaId) && scheduleSourceRecovery(qualityFallback = true)) return
+            }
+            if (!skipUnavailableTracks) {
+                pauseFailedPlayback("当前歌曲暂无可用音源")
+                return
             }
             val limitReached = playbackFailures.recordFailure()
             Timber.tag("MusicService").e("Play failure detected. Count: %s", playbackFailures.consecutiveFailures)
