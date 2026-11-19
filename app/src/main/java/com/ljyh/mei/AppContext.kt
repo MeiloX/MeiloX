@@ -12,6 +12,7 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import androidx.datastore.preferences.core.emptyPreferences
 import com.ljyh.mei.constants.DefaultImageCacheLimitMb
+import com.ljyh.mei.mcp.McpService
 import com.ljyh.mei.constants.ImageCacheLimitMbKey
 import com.ljyh.mei.utils.dataStore
 import com.ljyh.mei.utils.log.FileLoggingTree
@@ -36,6 +37,7 @@ class AppContext : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var sourcePlugins: ScriptPluginManager
     @Inject lateinit var sourceArtwork: com.ljyh.mei.source.script.SourceArtworkStore
     @Inject lateinit var sourceUpdates: com.ljyh.mei.source.update.SourceUpdateManager
+    @Inject internal lateinit var mcpService: McpService
     private val sourceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var imageCacheLimitMb = DefaultImageCacheLimitMb
     private val imageCacheSettings by lazy {
@@ -60,6 +62,7 @@ class AppContext : Application(), SingletonImageLoader.Factory {
         com.ljyh.mei.source.script.SourceArtworkRegistry.attach(sourceArtwork)
         sourceScope.launch { sourcePlugins.loadInstalled() }
         sourceUpdates.checkOnStartup()
+        mcpService.start()
     }
 
     companion object {
