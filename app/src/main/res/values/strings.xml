@@ -771,6 +771,9 @@
     <string name="track_quality_dolby">Dolby Atmos</string>
     <string name="track_quality_loading">Checking available qualities…</string>
     <string name="player_quality_pending">Loading quality</string>
+    <string name="player_automix_mixing">Mixing</string>
+    <string name="player_automix_active">AutoMix active</string>
+    <string name="player_automix_transitioning_to">Transitioning to %1$s</string>
     <string name="track_quality_unavailable">No available quality information</string>
     <string name="track_quality_local_file">Local File</string>
     <string name="menu_expanded">Expanded</string>

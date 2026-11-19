@@ -11,6 +11,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -37,6 +38,8 @@ import com.ljyh.mei.constants.MeshStaticModeKey
 import com.ljyh.mei.constants.MeshSubdivisionKey
 import com.ljyh.mei.playback.PlaybackBeatMeter
 import com.ljyh.mei.playback.PlaybackSpectrum
+import com.ljyh.mei.ui.component.player.LocalAutoMixUpcomingArtworkUrl
+import com.ljyh.mei.ui.component.player.LocalAutoMixVisuals
 import com.ljyh.mei.ui.component.player.LocalPlayerBackgroundReadyChanged
 import com.ljyh.mei.ui.component.player.component.mesh.MeshAlbum
 import com.ljyh.mei.ui.component.player.component.mesh.MeshGradientRenderer
@@ -92,7 +95,6 @@ private fun MeshBackground(
     backdrop: LayerBackdrop,
     modifier: Modifier,
 ) {
-    val context = LocalContext.current
     val sheet = LocalPlayerSheet.current
     val onBackgroundReadyChanged by rememberUpdatedState(LocalPlayerBackgroundReadyChanged.current)
     val expanded by remember(sheet) {
@@ -102,6 +104,9 @@ private fun MeshBackground(
         derivedStateOf { sheet == null || sheet.state.isExpanded || sheet.isTransitioning }
     }
     val backgroundActive = alpha > 0.01f && sheetVisible
+    val autoMix = LocalAutoMixVisuals.current
+    val nextArtworkUrl = LocalAutoMixUpcomingArtworkUrl.current
+    val latestAutoMix by rememberUpdatedState(autoMix)
     val (flowSpeed) = rememberPreference(MeshFlowSpeedKey, defaultValue = 0.25f)
     val (renderScale) = rememberPreference(MeshRenderScaleKey, defaultValue = 0.75f)
     val (staticMode) = rememberPreference(MeshStaticModeKey, defaultValue = false)
@@ -131,27 +136,25 @@ private fun MeshBackground(
         }
     }
 
-    // Keep the current album while the next request loads. Missing or failed
-    // artwork falls back to gray without making the player transparent.
-    val loadedAlbum by produceState<MeshAlbum?>(null, imageUrl) {
-        if (imageUrl.isNullOrBlank()) {
-            value = null
-            return@produceState
-        }
-        val result = context.imageLoader.execute(
-            ImageRequest.Builder(context)
-                .data(imageUrl)
-                .size(256)
-                .allowHardware(false)
-                .build(),
-        )
-        value = if (result is SuccessResult) {
-            withContext(Dispatchers.Default) {
-                MeshGradientRenderer.prepareAlbum(result.image.toBitmap(), currentSubdivision)
-            }
-        } else null
+    val outgoingUrl = imageUrl?.takeIf(String::isNotBlank)
+    val incomingUrl = autoMix?.incoming?.coverUrl?.takeIf(String::isNotBlank)
+    val prewarmUrl = (if (autoMix == null) nextArtworkUrl else incomingUrl)
+        ?.takeIf { backgroundActive && it.isNotBlank() && it != outgoingUrl }
+    // Keys retain the prepared incoming texture when it becomes the current cover.
+    val loadedAlbums = listOfNotNull(outgoingUrl, prewarmUrl).associateWith { url ->
+        key(url) { rememberMeshAlbum(url, currentSubdivision) }
     }
-    val album = loadedAlbum ?: placeholderAlbum
+    val loadedAlbum = outgoingUrl?.let(loadedAlbums::get)
+    val album = loadedAlbum?.album ?: placeholderAlbum.takeIf {
+        outgoingUrl == null || loadedAlbum != null || !renderer.hasAlbum
+    }
+    val autoMixAlbum = if (autoMix == null || incomingUrl == outgoingUrl) {
+        null
+    } else if (incomingUrl == null) {
+        placeholderAlbum
+    } else {
+        loadedAlbums[incomingUrl]?.let { it.album ?: placeholderAlbum }
+    }
 
     LaunchedEffect(renderer, flowSpeed, staticMode, shouldAnimate) {
         renderer.flowSpeed = flowSpeed
@@ -160,8 +163,10 @@ private fun MeshBackground(
         frameVersion.intValue++
     }
 
-    LaunchedEffect(renderer, album) {
+    LaunchedEffect(renderer, album, autoMixAlbum) {
         album?.let(renderer::setAlbum)
+        renderer.setAutoMixAlbum(autoMixAlbum)
+        renderer.setAutoMixProgress(latestAutoMix?.backgroundProgress() ?: 0f)
         frameVersion.intValue++
         // Publish readiness after a complete mesh is available, including the placeholder.
         onBackgroundReadyChanged(renderer.hasAlbum)
@@ -178,16 +183,20 @@ private fun MeshBackground(
         }
     }
 
-    LifecycleStartedEffect(renderer, backgroundActive, album, staticMode, shouldAnimate, audioReactive) {
+    LifecycleStartedEffect(
+        renderer, backgroundActive, album, autoMixAlbum, staticMode, isPlaying, shouldAnimate, audioReactive,
+    ) {
         // Never include elapsed hidden/stopped time in flow or crossfade progression.
         renderer.resetFrameClock()
         if (!backgroundActive) return@LifecycleStartedEffect
         runMeshFrames(
             intervalNanos = if (audioReactive) 16_666_667L else 33_333_333L,
-            needsAnimation = { renderer.needsAnimation },
+            needsAnimation = { renderer.needsAnimation || (autoMixAlbum != null && isPlaying) },
         ) { now ->
+            val animatedMesh = renderer.needsAnimation
             renderer.advanceFrame(now)
-            frameVersion.intValue++
+            val mixChanged = renderer.setAutoMixProgress(latestAutoMix?.backgroundProgress() ?: 0f)
+            if (animatedMesh || mixChanged) frameVersion.intValue++
         }
     }
 
@@ -223,4 +232,29 @@ private fun MeshBackground(
                 },
         )
     }
+}
+
+private class LoadedMeshAlbum(val album: MeshAlbum?)
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@Composable
+private fun rememberMeshAlbum(imageUrl: String, subdivision: Int): LoadedMeshAlbum? {
+    val context = LocalContext.current
+    val currentSubdivision by rememberUpdatedState(subdivision)
+    val loaded by produceState<LoadedMeshAlbum?>(null, imageUrl) {
+        val result = context.imageLoader.execute(
+            ImageRequest.Builder(context)
+                .data(imageUrl)
+                .size(256)
+                .allowHardware(false)
+                .build(),
+        )
+        val album = if (result is SuccessResult) {
+            withContext(Dispatchers.Default) {
+                MeshGradientRenderer.prepareAlbum(result.image.toBitmap(), currentSubdivision)
+            }
+        } else null
+        value = LoadedMeshAlbum(album)
+    }
+    return loaded
 }

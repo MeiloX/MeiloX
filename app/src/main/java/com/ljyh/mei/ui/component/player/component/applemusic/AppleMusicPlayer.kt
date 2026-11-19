@@ -5,7 +5,6 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.annotation.RequiresApi
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
@@ -59,6 +58,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.Image
 import com.ljyh.mei.ui.component.player.LocalPlayerArtwork
+import com.ljyh.mei.ui.component.player.PlayerArtworkTransition
 import com.ljyh.mei.ui.component.sheet.playerArtwork
 import com.ljyh.mei.ui.component.sheet.PlayerArtworkGeometry
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -802,10 +802,10 @@ fun AppleMusicPlayer(
                     .layerBackdrop(playerCoverBackdrop)
                     .trackBackdropPosition(playerCoverBackdrop),
             ) {
-                AnimatedContent(
-                    targetState = coverUrl,
+                PlayerArtworkTransition(
+                    coverUrl = coverUrl,
+                    contentDescription = "Cover",
                     transitionSpec = { appleMusicArtworkTransition() },
-                    label = "CoverTransition",
                     modifier = Modifier
                         .playerArtworkMotion(artworkFrame)
                         .size(with(density) { artworkLayoutSize.toDp() })
@@ -842,19 +842,20 @@ fun AppleMusicPlayer(
                         )
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) { currentCoverUrl ->
-                    if (currentCoverUrl != null) {
-                        val retainedPainter = remember(currentCoverUrl) {
-                            sharedArtwork?.takeIf { it.first == currentCoverUrl }?.second
+                    Box(Modifier.fillMaxSize()) {
+                        if (currentCoverUrl != null) {
+                            val retainedPainter = remember(currentCoverUrl) {
+                                sharedArtwork?.takeIf { it.first == currentCoverUrl }?.second
+                            }
+                            val painter = sharedArtwork?.takeIf { it.first == currentCoverUrl }?.second
+                                ?: retainedPainter
+                            if (painter != null) Image(
+                                painter = painter,
+                                contentDescription = "Cover",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
                         }
-                        val painter = sharedArtwork?.takeIf { it.first == currentCoverUrl }?.second ?: retainedPainter
-                        if (painter != null) Image(
-                            painter = painter,
-                            contentDescription = "Cover",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        ) else Box(Modifier.fillMaxSize())
-                    } else {
-                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
                     }
                 }
             }

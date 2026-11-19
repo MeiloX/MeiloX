@@ -2084,7 +2084,7 @@ private fun QueueModeIntroduction(symbol: String, title: String, description: St
     val colors = LocalGlassColors.current
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         SfIcon(symbol, contentDescription = null, tint = colors.content, size = 20.dp)
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f, fill = false)) {
             Text(title, color = colors.content, style = IosTypography.subheadline, fontWeight = FontWeight.SemiBold)
             Text(description, color = colors.secondaryContent, style = IosTypography.footnote)
         }

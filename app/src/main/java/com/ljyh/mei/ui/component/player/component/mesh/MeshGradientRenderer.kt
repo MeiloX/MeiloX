@@ -69,6 +69,9 @@ internal class MeshGradientRenderer {
 
     private val meshStates = mutableListOf<MeshState>()
     private var currentAlbum: MeshAlbum? = null
+    private var autoMixState: MeshState? = null
+    private var autoMixProgress = 0f
+    private val autoMixOutgoingPaint = Paint()
     private var accumulatedPlayingNanos = 0L
     private var lastFrameNanos: Long? = null
     private var revision = 0L
@@ -124,6 +127,17 @@ internal class MeshGradientRenderer {
 
     fun setAlbum(album: MeshAlbum) {
         if (currentAlbum === album) return
+        val promotedMix = autoMixState?.takeIf { it.album === album }
+        if (promotedMix != null) {
+            promotedMix.alpha = 1f
+            promotedMix.targetAlpha = 0f
+            promotedMix.compositePaint.blendMode = BlendMode.SRC_OVER
+            meshStates.clear()
+            meshStates.add(promotedMix)
+            currentAlbum = album
+            setAutoMixAlbum(null)
+            return
+        }
         val firstAlbum = meshStates.isEmpty()
         // A returning album must reuse its fading state: its mutable shader may only
         // belong to one state, even when A -> B -> A happens before a fade completes.
@@ -140,6 +154,25 @@ internal class MeshGradientRenderer {
         }
         currentAlbum = album
         revision++
+    }
+
+    fun setAutoMixAlbum(album: MeshAlbum?) {
+        val target = album?.takeUnless { it === currentAlbum }
+        if (autoMixState?.album === target) return
+        autoMixState = target?.let {
+            MeshState(it, 0f).apply { compositePaint.blendMode = BlendMode.PLUS }
+        }
+        autoMixProgress = 0f
+        revision++
+    }
+
+    fun setAutoMixProgress(progress: Float): Boolean {
+        if (autoMixState == null) return false
+        val alpha = progress.coerceIn(0f, 1f)
+        if (autoMixProgress == alpha) return false
+        autoMixProgress = alpha
+        revision++
+        return true
     }
 
     /** Advance once per frame, even when the resulting layer is drawn more than once. */
@@ -202,34 +235,59 @@ internal class MeshGradientRenderer {
 
     private fun drawMeshes(canvas: Canvas, size: IntSize) {
         val time = accumulatedPlayingNanos / 1e9f * flowSpeed
+        val outgoingAlpha = 1f - autoMixProgress
+        if (outgoingAlpha > 0f) {
+            // Preserve an in-flight artwork change as one outgoing image. The usual
+            // case already has a single warm mesh and needs no additional layer.
+            if (outgoingAlpha < 1f && meshStates.size > 1) {
+                autoMixOutgoingPaint.alpha = (outgoingAlpha * 255f).roundToInt()
+                val saveCount = canvas.saveLayer(
+                    0f, 0f, size.width.toFloat(), size.height.toFloat(), autoMixOutgoingPaint,
+                )
+                drawAlbumStates(canvas, size, time, 1f)
+                canvas.restoreToCount(saveCount)
+            } else {
+                drawAlbumStates(canvas, size, time, outgoingAlpha)
+            }
+        }
+        // Add two premultiplied weights over the existing black base. This also
+        // blends transparent cover pixels without revealing the previous album.
+        autoMixState?.let { drawMesh(canvas, size, it, autoMixProgress, time) }
+    }
+
+    private fun drawAlbumStates(canvas: Canvas, size: IntSize, time: Float, opacity: Float) {
         // Keep insertion order, oldest to newest, even when an existing state returns.
         for (index in meshStates.lastIndex downTo 0) {
             val state = meshStates[index]
-            val alpha = (1f - cos(state.alpha.coerceIn(0f, 1f) * Math.PI.toFloat())) * .5f
-            if (alpha <= 0f) continue
-            state.resize(size)
-            state.shader.setFloatUniform("time", time)
-            state.shader.setFloatUniform("audioResponse", audioScale, audioContrast, audioSaturation)
-            state.compositePaint.alpha = (alpha * 255f).roundToInt()
-            val saveCount = canvas.saveLayer(
-                0f, 0f, size.width.toFloat(), size.height.toFloat(), state.compositePaint,
-            )
-            canvas.drawVertices(
-                Canvas.VertexMode.TRIANGLES,
-                state.scaledPositions.size,
-                state.scaledPositions,
-                0,
-                state.album.textureCoordinates,
-                0,
-                null,
-                0,
-                state.album.indices,
-                0,
-                state.album.indices.size,
-                state.meshPaint,
-            )
-            canvas.restoreToCount(saveCount)
+            val eased = (1f - cos(state.alpha.coerceIn(0f, 1f) * Math.PI.toFloat())) * .5f
+            drawMesh(canvas, size, state, eased * opacity, time)
         }
+    }
+
+    private fun drawMesh(canvas: Canvas, size: IntSize, state: MeshState, alpha: Float, time: Float) {
+        if (alpha <= 0f) return
+        state.resize(size)
+        state.shader.setFloatUniform("time", time)
+        state.shader.setFloatUniform("audioResponse", audioScale, audioContrast, audioSaturation)
+        state.compositePaint.alpha = (alpha * 255f).roundToInt()
+        val saveCount = canvas.saveLayer(
+            0f, 0f, size.width.toFloat(), size.height.toFloat(), state.compositePaint,
+        )
+        canvas.drawVertices(
+            Canvas.VertexMode.TRIANGLES,
+            state.scaledPositions.size,
+            state.scaledPositions,
+            0,
+            state.album.textureCoordinates,
+            0,
+            null,
+            0,
+            state.album.indices,
+            0,
+            state.album.indices.size,
+            state.meshPaint,
+        )
+        canvas.restoreToCount(saveCount)
     }
 
     private fun updateAudioResponse(seconds: Float) {

@@ -151,6 +151,10 @@ class MusicService : MediaLibraryService(),
     @Inject
     lateinit var lyricManager: com.ljyh.mei.utils.lyric.LyricManager
     private lateinit var autoMixController: AutoMixController
+    internal val autoMixStatus get() = autoMixController.status
+    internal val upcomingAutoMixTrack get() = autoMixController.upcoming
+    internal val autoMixTracks get() = autoMixController.mixTracks
+    internal fun incomingMixPositionMs() = autoMixController.incomingVisualPositionMs()
     private lateinit var equalizerConfigurationState: EqualizerConfigurationState
     private lateinit var usbAudioOutput: UsbAudioOutput
     val audioOutputStatus get() = usbAudioOutput.status

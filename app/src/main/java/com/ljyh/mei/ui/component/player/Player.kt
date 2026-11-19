@@ -1,5 +1,8 @@
 package com.ljyh.mei.ui.component.player
 
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -9,6 +12,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -20,6 +24,7 @@ import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
 import com.ljyh.mei.ui.component.sheet.rememberPlayerSheetLayers
 import com.ljyh.mei.ui.component.sheet.PlayerSheetArtworkOverlay
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.Dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
@@ -41,20 +46,48 @@ import io.github.neoruaa.glasmio.glass.LocalBlurBackdrop
 import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
 import io.github.neoruaa.glasmio.glass.rememberRasterizedBackdrop
 import coil3.compose.rememberAsyncImagePainter
+import coil3.compose.AsyncImagePainter
 import coil3.request.ImageRequest
 import coil3.size.Precision
 import androidx.compose.runtime.key
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ljyh.mei.R
+import com.ljyh.mei.data.model.MediaMetadata
+import com.ljyh.mei.data.model.metadata
 import com.ljyh.mei.playback.PrivateFmMode
 import com.ljyh.mei.utils.rememberEnumPreference
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberCombinedBackdrop
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberLayerBackdrop
 
-internal val LocalPlayerArtwork = staticCompositionLocalOf<Pair<String, androidx.compose.ui.graphics.painter.Painter>?> { null }
+internal val LocalPlayerArtwork = staticCompositionLocalOf<Pair<String, Painter>?> { null }
+
+internal class AutoMixVisuals(
+    val incoming: MediaMetadata,
+    private val audioProgress: () -> Float,
+    private val durationMs: Long,
+    val incomingPositionMs: () -> Long,
+) {
+    fun artworkProgress(): Float = autoMixArtworkEasing.transform(afterPivot(3_000f))
+
+    fun backgroundProgress(): Float = autoMixBackgroundEasing.transform(afterPivot(6_000f))
+
+    fun progress(): Float = EaseInOut.transform(afterPivot(300f))
+
+    private fun afterPivot(targetDurationMs: Float): Float {
+        // MeiloX's gain envelopes meet at their midpoint. Short mixes have less
+        // time left before the incoming deck takes over, so fit the handoff there.
+        val remainingMs = durationMs * 0.5f
+        val windowMs = targetDurationMs.coerceAtMost(remainingMs)
+        return ((audioProgress() - 0.5f) * durationMs / windowMs).coerceIn(0f, 1f)
+    }
+}
+
+private val autoMixArtworkEasing = CubicBezierEasing(0.62f, 0f, 0.8f, 1f)
+private val autoMixBackgroundEasing = CubicBezierEasing(0f, 0f, 0.30f, 1f)
+internal val LocalAutoMixVisuals = compositionLocalOf<AutoMixVisuals?> { null }
+internal val LocalAutoMixUpcomingArtworkUrl = compositionLocalOf<String?> { null }
 
 internal val LocalPlayerRoamingModeLabel = staticCompositionLocalOf<String?> { null }
 
@@ -124,11 +157,33 @@ fun BottomSheetPlayer(
     val sheetLayers = rememberPlayerSheetLayers(state)
     val overlayHandler = rememberOverlayHandler(stateContainer)
 
-    val currentMetadata by playerConnection.mediaMetadata.collectAsState()
+    val currentMetadata = stateContainer.mediaMetadata.value
+    val upcomingMixTrack by playerConnection.upcomingAutoMixTrack.collectAsStateWithLifecycle()
+    val mixTracks by playerConnection.autoMixTracks.collectAsStateWithLifecycle()
+    val mixStatus = playerConnection.autoMixStatus.collectAsStateWithLifecycle()
+    // The wrapper player's cached MediaItem may lag behind the physical deck.
+    val playingMetadata = playerConnection.player.activeDeck.currentMediaItem?.metadata
+    val playingRef = playingMetadata?.trackRef
+    val displayedMix = mixTracks?.takeIf {
+        progressUpdatesEnabled &&
+            (playingRef == it.incoming.trackRef || (!it.completed && playingRef == it.outgoing?.trackRef))
+    }
+    val mixPromoted = displayedMix?.let {
+        it.completed || (playingRef == it.incoming.trackRef && playingRef != it.outgoing?.trackRef)
+    } == true
     val context = LocalContext.current
-    val artwork = currentMetadata?.coverUrl?.let { url ->
+    val currentUrl = currentMetadata?.coverUrl
+    val activeMix = displayedMix?.takeIf {
+        !mixPromoted || (it.incoming.trackRef != currentMetadata?.trackRef && it.outgoing?.trackRef == currentMetadata?.trackRef)
+    }
+    val upcomingArtworkUrl = (activeMix?.incoming ?: upcomingMixTrack)?.coverUrl?.takeIf { progressUpdatesEnabled }
+    val mixArtworkUrl = displayedMix?.incoming?.coverUrl?.takeIf {
+        it.isNotBlank() && (!mixPromoted || it == playingMetadata?.coverUrl)
+    }
+    // Keep painter identity as the prepared artwork moves into the current slot.
+    val artworks = listOfNotNull(currentUrl, mixArtworkUrl, upcomingArtworkUrl).distinct().associateWith { url ->
         key(url) {
-            url to rememberAsyncImagePainter(
+            rememberAsyncImagePainter(
                 ImageRequest.Builder(context)
                     .data(url)
                     .size(1440)
@@ -137,12 +192,43 @@ fun BottomSheetPlayer(
             )
         }
     }
+    val artwork = currentUrl?.let { url -> artworks[url]?.let { url to it } }
+    val decodedMixArtwork = mixArtworkUrl?.let(artworks::get)?.state?.collectAsStateWithLifecycle()?.value
+    val readyMixPainter = (decodedMixArtwork as? AsyncImagePainter.State.Success)?.painter
+    val retainedMixPainter = remember(mixArtworkUrl) { arrayOfNulls<Painter>(1) }
+    SideEffect { if (readyMixPainter != null) retainedMixPainter[0] = readyMixPainter }
+    val mixVisuals = remember(activeMix, mixPromoted, mixStatus, playerConnection) {
+        activeMix?.let {
+            AutoMixVisuals(
+                incoming = it.incoming,
+                audioProgress = { if (mixPromoted) 1f else mixStatus.value.progress },
+                durationMs = it.durationMs,
+                incomingPositionMs = playerConnection::incomingMixPositionMs,
+            )
+        }
+    }
+    val mixArtwork = remember(mixArtworkUrl, displayedMix, mixPromoted, readyMixPainter ?: retainedMixPainter[0], mixVisuals) {
+        val painter = readyMixPainter ?: retainedMixPainter[0]
+        if (mixArtworkUrl != null && painter != null &&
+            displayedMix.outgoing?.coverUrl != mixArtworkUrl
+        ) {
+            AutoMixArtworkFrame(
+                url = mixArtworkUrl,
+                painter = painter,
+                completed = mixPromoted,
+                fraction = { if (mixPromoted) 1f else mixVisuals?.artworkProgress() ?: 0f },
+            )
+        } else null
+    }
 
 
     // 单入口、双实现 - 根据样式渲染不同的播放器
     CompositionLocalProvider(
         LocalPlayerSheet provides sheetLayers,
         LocalPlayerArtwork provides artwork,
+        LocalAutoMixVisuals provides mixVisuals,
+        LocalAutoMixArtworkFrame provides mixArtwork,
+        LocalAutoMixUpcomingArtworkUrl provides upcomingArtworkUrl,
         LocalPlayerRoamingModeLabel provides roamingModeLabel,
         LocalPlayerBackgroundReadyChanged provides onBackgroundReadyChanged,
         LocalGlassBackdrop provides playerBackdrop,
