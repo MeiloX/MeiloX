@@ -52,24 +52,32 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ljyh.mei.R
 import com.ljyh.mei.data.model.room.DownloadStatus
 import com.ljyh.mei.data.model.room.DownloadTask
+import com.ljyh.mei.ui.navigation.MeiRoute
+import com.ljyh.mei.ui.navigation.MeiloXPageEntry
+import com.ljyh.mei.ui.navigation.MeiloXPageHeaders
 import com.ljyh.mei.ui.screen.main.library.component.DownloadLibraryEntry
 import com.ljyh.mei.ui.screen.main.library.component.DownloadLibraryRow
 import com.ljyh.mei.ui.screen.main.library.component.LibraryLandscapeSongRow
@@ -419,56 +427,128 @@ class SongListRenderingTest {
     }
 
     @Test
-    fun splitPlaylistKeepsTheHeroStationaryWhileTheSongPaneScrolls() {
+    fun narrowSplitPlaylistKeepsAllHeaderActionsVisible() {
+        val showSubscription = mutableStateOf(false)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                GlasmioTheme {
+                    Box(Modifier.requiredWidth(194.dp)) {
+                        PlaylistHeader(
+                            title = "Playlist",
+                            creator = "Artist",
+                            count = 12,
+                            playCount = 0,
+                            subscribeCount = 0,
+                            cover = "",
+                            coverList = emptyList(),
+                            isSubscribed = false,
+                            onPlayAll = {},
+                            onSubscribed = {},
+                            actionIcon = Icons.Default.FavoriteBorder,
+                            actionLabel = "Subscribe",
+                            showSubscriptionAction = showSubscription.value,
+                            detailAction = true,
+                            allowActionScroll = true,
+                        )
+                    }
+                }
+            }
+        }
+        val play = compose.onNode(hasText(context.getString(R.string.pip_play)) and hasClickAction())
+        val shuffle = compose.onNodeWithContentDescription(context.getString(R.string.notification_mode_shuffle))
+        fun assertFullyVisible(action: SemanticsNodeInteraction) {
+            action.assertIsDisplayed()
+            val unclipped = action.getUnclippedBoundsInRoot()
+            assertEquals(
+                (unclipped.right - unclipped.left).value,
+                action.fetchSemanticsNode().boundsInRoot.width,
+                1f,
+            )
+        }
+        assertFullyVisible(shuffle)
+        assertFullyVisible(play)
+
+        compose.runOnIdle { showSubscription.value = true }
+        assertFullyVisible(shuffle)
+        assertFullyVisible(play)
+        assertFullyVisible(compose.onNodeWithContentDescription("Subscribe"))
+    }
+
+    @Test
+    fun splitPlaylistPanesScrollIndependentlyAndBothDriveHeaderBlur() {
+        val route = MeiRoute("split-playlist")
+        val headers = MeiloXPageHeaders()
+        val motion = object : GlasmioHeaderMotion {
+            override val frame = mutableStateOf(GlasmioNavigationFrame(0, route.route, route.route))
+        }
         lateinit var state: LazyListState
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(0.5f, 1f)) {
                 GlasmioTheme {
                     state = rememberLazyListState()
                     Box(Modifier.requiredWidth(900.dp).requiredHeight(500.dp)) {
-                        SongListDetailPage(
-                            title = "Playlist",
-                            subtitle = null,
-                            listState = state,
-                            backgroundColor = Color.Black,
-                            backgroundBrush = null,
-                            bottomPadding = 48.dp,
-                            horizontalContentPadding = 24.dp,
-                            splitHeader = true,
-                            hero = { Text("Playlist artwork", Modifier.testTag("PinnedHero")) },
-                            onNavigateBack = {},
-                            actions = { emptyList() },
-                        ) {
-                            items(30) { Text("Song $it", Modifier.fillMaxWidth().height(64.dp).testTag("SplitSong:$it")) }
+                        GlasmioNavigationScaffold(motion, header = { headers.entry(it).spec }) {
+                            MeiloXPageEntry(route, headers) {
+                                SongListDetailPage(
+                                    title = "Playlist",
+                                    subtitle = null,
+                                    listState = state,
+                                    backgroundColor = Color.Black,
+                                    backgroundBrush = null,
+                                    bottomPadding = 48.dp,
+                                    horizontalContentPadding = 24.dp,
+                                    splitHeader = true,
+                                    hero = {
+                                        Column(Modifier.height(600.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("Playlist artwork", Modifier.testTag("PinnedHero"))
+                                        }
+                                    },
+                                    onNavigateBack = {},
+                                    actions = { emptyList() },
+                                ) {
+                                    items(30) { Text("Song $it", Modifier.fillMaxWidth().height(64.dp).testTag("SplitSong:$it")) }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        val hero =
-            compose
-                .onNodeWithTag("PinnedHero", useUnmergedTree = true)
-                .fetchSemanticsNode()
-                .boundsInRoot
-        val left = compose.onNodeWithTag("DetailHeroPane").fetchSemanticsNode().boundsInRoot
-        val right = compose.onNodeWithTag("DetailTrackPane").fetchSemanticsNode().boundsInRoot
+        val hero = compose.onNodeWithTag("PinnedHero", useUnmergedTree = true)
+        val heroPane = compose.onNodeWithTag("DetailHeroPane")
+        val trackPane = compose.onNodeWithTag("DetailTrackPane")
+        val initialHero = hero.fetchSemanticsNode().boundsInRoot
+        val left = heroPane.fetchSemanticsNode().boundsInRoot
+        val right = trackPane.fetchSemanticsNode().boundsInRoot
         assertTrue(left.right <= right.left)
         assertEquals(left.width, right.width, 1f)
-        assertEquals(left.center.x, hero.center.x, 1f)
+        assertEquals(left.center.x, initialHero.center.x, 1f)
         val firstSong = compose.onNodeWithTag("SplitSong:0", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
         assertEquals(12f, firstSong.left - right.left, 1f)
         assertEquals(12f, right.right - firstSong.right, 1f)
-        assertEquals(hero.top, firstSong.top, 1f)
-        compose.onNodeWithTag("DetailTrackPane").performScrollToIndex(12)
-        assertEquals(
-            hero,
-            compose
-                .onNodeWithTag("PinnedHero", useUnmergedTree = true)
-                .fetchSemanticsNode()
-                .boundsInRoot,
-        )
+        assertEquals(initialHero.top, firstSong.top, 1f)
+
+        fun assertBlurProgress(expected: Float) = compose.runOnIdle {
+            val scrollState = requireNotNull(headers.entry(route.route).spec.scrollState)
+            assertEquals(expected, scrollState.scrollEdgeProgress(), 0.01f)
+        }
+        assertBlurProgress(0f)
+        heroPane.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 14f) }
+        assertBlurProgress(0.5f)
+        compose.runOnIdle { assertEquals(0, state.firstVisibleItemScrollOffset) }
+        val scrolledHero = hero.fetchSemanticsNode().boundsInRoot
+        assertTrue(scrolledHero.top < initialHero.top)
+
+        trackPane.performScrollToIndex(12)
+        assertBlurProgress(1f)
+        assertEquals(scrolledHero, hero.fetchSemanticsNode().boundsInRoot)
         compose.runOnIdle { assertTrue(state.firstVisibleItemIndex > 0) }
+        trackPane.performScrollToIndex(0)
+        assertBlurProgress(0.5f)
+        heroPane.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -14f) }
+        assertBlurProgress(0f)
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.ljyh.mei.ui.screen.playlist
 
 import com.ljyh.mei.ui.component.item.trackPressViewport
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +36,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
@@ -70,6 +73,7 @@ import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 import io.github.neoruaa.glasmio.scaffold.GlasmioHeaderAction
+import io.github.neoruaa.glasmio.scaffold.GlasmioHeaderCollapseDefaults
 import io.github.neoruaa.glasmio.scaffold.GlasmioHeaderSearchState
 import io.github.neoruaa.glasmio.scaffold.rememberGlasmioHeaderSearch
 import io.github.neoruaa.glasmio.ui.GlasmioButton
@@ -436,6 +440,16 @@ internal fun SongListDetailPage(
         }
         return
     }
+    val heroScrollState = rememberScrollState()
+    val blurDistancePx = with(LocalDensity.current) {
+        GlasmioHeaderCollapseDefaults.EnterBreakpoint.toPx().coerceAtLeast(1f)
+    }
+    val topBarBlurProgress by remember(heroScrollState, listState, blurDistancePx) {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) 1f
+            else (heroScrollState.value / blurDistancePx).coerceAtMost(1f)
+        }
+    }
     MeiloXPinnedPage(
         title = title,
         subtitle = subtitle,
@@ -445,10 +459,7 @@ internal fun SongListDetailPage(
         onNavigateBack = onNavigateBack,
         actionSearch = actionSearch,
         actions = actions,
-        topBarBlurProgress =
-            if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0)
-                1f
-            else 0f,
+        topBarBlurProgress = topBarBlurProgress,
     ) { padding ->
         val panePadding = remember(padding, horizontalContentPadding) {
             object : PaddingValues by padding {
@@ -456,12 +467,14 @@ internal fun SongListDetailPage(
                 override fun calculateRightPadding(layoutDirection: LayoutDirection) = horizontalContentPadding
             }
         }
-        Row(Modifier.fillMaxSize()) {
+        // Keep the opaque cover gradient available to button blending inside the scroll-edge fade layer.
+        val blendBackground = backgroundBrush?.takeIf { topBarBlurProgress > 0f }
+        Row(Modifier.fillMaxSize().then(blendBackground?.let { Modifier.background(it) } ?: Modifier)) {
             Column(
                 Modifier.weight(1f)
                     .fillMaxHeight()
                     .testTag("DetailHeroPane")
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(heroScrollState)
                     .padding(panePadding),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
