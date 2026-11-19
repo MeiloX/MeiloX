@@ -19,9 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.res.ResourcesCompat
 import com.kyant.capsule.ContinuousRoundedRectangle
-import com.ljyh.mei.R
 import com.ljyh.mei.constants.DefaultInterfaceLetterSpacing
 import com.ljyh.mei.constants.InterfaceLetterSpacingKey
 import com.ljyh.mei.constants.MaxInterfaceLetterSpacing
@@ -114,7 +112,7 @@ fun MusicTheme(
     }
     val context = LocalContext.current
     val symbolTypeface = remember(context) {
-        ResourcesCompat.getFont(context.applicationContext, R.font.sf_pro)
+        sfProSymbolTypeface(context)
     }
     val shimmerProgress = LocalShimmerProgress.current ?: rememberShimmerProgress()
     GlasmioTheme(

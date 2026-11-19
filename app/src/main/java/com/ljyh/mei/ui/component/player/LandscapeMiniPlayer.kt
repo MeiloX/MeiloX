@@ -20,9 +20,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.text.font.Font
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -215,12 +212,8 @@ internal fun LandscapeMiniPlayer(
                 Column(Modifier.weight(1f).padding(horizontal = 8.dp),
                     verticalArrangement = Arrangement.Center) {
                     val track = metadata
-                    val titleFont = remember {
-                        FontFamily(Font(R.font.sf_pro, weight = FontWeight.Medium,
-                            variationSettings = FontVariation.Settings(FontVariation.weight(500))))
-                    }
                     val titleStyle = IosTypography.body.copy(
-                        fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = titleFont,
+                        fontSize = 15.sp, fontWeight = FontWeight.Medium,
                     )
                     val artistStyle = IosTypography.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Normal)
                     if (track != null) MiniPlayerTrackSwipe(connection, track) { visibleTrack, allowMarquee ->
