@@ -25,6 +25,7 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,10 +48,11 @@ class SourceSearchInstrumentedTest {
         override val displayName = id
         override val capabilities = setOf(SourceCapability.SEARCH, SourceCapability.TRACK)
         override var status = SourceStatus.READY
-        val requests = CopyOnWriteArrayList<String>()
+        val requests = CopyOnWriteArrayList<Pair<String, PageRequest>>()
         val slowCancelled = AtomicBoolean(false)
+        var fastSearchGate: CompletableDeferred<Unit>? = null
         override suspend fun search(query: String, page: PageRequest): SourcePage<Track> {
-            requests += "$query:${page.offset}"
+            requests += query to page
             if (id == "a" && query == "slow") {
                 try { delay(10_000) } catch (cancelled: CancellationException) {
                     slowCancelled.set(true)
@@ -58,8 +60,9 @@ class SourceSearchInstrumentedTest {
                 }
             }
             if (query == "bad") throw SourceException(SourceErrorCode.TIMEOUT)
+            if (query == "fast") fastSearchGate?.await()
             val first = Track(TrackRef(id, "$query:first"), "$id $query", listOf(SourceArtist("Artist")))
-            return if (page.offset == 0) SourcePage(listOf(first), hasMore = true)
+            return if (page.offset == 0) SourcePage(listOf(first), hasMore = true, nextCursor = "$query:next")
                 else SourcePage(listOf(first, first.copy(ref = TrackRef(id, "$query:second"))))
         }
         override suspend fun getTrack(ref: TrackRef): Track? = null
@@ -99,6 +102,51 @@ class SourceSearchInstrumentedTest {
             val paged = withTimeout(5_000) { model.state.first { !it.loading && it.tracks.size == 2 } }
             assertEquals(listOf(TrackRef("b", "fast:first"), TrackRef("b", "fast:second")), paged.tracks.map { it.ref })
             assertFalse(paged.hasMore)
+
+            stage = "pull refresh from the first page"
+            val refreshGate = CompletableDeferred<Unit>()
+            withContext(Dispatchers.Main) {
+                b.fastSearchGate = refreshGate
+                model.refreshOnPull()
+                assertTrue(model.state.value.refreshing)
+                assertEquals(paged.tracks, model.state.value.tracks)
+                model.refreshOnPull()
+                model.loadMore()
+            }
+            refreshGate.complete(Unit)
+            val refreshed = withTimeout(5_000) { model.state.first { !it.loading } }
+            assertFalse(refreshed.refreshing)
+            assertEquals(paged.tracks.take(1), refreshed.tracks)
+            assertTrue(refreshed.hasMore)
+            val nextPage = PageRequest(offset = 1, cursor = "fast:next")
+            assertEquals(
+                listOf(PageRequest(), nextPage, PageRequest(refresh = true)),
+                b.requests.filter { it.first == "fast" }.map { it.second },
+            )
+            withContext(Dispatchers.Main) { model.loadMore() }
+            withTimeout(5_000) { model.state.first { !it.loading && it.tracks == paged.tracks } }
+            assertEquals("fast" to nextPage, b.requests.last())
+
+            stage = "failed pull refresh keeps results"
+            val failureGate = CompletableDeferred<Unit>()
+            withContext(Dispatchers.Main) {
+                b.fastSearchGate = failureGate
+                model.refreshOnPull()
+            }
+            failureGate.completeExceptionally(SourceException(SourceErrorCode.TIMEOUT))
+            val refreshFailure = withTimeout(5_000) { model.state.first { it.error == SourceErrorCode.TIMEOUT } }
+            assertFalse(refreshFailure.refreshing)
+            assertEquals(paged.tracks, refreshFailure.tracks)
+
+            stage = "cancelled pull refresh clears its indicator"
+            val cancelGate = CompletableDeferred<Unit>()
+            withContext(Dispatchers.Main) {
+                b.fastSearchGate = cancelGate
+                model.refreshOnPull()
+            }
+            cancelGate.cancel()
+            val cancelledRefresh = withTimeout(5_000) { model.state.first { !it.loading } }
+            assertEquals(refreshFailure, cancelledRefresh)
 
             stage = "typed timeout response"
             withContext(Dispatchers.Main) { model.search("bad") }

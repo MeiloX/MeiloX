@@ -157,14 +157,15 @@ fun LazyListScope.SourceTrackResults(
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
     onSongMore: ((MediaMetadata, Rect) -> Unit)? = null,
+    showProviderName: Boolean = true,
 ) {
+    val firstItemTopPadding = 10.dp
     groupedLazyItems(
         state.tracks,
         key = { "source-track-${TrackRefCodec.encode(it.ref)}" },
         contentType = "source-track",
-        firstItemTopPadding = 10.dp,
+        firstItemTopPadding = firstItemTopPadding,
     ) { track, index ->
-        val sourceName = providers.firstOrNull { it.id == track.ref.providerId }?.displayName ?: track.ref.providerId
         GlasmioListRow(
             title = track.title,
             subtitle = track.artists.joinToString(" / ") { it.name }.takeIf(String::isNotBlank),
@@ -175,7 +176,11 @@ fun LazyListScope.SourceTrackResults(
             },
             trailing = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(sourceName, style = MaterialTheme.typography.labelSmall, color = LocalGlassColors.current.secondaryContent)
+                    if (showProviderName) {
+                        val sourceName = providers.firstOrNull { it.id == track.ref.providerId }?.displayName
+                            ?: track.ref.providerId
+                        Text(sourceName, style = MaterialTheme.typography.labelSmall, color = LocalGlassColors.current.secondaryContent)
+                    }
                     if (onSongMore != null) {
                         var anchor by remember { mutableStateOf(Rect.Zero) }
                         Box(Modifier.size(40.dp).onGloballyPositioned { anchor = it.boundsInWindow() }
@@ -200,9 +205,12 @@ fun LazyListScope.SourceTrackResults(
             onLoadMore()
         }
     }
-    if ((state.loading || state.hasMore) && state.error == null) {
-        items(4, key = { "source-track-loading:$it" }) {
-            ShimmerHost { TrackItemShimmer(isTablet = false, flatDetailStyle = true, showArtwork = true) }
+    if (!state.refreshing && (state.loading || state.hasMore) && state.error == null) {
+        items(4, key = { "source-track-loading:$it" }) { index ->
+            val topPadding = if (index == 0 && state.tracks.isEmpty()) firstItemTopPadding else 0.dp
+            ShimmerHost(Modifier.padding(top = topPadding)) {
+                TrackItemShimmer(isTablet = false, flatDetailStyle = true, showArtwork = true)
+            }
         }
     }
 }
