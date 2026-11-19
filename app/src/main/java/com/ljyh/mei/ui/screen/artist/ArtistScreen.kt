@@ -175,6 +175,11 @@ internal fun ArtistDetailPageLayout(
                                 ),
                     )
                 } else {
+                    if (topBarBlurProgress > 0f) {
+                        // The scroll-edge fade isolates the foreground in an offscreen layer.
+                        // Give the header buttons the same gradient to blend against there.
+                        Box(Modifier.matchParentSize().background(background.brush))
+                    }
                     // Keep the portrait artwork full bleed, including behind the window caption.
                     val listPadding = PaddingValues(
                         top = if (landscape) contentPadding.calculateTopPadding() else 0.dp,
