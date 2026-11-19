@@ -1,33 +1,16 @@
 package com.ljyh.mei.ui.theme
 
 import androidx.compose.material3.Typography
-import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.ljyh.mei.R
 
-@OptIn(ExperimentalTextApi::class)
-private fun sfProFont(weight: FontWeight) = Font(
-    resId = R.font.sf_pro,
-    weight = weight,
-    variationSettings = FontVariation.Settings(
-        FontVariation.weight(weight.weight),
-        FontVariation.width(100f),
-    ),
-)
-
-val AppFontFamily = FontFamily(
-    sfProFont(FontWeight.Light),
-    sfProFont(FontWeight.Normal),
-    sfProFont(FontWeight.Medium),
-    sfProFont(FontWeight.SemiBold),
-    sfProFont(FontWeight.Bold),
-)
+// Resolve weights through Android so font axes do not override the system fallback.
+val AppFontFamily = FontFamily(Font(R.font.sf_pro, FontWeight.Normal))
 
 /** Shared typography for Material controls, iOS components, inputs, and lyrics. */
 fun appTypography(letterSpacing: TextUnit): Typography {
