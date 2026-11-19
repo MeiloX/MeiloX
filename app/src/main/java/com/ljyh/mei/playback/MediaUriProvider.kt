@@ -162,11 +162,15 @@ class MediaUriProvider @Inject constructor(
         return readLocalPlaybackInfo(uri)
     }
 
+    internal suspend fun hasLocalSource(mediaId: String): Boolean = playableLocalSong(mediaId)?.let(::localUri) != null
+
+    private suspend fun playableLocalSong(mediaId: String): Song? =
+        localSong(mediaId)?.takeUnless { it.sourceType != SourceType.LOCAL && onlineSourceOverrides.contains(mediaId) }
+
     /** All local opens publish the same source information as streaming and disk cache hits. */
     internal suspend fun resolveLocalSource(mediaId: String): ResolvedMediaSource? {
         val stateVersion = synchronized(qualityStateLock) { qualityStateVersion.get() }
-        val song = localSong(mediaId) ?: return null
-        if (song.sourceType != SourceType.LOCAL && onlineSourceOverrides.contains(mediaId)) return null
+        val song = playableLocalSong(mediaId) ?: return null
         val uri = localUri(song) ?: return null
         val info = readLocalPlaybackInfo(uri)
         val task = if (song.sourceType == SourceType.DOWNLOAD) downloadRepository?.getBySongId(song.id) else null
@@ -246,7 +250,7 @@ class MediaUriProvider @Inject constructor(
         router.registry.awaitInitialized()
         return sourceUpdatePlaybackGuard.withResolution({ resolutionUpdateSources(track.ref.providerId) }) {
             val stateVersion = synchronized(qualityStateLock) { accountStateVersion.get() }
-            val resolution = playbackResolver.resolve(track, quality, originalResolver = {
+            val resolution = playbackResolver.resolve(track, quality, allowAlternateVersion = false, originalResolver = {
                 resolveOriginResource(TrackRefCodec.mediaId(track.ref), track.ref, quality, stateVersion, forDownload = true)
             })
             synchronized(qualityStateLock) { ensureCurrentState(stateVersion, forDownload = true) }

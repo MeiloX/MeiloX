@@ -684,7 +684,8 @@ fun SourceLibraryScreen(
             loaded.providerId == selectedId && loaded.providerVersion == provider?.version &&
                 (revisionFlow == null || loaded.accountRevision == accountRevision) && !loaded.loading &&
                 (loaded.error == SourceErrorCode.AUTH_REQUIRED || loaded.error == SourceErrorCode.AUTH_EXPIRED ||
-                    loaded.error == null && SourceCapability.ACCOUNT in provider?.capabilities.orEmpty() && loaded.account == null)
+                    loaded.error == null && !loaded.cachedSnapshot &&
+                    SourceCapability.ACCOUNT in provider?.capabilities.orEmpty() && loaded.account == null)
         }
     if (requiresSignIn) {
         MeiloXPinnedListPage(title = title, bottomPadding = bottom,

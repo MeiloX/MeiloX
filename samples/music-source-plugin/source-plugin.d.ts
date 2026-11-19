@@ -264,6 +264,8 @@ export type CommentUser = { nickname: string; avatarUrl?: string | null } &
 export interface CommentRow {
   commentId: string; user: CommentUser; content: string; time: number; timeStr?: string;
   liked: boolean; likedCount: number; replyCount: number; showFloorComment?: { replyCount: number } | null;
+  voiceDurationMillSecond?: number | null;
+  voiceInfo?: { durationMs?: number; voiceDurationMillSecond?: number } | null;
 }
 export interface CommentPage { comments: CommentRow[]; hasMore: boolean; cursor?: string | null; totalCount: number }
 export interface FloorCommentPage { comments: CommentRow[]; hasMore: boolean; time: number; totalCount: number }

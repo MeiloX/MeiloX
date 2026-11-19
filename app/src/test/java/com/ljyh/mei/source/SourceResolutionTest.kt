@@ -1501,6 +1501,48 @@ class SourceResolutionTest {
         assertEquals("a", result.actualAudioProviderId)
         assertEquals(1, alternate.calls)
     }
+
+    @Test fun optInCanResolveAnAlternateRecordingWithinTheOriginalSource() = runTest {
+        val alternate = original.copy(ref = TrackRef(original.ref.providerId, "live-1"), title = "Song (Live)", durationMs = 213_000)
+        val origin = Provider("original", alternate)
+        val unavailable: suspend () -> AudioResource = { throw SourceException(SourceErrorCode.UNAVAILABLE) }
+        val result = resolver(listOf(origin), SourceSettings(allowAlternateVersions = true))
+            .resolve(original, "standard", originalResolver = unavailable)
+        assertEquals(original.ref, result.originTrackRef)
+        assertEquals(alternate.ref, result.resolvedTrackRef)
+        assertEquals(CachePolicy.NO_STORE, result.resource.cachePolicy)
+        assertTrue(result.alternateVersion)
+        assertEquals(1, origin.calls)
+        assertFailsWithUnavailable {
+            resolver(listOf(origin), SourceSettings()).resolve(original, "standard", originalResolver = unavailable)
+        }
+        assertFailsWithUnavailable {
+            resolver(listOf(origin), SourceSettings(allowAlternateVersions = true))
+                .resolve(original, "standard", allowAlternateVersion = false, originalResolver = unavailable)
+        }
+        assertEquals(1, origin.calls)
+    }
+
+    @Test fun alternateMatcherRequiresTheSameArtistsAndAnUnambiguousVersion() {
+        val live = original.copy(ref = TrackRef("original", "live"), title = "Song (Live)")
+        val acoustic = original.copy(ref = TrackRef("original", "acoustic"), title = "Song", version = "Acoustic")
+        val matcher = TrackMatcher()
+        assertEquals(live, matcher.alternate(original, listOf(live)))
+        assertNull(matcher.alternate(original, listOf(live, acoustic)))
+        assertNull(matcher.alternate(original, listOf(live.copy(artists = listOf(SourceArtist("Different artist"))))))
+        assertNull(matcher.alternate(original, listOf(live.copy(title = "Song (Instrumental)"))))
+        assertNull(matcher.alternate(original, listOf(live.copy(title = "Song (Delivered)"))))
+    }
+
+    private suspend fun assertFailsWithUnavailable(action: suspend () -> Unit) {
+        try {
+            action()
+            fail("The original track should remain unavailable")
+        } catch (error: PlaybackResolutionException) {
+            assertEquals(SourceErrorCode.UNAVAILABLE, error.code)
+        }
+    }
+
     @Test fun finalNetworkAndTimeoutCausesRemainAvailableToPlaybackRecovery() = runTest {
         for (code in listOf(SourceErrorCode.NETWORK, SourceErrorCode.TIMEOUT)) {
             val origin = Provider("original", original)

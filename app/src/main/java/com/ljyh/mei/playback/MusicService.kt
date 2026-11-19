@@ -188,7 +188,7 @@ class MusicService : MediaLibraryService(),
     private var playbackRestoreJob: Job? = null
     private lateinit var playbackPersistence: PlaybackPersistence
     private var isRestoringPlayback = true
-    private lateinit var connectivityManager: ConnectivityManager
+    private var deferredRestorePrepare = false
     val currentMediaMetadata = MutableStateFlow<MediaMetadata?>(null)
     val availableMusicQualities = MutableStateFlow<List<MusicQuality>>(emptyList())
     val currentMusicQuality = MutableStateFlow<MusicQuality?>(null)
@@ -262,7 +262,6 @@ class MusicService : MediaLibraryService(),
         }
         playbackHistoryReporter = PlaybackHistoryReporter(sourceFeatures)
         equalizerConfigurationState = EqualizerConfigurationState(this, scope)
-        audioOutputMode = context.dataStore[AudioOutputModeKey].toEnum(AudioOutputMode.AudioTrack)
         usbAudioOutput = UsbAudioOutput(this) {
             scope.launch {
                 if (::player.isInitialized && audioOutputMode == AudioOutputMode.UsbBitPerfect) {
@@ -281,7 +280,6 @@ class MusicService : MediaLibraryService(),
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
-        val handleAudioFocus = !context.dataStore.get(AllowConcurrentPlaybackKey, false)
         // Media3 1.11 dynamic scheduling batches position updates. Both decks need
         // continuous timestamps for karaoke highlighting and beat synchronization.
         val firstDeck = ExoPlayer.Builder(this)
@@ -300,7 +298,7 @@ class MusicService : MediaLibraryService(),
             //它并不会阻止屏幕变暗或关闭；它主要是为了防止CPU进入睡眠状态以及确保网络连接的活跃，从而避免播放中断。
             .setWakeMode(C.WAKE_MODE_NETWORK)
             //音频属性
-            .setAudioAttributes(playbackAudioAttributes, handleAudioFocus)
+            .setAudioAttributes(playbackAudioAttributes, true)
             //快进快退时间
             .setSeekBackIncrementMs(5000)
             .setSeekForwardIncrementMs(5000)
@@ -319,7 +317,7 @@ class MusicService : MediaLibraryService(),
             .setSeekBackIncrementMs(5000)
             .setSeekForwardIncrementMs(5000)
             .build()
-        player = StableDeckPlayer(firstDeck, secondDeck, playbackAudioAttributes, handleAudioFocus)
+        player = StableDeckPlayer(firstDeck, secondDeck, playbackAudioAttributes)
         listOf(firstDeck, secondDeck).forEachIndexed { index, deck ->
             deck.addAnalyticsListener(object : AnalyticsListener {
                 override fun onAudioDecoderInitialized(
@@ -413,7 +411,7 @@ class MusicService : MediaLibraryService(),
             scope = scope,
             sourceResolver = { item ->
                 item.metadata?.let { mediaUriProvider.rememberTrack(it, item.mediaId) }
-                val quality = context.dataStore[MusicQualityKey]
+                val quality = context.dataStore.data.firstOrNull()?.get(MusicQualityKey)
                     ?.lowercase(getDefault())
                     ?: MusicQuality.EXHIGH.text
                 mediaUriProvider.resolveMediaSource(item.mediaId, quality, allowDolby = supportsDolby)
@@ -531,9 +529,6 @@ class MusicService : MediaLibraryService(),
         val sessionToken = SessionToken(this, ComponentName(this, MusicService::class.java))
         val controllerFuture = MediaController.Builder(this, sessionToken).buildAsync()
         controllerFuture.addListener({ controllerFuture.get() }, MoreExecutors.directExecutor())
-
-        connectivityManager = getSystemService(ConnectivityManager::class.java)
-
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -550,14 +545,23 @@ class MusicService : MediaLibraryService(),
         playbackRestoreJob = scope.launch {
             try {
                 sourceUpdateRestoreBarrier?.await()
-                val restoredState = withContext(Dispatchers.IO) {
+                val (preferences, restoredState) = withContext(Dispatchers.IO) {
                     val preferences = context.dataStore.data.firstOrNull() ?: return@withContext null
-                    playbackPersistence.load()?.withRestorePreferences(preferences)?.let { snapshot ->
-                        snapshot to playbackPersistence.restoreItems(snapshot)
+                    val restored = playbackPersistence.load()?.withRestorePreferences(preferences)?.let { snapshot ->
+                        val items = playbackPersistence.restoreItems(snapshot)
+                        val current = items.getOrNull(snapshot.currentIndex.coerceIn(0, items.lastIndex.coerceAtLeast(0)))
+                        val online = getSystemService(ConnectivityManager::class.java)?.let { it.activeNetwork != null } ?: true
+                        val prepare = current != null && (online || mediaUriProvider.hasLocalSource(current.mediaId) ||
+                            fullyCachedPlaybackKey(CacheManager.getSimpleCache(context), current.mediaId,
+                                preferences[MusicQualityKey]?.let(::normalizePlaybackQuality) ?: MusicQuality.EXHIGH.text) != null)
+                        Triple(snapshot, items, prepare)
                     }
-                }
+                    preferences to restored
+                } ?: return@launch
                 // The service is already usable while disk data loads. A new queue wins.
                 if (player.mediaItemCount > 0 || queueTitle != null) return@launch
+                applyAudioOutputMode(preferences[AudioOutputModeKey].toEnum(AudioOutputMode.AudioTrack))
+                player.setHandleAudioFocus(!(preferences[AllowConcurrentPlaybackKey] ?: false))
                 val snapshot = restoredState?.first
                 if (snapshot != null && snapshot.items.isNotEmpty()) {
                     val restoredItems = restoredState.second
@@ -584,8 +588,12 @@ class MusicService : MediaLibraryService(),
                     player.shuffleModeEnabled = snapshot.shuffleModeEnabled &&
                         (!snapshot.isFmMode || snapshot.queueAutoplayEnabled)
                     queueManager.restorePlaylistSource(snapshot.playlistSource)
-                    player.playWhenReady = snapshot.playWhenReady
-                    player.prepare()
+                    if (restoredState.third) {
+                        player.playWhenReady = snapshot.playWhenReady
+                        player.prepare()
+                    } else {
+                        deferredRestorePrepare = true
+                    }
                     queueManager.restoreSourceContentQueue(snapshot.sourceContentContext, snapshot.queueTitle)
                     Timber.tag("MusicService").d(
                         "Restored playback snapshot -> items: ${restoredItems.size}, " +
@@ -593,8 +601,6 @@ class MusicService : MediaLibraryService(),
                             "source: ${snapshot.sourceType}",
                     )
                 } else {
-                    val preferences = context.dataStore.data.firstOrNull() ?: return@launch
-                    if (player.mediaItemCount > 0 || queueTitle != null) return@launch
                     val savedShuffleMode = preferences[IsShuffleModeKey] ?: true
                     val savedRepeatMode = preferences[RepeatModeKey] ?: Player.REPEAT_MODE_ALL
                     player.shuffleModeEnabled = savedShuffleMode
@@ -830,6 +836,10 @@ class MusicService : MediaLibraryService(),
     }
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        if (playWhenReady && deferredRestorePrepare && player.mediaItemCount > 0) {
+            deferredRestorePrepare = false
+            if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        }
         updateSandboxKeepWarm()
         if (playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
             playbackFailures.reset()
@@ -855,6 +865,7 @@ class MusicService : MediaLibraryService(),
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
+        if (playbackState != Player.STATE_IDLE) deferredRestorePrepare = false
         if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
             recordPlaybackDuration(
                 playbackHistorySession.finish(
@@ -1356,19 +1367,14 @@ class MusicService : MediaLibraryService(),
 
     }
 
-    private fun createDataSourceFactory(): DataSource.Factory {
+    private fun createDataSourceFactory(): DataSource.Factory = DataSource.Factory {
         val simpleCache = CacheManager.getSimpleCache(context)
 
-        return ResolvingDataSource.Factory(CacheManager.getPlaybackDataSourceFactory(context)) { dataSpec ->
+        ResolvingDataSource.Factory(CacheManager.getPlaybackDataSourceFactory(context, simpleCache)) { dataSpec ->
             val mediaId = dataSpec.key ?: error("No media key")
             val quality = context.dataStore[MusicQualityKey]
                 ?.let(::normalizePlaybackQuality)
                 ?: MusicQuality.EXHIGH.text
-            val effectiveQuality = if (!supportsDolby && quality == MusicQuality.DOLBY.text) {
-                MusicQuality.SKY.text
-            } else {
-                quality
-            }
             val localSource = runBlocking { mediaUriProvider.resolveLocalSource(mediaId) }
             if (localSource != null) {
                 Timber.tag("ResolvingDataSource").d("Using local source for mediaId: %s", mediaId)
@@ -1377,8 +1383,9 @@ class MusicService : MediaLibraryService(),
                     .setKey(null)
                     .build()
             }
-            val fullyCachedKey = findFullyCachedPlaybackKey(simpleCache, mediaId, effectiveQuality)
-            if (fullyCachedKey != null && !mediaUriProvider.isRejectedCachedSource(mediaId, fullyCachedKey)) {
+            val effectiveQuality = effectivePlaybackCacheQuality(quality)
+            val fullyCachedKey = fullyCachedPlaybackKey(simpleCache, mediaId, quality)
+            if (fullyCachedKey != null) {
                 Timber.tag("ResolvingDataSource").d("Fully cached on disk: $mediaId")
                 mediaUriProvider.rememberCachedSource(mediaId, effectiveQuality, fullyCachedKey, dataSpec.uri)
                 return@Factory dataSpec.buildUpon()
@@ -1390,8 +1397,15 @@ class MusicService : MediaLibraryService(),
                 val resolved = mediaUriProvider.resolveMediaSource(mediaId, quality, allowDolby = supportsDolby)
                 resolvedMediaDataSpec(dataSpec, resolved)
             }
-        }
+        }.createDataSource()
     }
+
+    private fun effectivePlaybackCacheQuality(quality: String): String =
+        if (quality == MusicQuality.DOLBY.text && !supportsDolby) MusicQuality.SKY.text else quality
+
+    private fun fullyCachedPlaybackKey(cache: androidx.media3.datasource.cache.Cache, mediaId: String, quality: String): String? =
+        findFullyCachedPlaybackKey(cache, mediaId, effectivePlaybackCacheQuality(quality))
+            ?.takeUnless { mediaUriProvider.isRejectedCachedSource(mediaId, it) }
 
     private class ProfileAudioOutputProvider(
         val mode: AudioOutputMode,

@@ -694,6 +694,9 @@
     <string name="move_up">Move up</string>
     <string name="move_down">Move down</string>
     <string name="reorder_drag_handle">Drag to reorder</string>
+    <string name="source_allow_alternate_versions">Play other versions when unavailable</string>
+    <string name="source_allow_alternate_versions_detail">Try a live, acoustic or remastered version by the same artist.</string>
+    <string name="source_playing_alternate_version">Playing another version</string>
     <string name="load_failed_message">Could not load: %1$s</string>
     <string name="no_search_results">No search results</string>
     <string name="library_sign_in">Sign in to sync your music library</string>

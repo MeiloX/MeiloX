@@ -433,11 +433,12 @@ class HomeRepositoryTest {
         assertArrayEquals(before, fixture.cache.file(fixture.owner).readBytes())
     }
 
-    @Test fun cachedArtworkUsesOnlyTheFreshOwnerAndNeverFetches() = runBlocking {
+    @Test fun cachedArtworkUsesOnlyTheMatchingOwnerAndNeverFetches() = runBlocking {
         val fixture = Fixture()
         val playlist = PlaylistRef("qq", "playlist-007")
         assertNull(fixture.cache.cachedArtwork(fixture.owner, fixture.provider, playlist))
         fixture.cache.write(fixture.owner, fixture.richFeed())
+        now = Instant.parse("2026-10-15T22:00:00Z").toEpochMilli()
         assertEquals(fixture.artwork, fixture.cache.cachedArtwork(fixture.owner, fixture.provider, playlist))
         assertNull(fixture.cache.cachedArtwork(fixture.owner.copy(accountRevision = "another"), fixture.provider, playlist))
         assertNull(fixture.cache.cachedArtwork(fixture.owner, fixture.provider, PlaylistRef("other", playlist.playlistId)))
@@ -482,9 +483,10 @@ class HomeRepositoryTest {
         vm.state.first { !it.loading && it.sections.isNotEmpty() }
         fixture.provider.failAppend = true
         vm.refresh()
-        vm.state.first { !it.loading && !it.refreshing && it.error != null }
+        val fallback = vm.state.first { !it.loading && !it.refreshing && it.cachedSnapshot }
         assertArrayEquals(before, fixture.cache.file(fixture.owner).readBytes())
-        assertEquals(SourceErrorCode.NETWORK, vm.state.value.error)
+        assertEquals(fixture.richFeed().sections, fallback.sections)
+        assertNull(fallback.error)
         vm.viewModelScope.cancel()
         fixture.cache.file(fixture.owner).writeText("{broken")
         fixture.provider.failAppend = false
@@ -493,6 +495,105 @@ class HomeRepositoryTest {
         reopened.state.first { !it.loading && it.sections.size == 2 }
         awaitCache(fixture, rejects = "{broken")
         assertNotNull(fixture.cache.read(fixture.owner, fixture.provider))
+    }
+
+    @Test fun offlineColdHomeUsesYesterdaySnapshotWithoutCallingTheSource() = runTest(dispatcher) {
+        val fixture = Fixture(hasNetwork = { false })
+        val page = fixture.richFeed()
+        assertTrue(fixture.cache.write(fixture.owner, page))
+        now = Instant.parse("2026-10-15T22:00:00Z").toEpochMilli()
+        val model = fixture.model()
+        model.open(SourceContentRequest.Feed(FeedKind.HOME, providerId = fixture.provider.id))
+        val offline = model.state.first { !it.loading && it.cachedSnapshot }
+        assertEquals(page.sections, offline.sections)
+        assertTrue(fixture.provider.requests.isEmpty())
+        assertNull(fixture.cache.read(fixture.owner, fixture.provider))
+    }
+
+    @Test fun librarySnapshotSurvivesTransportFailureAndDisappearsOnAccountSwitch() = runTest(dispatcher) {
+        val provider = ProfileProvider()
+        val cache = SourceHomeFeedCache(temporary.newFolder(), listOf(temporary.root)) { now }
+        val registry = ProviderRegistry(listOf(provider))
+        val owner = SourceHomeCacheOwner(provider.id, provider.instanceId, provider.version, provider.accountRevision.value)
+        val collection = LibraryCollection.LIKED_TRACKS
+        val request = SourceContentRequest.Library(collection, provider.id)
+        fun model() = SourceContentViewModel(SourceRouter(registry), SourcePreferences(MemoryPreferences()), registry,
+            homeCache = cache).also(models::add)
+        val initial = model()
+        initial.open(request)
+        val items = initial.state.first { !it.loading && it.items.isNotEmpty() }.items
+        withContext(Dispatchers.IO) {
+            withTimeout(3_000) {
+                while (!cache.file(owner, collection.operation).isFile) delay(10)
+            }
+        }
+        initial.viewModelScope.cancel()
+        provider.failure = SourceErrorCode.NETWORK
+        val reopened = model()
+        reopened.open(request)
+        val fallback = reopened.state.first { !it.loading && it.cachedSnapshot }
+        assertEquals(items, fallback.items)
+        assertFalse(fallback.hasMore)
+        assertNull(fallback.error)
+        provider.accountRevision.value = "another-account"
+        val otherAccount = reopened.state.first { !it.loading && it.accountRevision == "another-account" }
+        assertTrue(otherAccount.items.isEmpty())
+        assertEquals(SourceErrorCode.NETWORK, otherAccount.error)
+    }
+
+    @Test fun libraryAppendErrorKeepsTheNewerPageAndItsRetryCursor() = runTest(dispatcher) {
+        val provider = ProfileProvider().apply { libraryHasMore = true }
+        val cache = SourceHomeFeedCache(temporary.newFolder(), listOf(temporary.root)) { now }
+        val registry = ProviderRegistry(listOf(provider))
+        val owner = SourceHomeCacheOwner(provider.id, provider.instanceId, provider.version, provider.accountRevision.value)
+        val collection = LibraryCollection.LIKED_TRACKS
+        val oldItems = listOf("old-1", "old-2").map { id ->
+            SourceItem.TrackItem(Track(TrackRef(provider.id, id), id, emptyList()))
+        }
+        assertTrue(cache.writeSnapshot(owner,
+            SourceFeedPage(listOf(SourceFeedSection("items", "Library", SourceFeedLayout.GRID, oldItems))),
+            snapshot = collection.operation))
+        val model = SourceContentViewModel(SourceRouter(registry), SourcePreferences(MemoryPreferences()), registry,
+            homeCache = cache).also(models::add)
+        model.open(SourceContentRequest.Library(collection, provider.id))
+        val online = model.state.first { !it.loading && it.hasMore && it.items.isNotEmpty() }
+        provider.libraryFailure = SourceErrorCode.NETWORK
+        model.loadMore()
+        val failed = model.state.first { !it.loading && it.error == SourceErrorCode.NETWORK }
+        assertEquals(online.items, failed.items)
+        assertEquals(online.nextCursor, failed.nextCursor)
+        assertTrue(failed.hasMore)
+        assertFalse(failed.cachedSnapshot)
+        model.refresh()
+        val retained = model.state.first { !it.loading && it.cachedSnapshot }
+        assertEquals(online.items, retained.items)
+        assertEquals(SourceErrorCode.NETWORK, retained.error)
+        assertFalse(retained.refreshing)
+    }
+
+    @Test fun knownAuthExpiryRemovesOnlyTheFailedSnapshot() = runTest(dispatcher) {
+        var online = true
+        val provider = ProfileProvider()
+        val cache = SourceHomeFeedCache(temporary.newFolder(), listOf(temporary.root), { online }) { now }
+        val registry = ProviderRegistry(listOf(provider))
+        val owner = SourceHomeCacheOwner(provider.id, provider.instanceId, provider.version, provider.accountRevision.value)
+        val collection = LibraryCollection.LIKED_TRACKS
+        val otherCollection = LibraryCollection.CREATED_PLAYLISTS
+        for (key in listOf(collection.operation, otherCollection.operation)) {
+            val snapshot = SourceFeedPage(listOf(SourceFeedSection("items", "Library", SourceFeedLayout.GRID, emptyList())))
+            assertTrue(cache.writeSnapshot(owner, snapshot, snapshot = key))
+        }
+        fun model() = SourceContentViewModel(SourceRouter(registry), SourcePreferences(MemoryPreferences()), registry,
+            homeCache = cache).also(models::add)
+        provider.failure = SourceErrorCode.AUTH_EXPIRED
+        model().apply { open(SourceContentRequest.Library(collection, provider.id)) }
+            .state.first { !it.loading && it.error == SourceErrorCode.AUTH_EXPIRED }
+        assertFalse(cache.file(owner, collection.operation).exists())
+        assertTrue(cache.file(owner, otherCollection.operation).exists())
+        online = false
+        val offline = model().apply { open(SourceContentRequest.Library(collection, provider.id)) }
+            .state.first { !it.loading && it.error == SourceErrorCode.NETWORK }
+        assertFalse(offline.cachedSnapshot)
     }
 
     @Test fun repeatedFeedContentStopsEvenWhenTheCursorChanges() = runTest(dispatcher) {
@@ -534,12 +635,12 @@ class HomeRepositoryTest {
         }
     }
 
-    private inner class Fixture {
+    private inner class Fixture(hasNetwork: () -> Boolean = { true }) {
         val directory = temporary.newFolder()
         val artwork = File(temporary.root, "cover.jpg").toURI().toString()
         val provider = FeedProvider()
         val owner = SourceHomeCacheOwner(provider.id, provider.instanceId, provider.version, provider.accountRevision.value)
-        val cache = SourceHomeFeedCache(directory, listOf(temporary.root)) { now }
+        val cache = SourceHomeFeedCache(directory, listOf(temporary.root), hasNetwork) { now }
         fun model(): SourceContentViewModel {
             val registry = ProviderRegistry(listOf(provider))
             return SourceContentViewModel(SourceRouter(registry), SourcePreferences(MemoryPreferences()), registry, homeCache = cache).also(models::add)
@@ -581,6 +682,7 @@ class HomeRepositoryTest {
         var pending: CompletableDeferred<Unit>? = null
         var libraryPending: CompletableDeferred<Unit>? = null
         var libraryFailure: SourceErrorCode? = null
+        var libraryHasMore = false
         val libraryRequests = mutableListOf<PageRequest>()
         val playlistRequests = mutableListOf<PageRequest>()
         var remotePlaylistVersion = 1
@@ -599,7 +701,7 @@ class HomeRepositoryTest {
             val item = if (collection == LibraryCollection.LIKED_TRACKS)
                 SourceItem.TrackItem(Track(TrackRef(id, "track"), "Track", emptyList()))
             else SourceItem.PlaylistItem(SourcePlaylist(PlaylistRef(id, "playlist"), "Playlist"))
-            return SourcePage(listOf(item))
+            return SourcePage(listOf(item), hasMore = libraryHasMore, nextCursor = "next".takeIf { libraryHasMore })
         }
         override suspend fun playlist(ref: PlaylistRef) = SourcePlaylist(ref, "Playlist $displayedPlaylistVersion")
         override suspend fun playlistTracks(ref: PlaylistRef, page: PageRequest): SourcePage<Track> {

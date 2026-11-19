@@ -35,7 +35,9 @@ import com.ljyh.mei.di.AppDatabase
 import com.ljyh.mei.utils.ImageUtils
 import com.ljyh.mei.utils.AudioFileFormat
 import com.ljyh.mei.utils.detectAudioFileFormat
+import com.ljyh.mei.utils.deleteDownloadedArtwork
 import com.ljyh.mei.utils.localAudioPublicationMutex
+import com.ljyh.mei.utils.saveDownloadedArtwork
 import com.ljyh.mei.utils.lyric.LyricPreloader
 import com.ljyh.mei.utils.SongMate
 import kotlinx.coroutines.Dispatchers
@@ -295,9 +297,12 @@ class DownloadWorker(
                 .getOrDefault(0L)
             val lyric = async { downloadLyric(task, songId, duration) }
             val cover = async { if (task.songCover.isNotBlank()) ImageUtils.downloadImageBytes(task.songCover) else null }
+            val coverBytes = cover.await() ?: runCatching {
+                AudioFileIO.readAs(tempFile, format.extension).tag?.firstArtwork?.binaryData
+            }.getOrNull()
             try {
                 SongMate.writeTagsWithCoverBytes(task.songTitle, task.songArtist, task.songAlbum,
-                    cover.await(), tempFile.absolutePath, lyric.await())
+                    coverBytes, tempFile.absolutePath, lyric.await())
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -310,16 +315,19 @@ class DownloadWorker(
                 try {
                     published = publishDownloadedAudio(applicationContext, tempFile, fileName, format.extension, relativePath)
                     val uri = checkNotNull(published) { "Could not publish downloaded audio" }
+                    val localCover = coverBytes?.let { saveDownloadedArtwork(applicationContext, uri.toString(), it) }
                     if (saveDownloadedSong(db, songId, task, uri, duration, relativePath,
-                            format, fileName, tempFile.length())) {
+                            format, fileName, tempFile.length(), localCover ?: task.songCover)) {
                         published = null
                         completedCount.incrementAndGet()
+                        if (existingPath != uri.toString()) deleteDownloadedArtwork(applicationContext, existingPath)
                     }
                 } finally {
                     published?.let { uri -> withContext(NonCancellable) {
                         // Keep publication cleanup inside the scanner's reconciliation lock.
                         // Cancellation may arrive after Room commits but before it returns.
                         if (db.songDao().getSong(songId).first()?.path != uri.toString()) {
+                            deleteDownloadedArtwork(applicationContext, uri.toString())
                             applicationContext.contentResolver.delete(uri, null, null)
                         }
                     } }
@@ -358,6 +366,7 @@ class DownloadWorker(
         format: AudioFileFormat,
         fileName: String,
         fileSize: Long,
+        cover: String,
     ): Boolean = db.withTransaction {
         currentCoroutineContext().ensureActive()
         val current = db.downloadDao().getBySongId(songId)
@@ -372,7 +381,7 @@ class DownloadWorker(
                 .filter { it.isNotBlank() }
                 .ifEmpty { listOf(task.songArtist.trim()) },
             album = task.songAlbum,
-            cover = task.songCover,
+            cover = cover,
             duration = durationMs,
             path = uri.toString(),
             sourceType = SourceType.DOWNLOAD,

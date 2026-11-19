@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="queue_modes_intro_title">播放模式</string>
+    <string name="queue_automix_description">自動混合歌曲之間的轉場</string>
+    <string name="queue_actions">佇列操作</string>
+    <string name="queue_like_all">將佇列加入喜愛歌曲</string>
+    <string name="queue_like_all_confirm">將 %1$d 首歌曲加入喜愛歌曲？</string>
+    <string name="queue_liked_count">%2$d 首歌曲中有 %1$d 首已加入喜愛歌曲</string>
+    <string name="queue_save_playlist">將佇列儲存為歌單</string>
+    <string name="queue_playlist_count">已將 %2$d 首歌曲中的 %1$d 首存入歌單</string>
+    <string name="queue_collection_failed">無法儲存佇列</string>
+    <string name="detail_save_cover">儲存封面</string>
+    <string name="detail_cover_saving">正在儲存封面…</string>
+    <string name="detail_cover_saved">封面已儲存至相簿</string>
+    <string name="detail_cover_save_failed">無法儲存封面</string>
+    <string name="comment_voice">語音留言</string>
+    <string name="comment_voice_seconds">語音留言 · %1$d 秒</string>
+</resources>

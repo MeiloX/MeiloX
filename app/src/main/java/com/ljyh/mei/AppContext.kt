@@ -10,6 +10,7 @@ import coil3.memory.MemoryCache
 import coil3.gif.AnimatedImageDecoder
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
+import androidx.datastore.preferences.core.emptyPreferences
 import com.ljyh.mei.constants.DefaultImageCacheLimitMb
 import com.ljyh.mei.constants.ImageCacheLimitMbKey
 import com.ljyh.mei.utils.dataStore
@@ -18,11 +19,14 @@ import dagger.hilt.android.HiltAndroidApp
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import java.io.IOException
 import javax.inject.Inject
 import com.ljyh.mei.source.script.ScriptPluginManager
 import timber.log.Timber
@@ -33,6 +37,16 @@ class AppContext : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var sourceArtwork: com.ljyh.mei.source.script.SourceArtworkStore
     @Inject lateinit var sourceUpdates: com.ljyh.mei.source.update.SourceUpdateManager
     private val sourceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var imageCacheLimitMb = DefaultImageCacheLimitMb
+    private val imageCacheSettings by lazy {
+        sourceScope.async(start = CoroutineStart.LAZY) {
+            val preferences = dataStore.data.catch { error ->
+                if (error !is IOException) throw error
+                emit(emptyPreferences())
+            }.first()
+            imageCacheLimitMb = preferences[ImageCacheLimitMbKey] ?: DefaultImageCacheLimitMb
+        }
+    }
     override fun onCreate() {
         // The isolated JavaScript worker must not initialize Hilt, accounts or app storage.
         // Hilt injects from its Application.onCreate(), so this guard precedes super.
@@ -42,6 +56,7 @@ class AppContext : Application(), SingletonImageLoader.Factory {
         // Timber owns its trees for the lifetime of this process, across Activity recreation.
         if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree())
         Timber.plant(FileLoggingTree(applicationContext))
+        imageCacheSettings.start()
         com.ljyh.mei.source.script.SourceArtworkRegistry.attach(sourceArtwork)
         sourceScope.launch { sourcePlugins.loadInstalled() }
         sourceUpdates.checkOnStartup()
@@ -75,20 +90,28 @@ class AppContext : Application(), SingletonImageLoader.Factory {
                 newDiskCache()
             }
             .components {
+                add(coil3.intercept.Interceptor { chain ->
+                    imageCacheSettings.await()
+                    chain.proceed()
+                })
                 add(com.ljyh.mei.source.script.SourceArtworkRegistry.interceptor)
                 add(OkHttpNetworkFetcherFactory(okHttpClient))
                 add(AnimatedImageDecoder.Factory())
             }
             .build()
     }
-    private fun newDiskCache(): DiskCache {
-        val limitMb = runBlocking {
-            dataStore.data.first()[ImageCacheLimitMbKey] ?: DefaultImageCacheLimitMb
+
+    internal suspend fun clearImageCache() {
+        imageCacheSettings.await()
+        SingletonImageLoader.get(this).let { loader ->
+            loader.memoryCache?.clear()
+            loader.diskCache?.clear()
         }
-        return DiskCache.Builder()
-            .directory(cacheDir.resolve("image_cache"))
-            .maxSizeBytes(limitMb.coerceIn(50, 2048) * 1024L * 1024L)
-            .build()
     }
+
+    private fun newDiskCache(): DiskCache = DiskCache.Builder()
+        .directory(cacheDir.resolve("image_cache"))
+        .maxSizeBytes(imageCacheLimitMb.coerceIn(50, 2048) * 1024L * 1024L)
+        .build()
 }
 

@@ -59,6 +59,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -105,6 +106,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.edit
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -116,21 +119,38 @@ import com.kyant.shapes.Capsule
 import com.ljyh.mei.R
 import com.ljyh.mei.constants.AutoMixEnabledKey
 import com.ljyh.mei.constants.LoopPlaybackKey
+import com.ljyh.mei.constants.QueueModesIntroDismissedKey
 import com.ljyh.mei.constants.songListCoverCornerRadius
 import com.ljyh.mei.constants.songListCoverSize
 import com.ljyh.mei.ui.component.playlist.songListDividerColor
+import com.ljyh.mei.ui.component.playlist.CreatePlaylistSheet
+import com.ljyh.mei.ui.component.player.PlayerViewModel
+import com.ljyh.mei.source.api.LikeCapability
+import com.ljyh.mei.source.api.PlaylistEditAction
+import com.ljyh.mei.source.api.PlaylistEditCapability
+import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.data.model.metadata
 import com.ljyh.mei.playback.PlayerConnection
 import com.ljyh.mei.playback.playbackOrderIndices
 import com.ljyh.mei.playback.queueEntryId
+import io.github.neoruaa.glasmio.core.IosTypography
+import io.github.neoruaa.glasmio.core.LocalGlassColors
+import io.github.neoruaa.glasmio.ui.GlasmioAlertButtonRole
+import io.github.neoruaa.glasmio.ui.GlasmioAlertButtonSpec
+import io.github.neoruaa.glasmio.ui.GlasmioAlertDialog
 import io.github.neoruaa.glasmio.ui.GlasmioMenuItem
+import io.github.neoruaa.glasmio.ui.GlasmioPopover
+import io.github.neoruaa.glasmio.ui.GlasmioTooltip
 import io.github.neoruaa.glasmio.ui.GlasmioMenu
 import io.github.neoruaa.glasmio.icons.SfIcon
+import com.ljyh.mei.utils.dataStore
 import com.ljyh.mei.utils.rememberPreference
 import com.ljyh.mei.utils.smallImage
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -633,6 +653,25 @@ fun PlayerQueuePage(
     val autoplayStartEntryId by playerConnection.queueAutoplayStartEntryId.collectAsStateWithLifecycle()
     val (autoMixEnabled, setAutoMixEnabled) = rememberPreference(AutoMixEnabledKey, false)
     val (_, setLoopPlayback) = rememberPreference(LoopPlaybackKey, true)
+    val introPreference: Flow<Boolean?> = remember(context) {
+        context.dataStore.data.map { it[QueueModesIntroDismissedKey] ?: false }
+    }
+    val introDismissed by introPreference.collectAsStateWithLifecycle(initialValue = null)
+    var introDismissedHere by rememberSaveable { mutableStateOf(false) }
+    var showModesIntro by remember { mutableStateOf(false) }
+    val introScope = rememberCoroutineScope()
+    LaunchedEffect(active, selected, introDismissed, introDismissedHere) {
+        showModesIntro = false
+        if (active && selected && introDismissed == false && !introDismissedHere) {
+            delay(350)
+            showModesIntro = true
+        }
+    }
+    val dismissModesIntro: () -> Unit = {
+        showModesIntro = false
+        introDismissedHere = true
+        introScope.launch { context.dataStore.edit { it[QueueModesIntroDismissedKey] = true } }
+    }
     var repeatMode by remember(player) { mutableIntStateOf(player.repeatMode) }
     val entries = remember(player) {
         mutableStateListOf<PhoneQueueEntry>().apply { addAll(player.phoneQueueEntries()) }
@@ -1193,9 +1232,10 @@ fun PlayerQueuePage(
                     setLoopPlayback(nextMode != Player.REPEAT_MODE_OFF)
                 },
             )
-            QueueModeButton(
+            QueueAutoplayButton(
+                showIntro = showModesIntro,
+                onDismissIntro = dismissModesIntro,
                 indication = indication,
-                systemName = "infinity",
                 label = stringResource(R.string.queue_autoplay),
                 selected = autoplayEnabled,
                 modifier = Modifier.weight(1f),
@@ -1205,33 +1245,39 @@ fun PlayerQueuePage(
             QueueModeButton(
                 indication = indication,
                 systemName = "circlebadge.2",
-                label = stringResource(R.string.automix_enabled),
+                label = stringResource(R.string.automix),
                 selected = autoMixEnabled,
                 modifier = Modifier.weight(1f),
                 onClick = { setAutoMixEnabled(!autoMixEnabled) },
             )
         }
     }
+    val queueTracks = remember(entriesSnapshot) {
+        entriesSnapshot.mapNotNull { entry ->
+            entry.mediaItem.metadata?.takeUnless { it.isLocal || it.isPodcast }?.trackRef
+        }.distinct()
+    }
     val continueHeading: @Composable (Modifier) -> Unit = { headingModifier ->
-        Column(
-            headingModifier,
-        ) {
-            Text(
-                stringResource(R.string.queue_continue_playing),
-                color = Color.White.copy(alpha = 0.92f),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                stringResource(
-                    R.string.queue_from_source,
-                    queueTitle?.takeIf(String::isNotBlank) ?: stringResource(R.string.player_action_queue),
-                ),
-                color = Color.White.copy(alpha = 0.55f),
-                fontSize = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Row(headingModifier, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.queue_continue_playing),
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(
+                        R.string.queue_from_source,
+                        queueTitle?.takeIf(String::isNotBlank) ?: stringResource(R.string.player_action_queue),
+                    ),
+                    color = Color.White.copy(alpha = 0.55f),
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            QueueCollectionMenu(queueTracks, queueTitle)
         }
     }
     val landscapeHeading: @Composable (Modifier) -> Unit = { headingModifier ->
@@ -1241,15 +1287,17 @@ fun PlayerQueuePage(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             continueHeading(Modifier.weight(1f).playerAdditiveBlend())
-            QueueModeButton(
-                systemName = "infinity", label = stringResource(R.string.queue_autoplay),
+            QueueAutoplayButton(
+                showIntro = showModesIntro,
+                onDismissIntro = dismissModesIntro,
+                label = stringResource(R.string.queue_autoplay),
                 selected = autoplayEnabled, modifier = Modifier.width(76.dp),
                 enabled = !fmEnabled || autoplayEnabled,
                 indication = indication,
                 onClick = { playerConnection.setQueueAutoplayEnabled(!autoplayEnabled) },
             )
             QueueModeButton(
-                systemName = "circlebadge.2", label = stringResource(R.string.automix_enabled),
+                systemName = "circlebadge.2", label = stringResource(R.string.automix),
                 selected = autoMixEnabled, modifier = Modifier.width(76.dp),
                 indication = indication,
                 onClick = { setAutoMixEnabled(!autoMixEnabled) },
@@ -1970,32 +2018,152 @@ private fun QueueModeButton(
     indication: Indication? = LocalIndication.current,
     onClick: () -> Unit,
 ) {
-    Box(
-        modifier = modifier
-            .height(36.dp)
-            .playerAdditiveBlend()
-            .clip(Capsule())
-            .background(Color.White.copy(alpha = if (selected) 0.45f else 0.1f))
-            .semantics { this.selected = selected }
-            .clickable(
-                interactionSource = null,
-                indication = indication,
-                enabled = enabled,
-                role = Role.Button,
-                onClick = onClick,
-            ),
-        contentAlignment = Alignment.Center,
+    GlasmioTooltip(text = label, modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .playerAdditiveBlend()
+                .clip(Capsule())
+                .background(Color.White.copy(alpha = if (selected) 0.45f else 0.1f))
+                .semantics { this.selected = selected }
+                .clickable(
+                    interactionSource = null,
+                    indication = indication,
+                    enabled = enabled,
+                    role = Role.Button,
+                    onClick = onClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            SfIcon(
+                systemName = systemName,
+                contentDescription = label,
+                tint = if (selected) Color.White else Color.White.copy(alpha = if (enabled) 0.8f else 0.3f),
+                size = 22.dp,
+                weight = FontWeight.Medium,
+                modifier = if (selected) Modifier.graphicsLayer {
+                    blendMode = BlendMode.DstOut
+                    compositingStrategy = CompositingStrategy.Offscreen
+                } else Modifier,
+            )
+        }
+    }
+}
+
+@Composable
+private fun QueueAutoplayButton(
+    showIntro: Boolean,
+    onDismissIntro: () -> Unit,
+    label: String,
+    selected: Boolean,
+    modifier: Modifier,
+    enabled: Boolean,
+    indication: Indication?,
+    onClick: () -> Unit,
+) {
+    GlasmioPopover(
+        visible = showIntro,
+        onDismissRequest = onDismissIntro,
+        modifier = modifier,
+        adaptToSheet = false,
+        title = stringResource(R.string.queue_modes_intro_title),
+        anchor = {
+            QueueModeButton("infinity", label, selected, enabled = enabled, indication = indication, onClick = onClick)
+        },
     ) {
-        SfIcon(
-            systemName = systemName,
-            contentDescription = label,
-            tint = if (selected) Color.White else Color.White.copy(alpha = if (enabled) 0.8f else 0.3f),
-            size = 22.dp,
-            weight = FontWeight.Medium,
-            modifier = if (selected) Modifier.graphicsLayer {
-                blendMode = BlendMode.DstOut
-                compositingStrategy = CompositingStrategy.Offscreen
-            } else Modifier,
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            QueueModeIntroduction("infinity", label, stringResource(R.string.queue_autoplay_description))
+            QueueModeIntroduction("circlebadge.2", stringResource(R.string.automix), stringResource(R.string.queue_automix_description))
+        }
+    }
+}
+
+@Composable
+private fun QueueModeIntroduction(symbol: String, title: String, description: String) {
+    val colors = LocalGlassColors.current
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        SfIcon(symbol, contentDescription = null, tint = colors.content, size = 20.dp)
+        Column(Modifier.weight(1f)) {
+            Text(title, color = colors.content, style = IosTypography.subheadline, fontWeight = FontWeight.SemiBold)
+            Text(description, color = colors.secondaryContent, style = IosTypography.footnote)
+        }
+    }
+}
+
+@Composable
+private fun QueueCollectionMenu(tracks: List<TrackRef>, queueTitle: String?) {
+    val viewModel: PlayerViewModel = hiltViewModel()
+    val providers by viewModel.sourceProviders.collectAsStateWithLifecycle()
+    val likeTracks = remember(tracks, providers) {
+        val capable = providers.filter { it is LikeCapability && it.canReadLikes && it.canWriteLikes }
+            .map { it.id }.toSet()
+        tracks.filter { it.providerId in capable }
+    }
+    val playlistProvider = tracks.firstOrNull()?.providerId?.takeIf { id -> tracks.all { it.providerId == id } }
+    val editor = providers.firstOrNull { it.id == playlistProvider } as? PlaylistEditCapability
+    val canSave = editor?.playlistEditActions?.containsAll(setOf(PlaylistEditAction.CREATE, PlaylistEditAction.ADD_TRACKS)) == true
+    if (likeTracks.isEmpty() && !canSave) return
+
+    val busy by viewModel.queueCollectionInProgress.collectAsStateWithLifecycle()
+    var menuOpen by remember { mutableStateOf(false) }
+    var pendingLikes by remember { mutableStateOf(emptyList<TrackRef>()) }
+    var pendingPlaylist by remember { mutableStateOf(emptyList<TrackRef>()) }
+    GlasmioMenu(
+        expanded = menuOpen,
+        onExpandedChange = { menuOpen = it },
+        itemCount = (if (likeTracks.isEmpty()) 0 else 1) + (if (canSave) 1 else 0),
+        fullScreen = true,
+        keepAnchorVisible = true,
+        anchor = { open ->
+            Box(
+                Modifier.size(34.dp).clickable(enabled = !busy, role = Role.Button, onClick = open),
+                contentAlignment = Alignment.Center,
+            ) {
+                SfIcon("ellipsis", stringResource(R.string.queue_actions), tint = Color.White, size = 18.dp)
+            }
+        },
+    ) { backdrop, close ->
+        if (likeTracks.isNotEmpty()) GlasmioMenuItem(
+            title = stringResource(R.string.queue_like_all),
+            systemName = "heart",
+            backdrop = backdrop,
+            onClick = {
+                close()
+                pendingLikes = likeTracks
+            },
+        )
+        if (canSave) GlasmioMenuItem(
+            title = stringResource(R.string.queue_save_playlist),
+            systemName = "music.note.list",
+            backdrop = backdrop,
+            onClick = {
+                close()
+                pendingPlaylist = tracks
+            },
         )
     }
+    GlasmioAlertDialog(
+        visible = pendingLikes.isNotEmpty(),
+        onDismissRequest = { pendingLikes = emptyList() },
+        title = stringResource(R.string.queue_like_all),
+        message = stringResource(R.string.queue_like_all_confirm, pendingLikes.size),
+        buttons = listOf(
+            GlasmioAlertButtonSpec(stringResource(R.string.cancel), { pendingLikes = emptyList() }, GlasmioAlertButtonRole.Cancel),
+            GlasmioAlertButtonSpec(stringResource(R.string.done), onClick = {
+                val snapshot = pendingLikes
+                pendingLikes = emptyList()
+                viewModel.likeQueueTracks(snapshot)
+            }),
+        ),
+    )
+    if (pendingPlaylist.isNotEmpty()) CreatePlaylistSheet(
+        defaultText = queueTitle.orEmpty().take(20),
+        onDismiss = { pendingPlaylist = emptyList() },
+        onConfirm = { title, privacy ->
+            val snapshot = pendingPlaylist
+            pendingPlaylist = emptyList()
+            viewModel.saveQueuePlaylist(snapshot, title, privacy)
+        },
+    )
 }

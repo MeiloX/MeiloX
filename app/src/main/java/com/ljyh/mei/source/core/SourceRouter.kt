@@ -3,6 +3,10 @@ package com.ljyh.mei.source.core
 import com.ljyh.mei.source.api.*
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -297,7 +301,22 @@ class SourceRouter @Inject constructor(
         affectsTrackLikes: Boolean = false, action: suspend () -> T): T =
         mutations.mutate(owner, key, signature) {
             try { action().also { mutations.ensureCurrent(owner); contentChanged(affectsTrackLikes) } }
-            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (cancelled: CancellationException) {
+                if (currentCoroutineContext()[SourceMutationAuthorization] != null && canReconcile()) {
+                    withContext(NonCancellable) {
+                        // A provider may already have received the write before cancellation.
+                        // Clear stale confirmation only if this is still the same account.
+                        try {
+                            mutations.ensureCurrent(owner)
+                            mutations.invalidate(owner, uncertain)
+                            contentChanged(affectsTrackLikes)
+                        } catch (_: CancellationException) {
+                            // Account replacement already invalidates the previous confirmation.
+                        }
+                    }
+                }
+                throw cancelled
+            }
             catch (error: Exception) {
                 val ambiguous = if (error is SourceException) error.outcomeUnknown || error.code in setOf(
                     SourceErrorCode.NETWORK, SourceErrorCode.TIMEOUT, SourceErrorCode.INVALID_RESPONSE,

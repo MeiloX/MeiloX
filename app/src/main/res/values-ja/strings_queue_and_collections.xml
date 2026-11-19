@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="queue_modes_intro_title">再生モード</string>
+    <string name="queue_automix_description">曲の切り替えを自動でミックスします</string>
+    <string name="queue_actions">再生キューの操作</string>
+    <string name="queue_like_all">キューの曲をお気に入りに追加</string>
+    <string name="queue_like_all_confirm">%1$d 曲をお気に入りに追加しますか？</string>
+    <string name="queue_liked_count">%2$d 曲中 %1$d 曲がお気に入りに追加済み</string>
+    <string name="queue_save_playlist">キューをプレイリストに保存</string>
+    <string name="queue_playlist_count">%2$d 曲中 %1$d 曲をプレイリストに保存しました</string>
+    <string name="queue_collection_failed">キューを保存できませんでした</string>
+    <string name="detail_save_cover">カバーを保存</string>
+    <string name="detail_cover_saving">カバーを保存中…</string>
+    <string name="detail_cover_saved">カバーを写真に保存しました</string>
+    <string name="detail_cover_save_failed">カバーを保存できませんでした</string>
+    <string name="comment_voice">音声コメント</string>
+    <string name="comment_voice_seconds">音声コメント · %1$d 秒</string>
+</resources>

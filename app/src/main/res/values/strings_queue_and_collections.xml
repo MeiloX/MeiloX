@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="queue_modes_intro_title">Playback Modes</string>
+    <string name="queue_automix_description">Blends the transitions between songs</string>
+    <string name="queue_actions">Queue Actions</string>
+    <string name="queue_like_all">Add Queue to Liked Songs</string>
+    <string name="queue_like_all_confirm">Add %1$d songs to Liked Songs?</string>
+    <string name="queue_liked_count">%1$d of %2$d songs in Liked Songs</string>
+    <string name="queue_save_playlist">Save Queue as Playlist</string>
+    <string name="queue_playlist_count">%1$d of %2$d songs saved to the playlist</string>
+    <string name="queue_collection_failed">Couldn’t save the queue</string>
+    <string name="detail_save_cover">Save Cover</string>
+    <string name="detail_cover_saving">Saving cover…</string>
+    <string name="detail_cover_saved">Cover saved to Photos</string>
+    <string name="detail_cover_save_failed">Couldn’t save the cover</string>
+    <string name="comment_voice">Voice comment</string>
+    <string name="comment_voice_seconds">Voice comment · %1$d sec</string>
+</resources>

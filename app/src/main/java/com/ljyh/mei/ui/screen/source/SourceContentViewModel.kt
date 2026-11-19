@@ -13,7 +13,10 @@ import com.ljyh.mei.source.core.SourceRouter
 import com.ljyh.mei.source.core.SourceFeatureClient
 import com.ljyh.mei.source.core.SourceHomeFeedCache
 import com.ljyh.mei.source.core.SourceHomeCacheOwner
+import com.ljyh.mei.source.shared.SourceShareResource
+import com.ljyh.mei.source.shared.shareResourceLink
 import com.ljyh.mei.source.shared.whileCurrent
+import com.ljyh.mei.data.model.melox.ShareResourceKind
 import com.ljyh.mei.source.script.ScriptPluginManager
 import com.ljyh.mei.source.script.InstalledPlugin
 import com.ljyh.mei.source.script.SourceCatalogInvalidatedException
@@ -81,6 +84,8 @@ data class SourceContentState(
     val nextCursor: String? = null,
     val nextOffset: Int = 0,
     val error: SourceErrorCode? = null,
+    val cachedSnapshot: Boolean = false,
+    val hasSnapshotContent: Boolean = false,
     val albumsHasMore: Boolean = false,
     val albumsNextCursor: String? = null,
     val albumsNextOffset: Int = 0,
@@ -171,7 +176,7 @@ class SourceContentViewModel internal constructor(
                             refreshing = refreshing)
                         displayedRequest = requested
                         displayedProvider = provider
-                        val home = requested is SourceContentRequest.Feed && requested.kind == FeedKind.HOME
+                        val home = requested is SourceContentRequest.Feed && requested.kind == FeedKind.HOME && requested.categoryId == null
                         val owner = provider?.takeIf { home }?.let { SourceHomeCacheOwner(id, it.instanceId, it.version, accountRevision) }
                         val cacheGuard: suspend () -> Unit = {
                             currentCoroutineContext().ensureActive()
@@ -181,28 +186,47 @@ class SourceContentViewModel internal constructor(
                             homeCache?.read(owner, provider, cacheGuard) else null
                         if (cached != null) {
                             mutableState.value = state.value.copy(sections = cached.sections, categories = cached.categories, loading = false,
-                                hasMore = false, nextCursor = null, error = null)
+                                hasMore = false, nextCursor = null, error = null, cachedSnapshot = false, hasSnapshotContent = true)
+                            return@account
+                        }
+                        if (requested.canCacheSnapshot() && provider?.status == SourceStatus.READY &&
+                            homeCache?.isOffline() == true) {
+                            if (!retainSnapshotContent(state.value) && !restoreCachedPage(requested, provider, token)) {
+                                mutableState.value = state.value.copy(loading = false, refreshing = false,
+                                    error = SourceErrorCode.NETWORK)
+                            }
                             return@account
                         }
                         load(requested, id, token, append = false, refresh = refreshing, forceAccountRefresh = refreshing)
                         // Home originally publishes the complete recommendation feed, including later modules.
                         if (requested is SourceContentRequest.Feed && requested.kind == FeedKind.HOME) {
                             var pages = 1
-                            while (token == generation && state.value.error == null && state.value.hasMore && pages < 10) {
+                            while (token == generation && state.value.error == null && !state.value.cachedSnapshot &&
+                                state.value.hasMore && pages < 10) {
                                 mutableState.value = state.value.copy(loading = true)
                                 load(requested, id, token, append = true)
                                 pages++
                             }
-                            if (token == generation && state.value.error == null && state.value.hasMore) {
+                            val current = state.value
+                            if (token == generation && home && current.error?.isSnapshotTransportFailure() == true) {
+                                // Prefer the previous complete feed when a new stream stops between pages.
+                                val retained = sameOwner && !previous.hasMore && retainSnapshotContent(previous)
+                                if (!retained && provider != null) {
+                                    restoreCachedPage(requested, provider, token)
+                                }
+                            }
+                            if (token == generation && state.value.error == null && !state.value.cachedSnapshot && state.value.hasMore) {
                                 mutableState.value = state.value.copy(loading = false, hasMore = false, error = SourceErrorCode.INVALID_RESPONSE)
                             }
-                            if (token == generation && state.value.error == null && !state.value.hasMore && owner != null) {
+                            if (token == generation && state.value.error == null && !state.value.cachedSnapshot &&
+                                !state.value.hasMore && owner != null) {
                                 homeCache?.write(owner, SourceFeedPage(state.value.sections, state.value.categories), cacheGuard)
                             }
                         }
                         if (token == generation) {
                             mutableState.value = state.value.copy(refreshing = false)
-                            if (requested is SourceContentRequest.Detail && requested.ref is PlaylistRef && state.value.error == null && searchIndexDao != null) {
+                            if (requested is SourceContentRequest.Detail && requested.ref is PlaylistRef &&
+                                state.value.error == null && !state.value.cachedSnapshot && searchIndexDao != null) {
                                 warmPlaylist(requested.ref, token, refreshing)
                             }
                         }
@@ -243,6 +267,16 @@ class SourceContentViewModel internal constructor(
         mutableState.value = current.copy(refreshing = true)
         refresh()
         return true
+    }
+
+    internal suspend fun detailShareUrl(ref: ContentRef, title: String): String? {
+        val kind = when (ref) {
+            is PlaylistRef -> ShareResourceKind.Playlist
+            is AlbumRef -> ShareResourceKind.Album
+            else -> return null
+        }
+        return features?.bind(ref.providerId, "detail-share")
+            ?.shareResourceLink(SourceShareResource(ref, kind, title, null, null))
     }
 
     fun selectProvider(id: String) { viewModelScope.launch { preferences.update { it.copy(preferredBrowseProvider = id) } } }
@@ -436,7 +470,10 @@ class SourceContentViewModel internal constructor(
                 sections = latest.sections, albumsHasMore = latest.albumsHasMore, albumsNextCursor = latest.albumsNextCursor,
                 albumsNextOffset = latest.albumsNextOffset, albumsLoading = latest.albumsLoading, albumsError = latest.albumsError,
             ) else progressed
-            mutableState.value = updated.copy(providerId = id, loading = false, error = null, nextOffset = page.offset + received)
+            val published = updated.copy(providerId = id, loading = false, error = null, cachedSnapshot = false,
+                hasSnapshotContent = requested.canCacheSnapshot(), nextOffset = page.offset + received)
+            mutableState.value = published
+            cacheLibraryContent(requested, boundProvider, token, published)
         } catch (cancelled: CancellationException) {
             if (!ownsActivePage()) throw cancelled
             if (retryCancellation && cancelled is SourceCatalogInvalidatedException) {
@@ -454,9 +491,94 @@ class SourceContentViewModel internal constructor(
             }
         } catch (error: Exception) {
             timber.log.Timber.tag("SourceContent").w(error, "Source content unavailable")
-            if (token == generation) mutableState.value = state.value.copy(loading = false, error = error.sourceCode(),
-                account = state.value.account.takeUnless { error.sourceCode() == SourceErrorCode.AUTH_REQUIRED || error.sourceCode() == SourceErrorCode.AUTH_EXPIRED },
-                hasMore = state.value.hasMore && error.sourceCode() != SourceErrorCode.INVALID_RESPONSE)
+            val code = error.sourceCode()
+            val owner = loadingProvider
+            val authFailure = code == SourceErrorCode.AUTH_REQUIRED || code == SourceErrorCode.AUTH_EXPIRED
+            if (owner != null && requested.canCacheSnapshot() && ownsActivePage()) {
+                if (authFailure) {
+                    val cacheOwner = SourceHomeCacheOwner(id, owner.instanceId, owner.version, previous.accountRevision)
+                    homeCache?.invalidate(cacheOwner, requested.librarySnapshotKey())
+                    if (!ownsActivePage()) return
+                    mutableState.value = SourceContentState(
+                        providerId = id,
+                        providerVersion = owner.version,
+                        accountRevision = previous.accountRevision,
+                        error = code,
+                    )
+                    return
+                }
+                if (!append && code.isSnapshotTransportFailure()) {
+                    val retainedError = code.takeUnless { requested is SourceContentRequest.Feed }
+                    if (retainSnapshotContent(previous.copy(account = state.value.account), retainedError) ||
+                        restoreCachedPage(requested, owner, token)) return
+                }
+            }
+            if (token == generation) mutableState.value = state.value.copy(loading = false, refreshing = false, error = code,
+                account = state.value.account.takeUnless { authFailure },
+                hasMore = state.value.hasMore && code != SourceErrorCode.INVALID_RESPONSE)
+        }
+    }
+
+    private fun retainSnapshotContent(previous: SourceContentState, error: SourceErrorCode? = null): Boolean {
+        if (!previous.hasSnapshotContent) return false
+        mutableState.value = previous.copy(loading = false, refreshing = false, cachedSnapshot = true, error = error)
+        return true
+    }
+
+    private suspend fun restoreCachedPage(requested: SourceContentRequest, provider: MusicProvider, token: Long): Boolean {
+        val before = state.value
+        val snapshotKey = requested.librarySnapshotKey()
+        val home = requested is SourceContentRequest.Feed && requested.kind == FeedKind.HOME && requested.categoryId == null
+        if (!home && snapshotKey == null || snapshotKey != null && SourceCapability.ACCOUNT in provider.capabilities &&
+            before.accountRevision == null) return false
+        val owner = SourceHomeCacheOwner(provider.id, provider.instanceId, provider.version, before.accountRevision)
+        val cached = homeCache?.readSnapshot(owner, provider, allowStale = true, snapshot = snapshotKey) {
+            ensureSnapshotOwner(requested, provider, token, before)
+        } ?: return false
+        ensureSnapshotOwner(requested, provider, token, before)
+        val current = state.value
+        val restored = when (requested) {
+            is SourceContentRequest.Feed -> current.copy(sections = cached.sections, categories = cached.categories)
+            is SourceContentRequest.Library -> {
+                val items = cached.sections.singleOrNull()?.items ?: return false
+                if (items.any { it.ref.type != requested.collection.type }) return false
+                current.copy(items = items)
+            }
+            is SourceContentRequest.Detail -> {
+                val playlist = cached.sections.firstOrNull()?.items?.singleOrNull() as? SourceItem.PlaylistItem ?: return false
+                val tracks = cached.sections.getOrNull(1)?.items ?: return false
+                if (playlist.ref != requested.ref || tracks.any { it !is SourceItem.TrackItem }) return false
+                current.copy(title = playlist.title, artworkUrl = playlist.artworkUrl, description = playlist.playlist.description,
+                    detail = playlist, items = tracks)
+            }
+            else -> return false
+        }
+        mutableState.value = restored.copy(loading = false, refreshing = false, cachedSnapshot = true, hasMore = false,
+            hasSnapshotContent = true, error = null, nextCursor = null, nextOffset = restored.items.size)
+        return true
+    }
+
+    private suspend fun cacheLibraryContent(requested: SourceContentRequest, provider: MusicProvider, token: Long,
+        state: SourceContentState) {
+        val cache = homeCache ?: return
+        val key = requested.librarySnapshotKey() ?: return
+        if (SourceCapability.ACCOUNT in provider.capabilities && state.accountRevision == null) return
+        val sections = listOfNotNull(
+            state.detail?.let { SourceFeedSection("playlist", it.title, SourceFeedLayout.PLAYLISTS, listOf(it)) },
+            SourceFeedSection("items", "Library", SourceFeedLayout.GRID, state.items.take(1000)),
+        )
+        val owner = SourceHomeCacheOwner(provider.id, provider.instanceId, provider.version, state.accountRevision)
+        cache.writeSnapshot(owner, SourceFeedPage(sections), snapshot = key, keepLarger = state.hasMore) {
+            ensureSnapshotOwner(requested, provider, token, state)
+        }
+    }
+
+    private suspend fun ensureSnapshotOwner(requested: SourceContentRequest, provider: MusicProvider, token: Long,
+        snapshot: SourceContentState) {
+        currentCoroutineContext().ensureActive()
+        if (token != generation || request.value != requested || displayedRequest != requested ||
+            displayedProvider !== provider || !sameOwner(provider, snapshot)) {
+            throw CancellationException("Source snapshot owner changed")
         }
     }
 
@@ -617,7 +739,7 @@ class SourceContentViewModel internal constructor(
         val current = state.value
         val editor = provider(playlist.ref.providerId) as? PlaylistEditCapability
         val tracks = current.items.filterIsInstance<SourceItem.TrackItem>()
-        return current.detail?.ref == playlist.ref && !current.loading && !current.hasMore && current.error == null &&
+        return current.detail?.ref == playlist.ref && !current.loading && !current.cachedSnapshot && !current.hasMore && current.error == null &&
             tracks.size == current.items.size && tracks.size == playlist.trackCount && tracks.isNotEmpty() &&
             tracks.map { it.ref }.distinct().size == tracks.size &&
             PlaylistEditAction.REORDER_TRACKS in playlist.editableActions &&
@@ -1139,6 +1261,19 @@ private fun SourceContentRequest?.providerId(preferred: String): String = when (
     is SourceContentRequest.Editor -> providerId
     else -> preferred
 }
+
+private fun SourceContentRequest.librarySnapshotKey(): String? = when (this) {
+    is SourceContentRequest.Library -> collection.operation
+    is SourceContentRequest.Detail -> (ref as? PlaylistRef)?.let { "playlist:${it.playlistId}" }
+    else -> null
+}
+
+private fun SourceContentRequest.canCacheSnapshot(): Boolean =
+    this is SourceContentRequest.Feed && kind == FeedKind.HOME && categoryId == null || librarySnapshotKey() != null
+
+private fun SourceErrorCode.isSnapshotTransportFailure(): Boolean =
+    this == SourceErrorCode.NETWORK || this == SourceErrorCode.TIMEOUT || this == SourceErrorCode.UNAVAILABLE
+
 private fun albumSections(albums: List<SourceAlbumInfo>): List<SourceFeedSection> =
     if (albums.isEmpty()) emptyList() else listOf(SourceFeedSection("artist-albums", "专辑", SourceFeedLayout.ALBUMS,
         albums.distinctBy { it.ref }.map { SourceItem.AlbumItem(it) }))

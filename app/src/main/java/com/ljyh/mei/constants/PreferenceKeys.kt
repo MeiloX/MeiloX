@@ -76,6 +76,8 @@ val RestorePlaybackPositionKey = booleanPreferencesKey("playback.restorePosition
 val RestorePlaybackStateKey = booleanPreferencesKey("playback.restoreState")
 val NotificationLeftActionKey = stringPreferencesKey("notification.leftAction")
 val NotificationRightActionKey = stringPreferencesKey("notification.rightAction")
+val QueueModesIntroDismissedKey = booleanPreferencesKey("player.queueModesIntroDismissed")
+
 val AutoMixEnabledKey = booleanPreferencesKey("autoMix.enabled")
 val AutoMixModeKey = stringPreferencesKey("autoMix.mode")
 val AutoMixDurationKey = floatPreferencesKey("autoMix.fixedDuration")

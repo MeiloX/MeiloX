@@ -694,6 +694,9 @@
     <string name="move_up">上移</string>
     <string name="move_down">下移</string>
     <string name="reorder_drag_handle">拖动排序</string>
+    <string name="source_allow_alternate_versions">无音源时播放其他版本</string>
+    <string name="source_allow_alternate_versions_detail">尝试同一歌手的现场版、不插电版或重制版。</string>
+    <string name="source_playing_alternate_version">正在播放其他版本</string>
     <string name="load_failed_message">加载失败：%1$s</string>
     <string name="no_search_results">暂无搜索结果</string>
     <string name="library_sign_in">登录以同步音乐库</string>

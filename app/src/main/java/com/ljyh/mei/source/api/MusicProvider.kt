@@ -83,6 +83,7 @@ data class PlaybackResolution(
     val instanceId: ProviderInstanceId,
     val resource: AudioResource,
     val attempts: List<ResolutionAttempt>,
+    val alternateVersion: Boolean = false,
 )
 
 /** Providers can hydrate queues in one request without losing their requested identities. */

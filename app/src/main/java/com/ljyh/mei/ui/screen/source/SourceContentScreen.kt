@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.source
 
+import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
@@ -83,6 +84,7 @@ import com.ljyh.mei.ui.screen.main.library.component.groupedLazyItems
 import com.ljyh.mei.ui.screen.search.LoadingView
 import com.ljyh.mei.ui.component.DownloadConfirmDialog
 import com.ljyh.mei.utils.DownloadManager
+import com.ljyh.mei.utils.image.saveImageToGallery
 import com.ljyh.mei.utils.rememberEnumPreference
 import com.ljyh.mei.utils.rememberPreference
 import io.github.neoruaa.glasmio.core.swipeBackExcluded
@@ -264,9 +266,14 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
     val canReorder = SourceCapability.PLAYLIST_EDIT in provider?.capabilities.orEmpty() &&
         PlaylistEditAction.REORDER_TRACKS in actions &&
         PlaylistEditAction.REORDER_TRACKS in (provider as? PlaylistEditCapability)?.playlistEditActions.orEmpty()
-    val title = state.title.ifBlank { when (ref) {
-        is PlaylistRef -> "歌单"; is AlbumRef -> "专辑"; is ArtistRef -> "歌手"; is TrackRef -> "歌曲"
-    } }
+    val title = state.title.ifBlank {
+        stringResource(when (ref) {
+            is PlaylistRef -> R.string.library_page_playlists
+            is AlbumRef -> R.string.playlist_table_album
+            is ArtistRef -> R.string.local_library_sort_artist
+            is TrackRef -> R.string.share_kind_song
+        })
+    }
     if (ref is ArtistRef) {
         SourceArtistDetail(ref, state, provider, savedLoading, saved, viewModel,
             onFollow = { if (!busy) toggleCollection() }, selection = menu, onDismissMenu = { menu = null },
@@ -424,6 +431,37 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
         ).toMutableList().apply {
             if (canReorder) add(2, GlasmioCascadingMenuItem(stringResource(R.string.playlist_order_title), "line.3.horizontal",
                 enabled = !busy && order == null, onClick = { openOrder() }))
+            if (state.detail?.ref == ref) {
+                val cover = state.artworkUrl
+                if (cover.isNotBlank()) add(GlasmioCascadingMenuItem(
+                    title = stringResource(R.string.detail_save_cover),
+                    systemName = "square.and.arrow.down",
+                    onClick = { scope.launch { saveImageToGallery(context, cover) } },
+                ))
+                add(GlasmioCascadingMenuItem(
+                    title = stringResource(R.string.system_share),
+                    systemName = "square.and.arrow.up",
+                    onClick = {
+                        scope.launch {
+                            val link = try {
+                                viewModel.detailShareUrl(ref, title)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                null
+                            } ?: if (ref.providerId == ProviderIds.NETEASE && ref.contentId.all(Char::isDigit)) {
+                                "https://music.163.com/${ref.type.wireName}?id=${ref.contentId}"
+                            } else null
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, title)
+                                putExtra(Intent.EXTRA_TEXT, listOfNotNull(title, link).joinToString("\n"))
+                            }
+                            context.startActivity(Intent.createChooser(intent, context.getString(R.string.system_share)))
+                        }
+                    },
+                ))
+            }
         }
         SongListDetailScreen(
             uiData = SongListDetailData(title = title, count = count,
