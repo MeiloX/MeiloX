@@ -94,7 +94,7 @@ android {
         applicationId = providers.gradleProperty("mei.applicationId")
             .orElse("com.neoruaa.meilox")
             .get()
-        minSdk = 33
+        minSdk = 31
         targetSdk = 37
         versionCode = 16
         versionName = "1.55.1"

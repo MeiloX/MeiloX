@@ -37,7 +37,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AmbientBackground(
     imageUrl: String?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    animated: Boolean = true,
 ) {
     val context = LocalContext.current
     val isDark = LocalGlassColors.current.isDark
@@ -52,10 +53,10 @@ fun AmbientBackground(
         }
     }
 
-    var fluidColors by remember { mutableStateOf(defaultColors) }
+    var fluidColors by remember(isDark) { mutableStateOf(defaultColors) }
 
     // 1. 异步取色
-    LaunchedEffect(imageUrl) {
+    LaunchedEffect(imageUrl, isDark) {
         if (imageUrl.isNullOrEmpty()) return@LaunchedEffect
 
         // 放在 IO 线程，不阻塞 UI
@@ -132,7 +133,8 @@ fun AmbientBackground(
         ) {
             FluidCanvasImproved(
                 colors = listOf(c1, c2, c3, c4),
-                isDark = isDark
+                isDark = isDark,
+                animated = animated,
             )
         }
 
@@ -155,24 +157,27 @@ fun AmbientBackground(
 }
 
 @Composable
-fun FluidCanvasImproved(colors: List<Color>, isDark: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition(label = "fluid")
+fun FluidCanvasImproved(colors: List<Color>, isDark: Boolean, animated: Boolean = true) {
+    val infiniteTransition = if (animated) rememberInfiniteTransition(label = "fluid") else null
 
     // 定义三种不同频率的运动，打破规律感
-    val t1 by infiniteTransition.animateFloat(
+    val t1State = infiniteTransition?.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(15000, easing = LinearEasing), RepeatMode.Reverse), label = "t1"
     )
-    val t2 by infiniteTransition.animateFloat(
+    val t2State = infiniteTransition?.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(23000, easing = LinearEasing), RepeatMode.Reverse), label = "t2"
     )
-    val t3 by infiniteTransition.animateFloat(
+    val t3State = infiniteTransition?.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(18000, easing = LinearEasing), RepeatMode.Reverse), label = "t3"
     )
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val t1 = t1State?.value ?: 0f
+        val t2 = t2State?.value ?: 0f
+        val t3 = t3State?.value ?: 0f
         val w = size.width
         val h = size.height
 

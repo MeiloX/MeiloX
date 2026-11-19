@@ -264,6 +264,11 @@
     <string name="appearance_animation_crossfade">Crossfade</string>
     <string name="appearance_animation_zoom">Zoom</string>
     <string name="appearance_animation_flip">3D flip</string>
+    <string name="legacy_appearance_notice_title">Appearance on Android 12</string>
+    <string name="legacy_appearance_notice_message">Reduce Transparency is always on for this device. The player uses a still background based on the album artwork. Liquid Glass, progressive blur, glass HDR effects, and the fluid player background require Android 13 or later.</string>
+    <string name="legacy_appearance_reduce_transparency_description">Always on in Android 12 and 12L.</string>
+    <string name="legacy_appearance_shader_requirement">Requires Android 13 or later.</string>
+    <string name="legacy_appearance_fluid_description">Android 13 or later is required for the fluid background. The player uses a still background based on the album artwork.</string>
     <string name="appearance_fluid_background">Fluid Background</string>
     <string name="appearance_flow_speed">Flow speed</string>
     <string name="appearance_render_scale">Render resolution</string>

@@ -1,5 +1,8 @@
 package com.ljyh.mei.ui.component.player.component
 
+import android.os.Build
+import androidx.annotation.RequiresApi
+import io.github.neoruaa.glasmio.glass.render.isRuntimeShaderSupported
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,6 +57,40 @@ fun FluidBackground(
     alpha: Float = 1f,
     backdrop: LayerBackdrop,
     modifier: Modifier = Modifier,
+) {
+    if (isRuntimeShaderSupported()) {
+        MeshBackground(imageUrl, beatMeter, isPlaying, alpha, backdrop, modifier)
+        return
+    }
+    val sheet = LocalPlayerSheet.current
+    val onBackgroundReadyChanged by rememberUpdatedState(LocalPlayerBackgroundReadyChanged.current)
+    DisposableEffect(Unit) {
+        onBackgroundReadyChanged(true)
+        onDispose { onBackgroundReadyChanged(false) }
+    }
+    Box(
+        modifier.fillMaxSize().graphicsLayer {
+            compositingStrategy = CompositingStrategy.ModulateAlpha
+            this.alpha = alpha.coerceIn(0f, 1f) * (sheet?.motionProgress?.let(::playerBackgroundAlpha) ?: 1f)
+        },
+    ) {
+        AmbientBackground(
+            imageUrl,
+            Modifier.layerBackdrop(backdrop).trackBackdropPosition(backdrop),
+            animated = false,
+        )
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@Composable
+private fun MeshBackground(
+    imageUrl: String?,
+    beatMeter: PlaybackBeatMeter,
+    isPlaying: Boolean,
+    alpha: Float,
+    backdrop: LayerBackdrop,
+    modifier: Modifier,
 ) {
     val context = LocalContext.current
     val sheet = LocalPlayerSheet.current

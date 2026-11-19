@@ -1,5 +1,7 @@
 package com.ljyh.mei.ui.component.player.component.mesh
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.BlendMode
@@ -35,6 +37,7 @@ internal class MeshAlbum internal constructor(
 
 /** Main-thread renderer shared by the player and its glass backdrop. */
 @MainThread
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 internal class MeshGradientRenderer {
     private class MeshState(val album: MeshAlbum, var alpha: Float) {
         var targetAlpha = if (alpha == 1f) 0f else 1f

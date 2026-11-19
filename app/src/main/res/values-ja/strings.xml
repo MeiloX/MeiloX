@@ -1023,4 +1023,10 @@
   <string name="search_history_title">最近の検索</string>
   <string name="search_history_clear">削除</string>
   <string name="search_history_remove">「%1$s」を最近の検索から削除</string>
-  <string name="search_history_show_all">すべて表示</string></resources>
+  <string name="search_history_show_all">すべて表示</string>
+    <string name="legacy_appearance_notice_title">Android 12 での表示</string>
+    <string name="legacy_appearance_notice_message">この端末では「透明度を下げる」が常にオンになります。プレイヤーにはジャケット画像の色に合わせた静止背景が表示されます。Liquid Glass、段階的なぼかし、ガラスの HDR 効果、流動背景には Android 13 以降が必要です。</string>
+    <string name="legacy_appearance_reduce_transparency_description">Android 12 と 12L では常にオンになります。</string>
+    <string name="legacy_appearance_shader_requirement">Android 13 以降が必要です。</string>
+    <string name="legacy_appearance_fluid_description">流動背景には Android 13 以降が必要です。プレイヤーにはジャケット画像の色に合わせた静止背景が表示されます。</string>
+</resources>

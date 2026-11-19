@@ -121,6 +121,7 @@ val BottomFloatingContentExtraSpacingKey = intPreferencesKey("appearance.bottomF
 const val DefaultBottomFloatingContentExtraSpacing = 8
 const val MaxBottomFloatingContentExtraSpacing = 64
 val LiquidGlassEnabledKey = booleanPreferencesKey("appearance.liquidGlassEnabled")
+val LegacyApiCompatibilityNoticeShownKey = booleanPreferencesKey("appearance.legacyApiCompatibilityNoticeShown")
 val GlassHdrEffectsKey = booleanPreferencesKey("appearance.glassHdrEffects")
 val ReduceTransparencyKey = booleanPreferencesKey("appearance.reduceTransparency")
 val ColorfulDetailBackgroundsKey = booleanPreferencesKey("appearance.colorfulDetailBackgrounds")

@@ -1,5 +1,6 @@
 package com.ljyh.mei
 
+import io.github.neoruaa.glasmio.glass.render.isRuntimeShaderSupported
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.union
 
@@ -9,7 +10,6 @@ import android.content.Context
 import android.content.res.Configuration
 import android.content.Intent
 import android.content.ServiceConnection
-import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.view.WindowManager
@@ -21,7 +21,6 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import io.github.neoruaa.glasmio.glass.render.configureGlassDynamicRange
-import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
@@ -192,6 +191,7 @@ import com.ljyh.mei.constants.MiniPlayerInlineVerticalTravel
 import com.ljyh.mei.constants.DefaultBottomFloatingContentExtraSpacing
 import com.ljyh.mei.constants.MaxBottomFloatingContentExtraSpacing
 import com.ljyh.mei.constants.GlassHdrEffectsKey
+import com.ljyh.mei.constants.LegacyApiCompatibilityNoticeShownKey
 import com.ljyh.mei.constants.LiquidGlassEnabledKey
 import com.ljyh.mei.constants.PredictiveBackAnimationEnabledKey
 import com.ljyh.mei.constants.ReduceTransparencyKey
@@ -242,6 +242,8 @@ import com.ljyh.mei.ui.local.LocalUserData
 import io.github.neoruaa.glasmio.ui.GlasmioNavigationBar
 import io.github.neoruaa.glasmio.glass.BottomNavigationContact
 import io.github.neoruaa.glasmio.glass.LocalBottomControlContact
+import io.github.neoruaa.glasmio.ui.GlasmioAlertButtonSpec
+import io.github.neoruaa.glasmio.ui.GlasmioAlertDialog
 import io.github.neoruaa.glasmio.ui.GlasmioIconButton
 import io.github.neoruaa.glasmio.ui.GlasmioTabItem
 import io.github.neoruaa.glasmio.ui.GlasmioTabBar
@@ -339,7 +341,6 @@ class MainActivity : ComponentActivity() {
 
 
     @androidx.annotation.OptIn(UnstableApi::class)
-    @RequiresApi(Build.VERSION_CODES.S)
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -371,7 +372,6 @@ class MainActivity : ComponentActivity() {
     }
 
     @androidx.annotation.OptIn(UnstableApi::class)
-    @RequiresApi(Build.VERSION_CODES.S)
     @OptIn(ExperimentalMaterial3Api::class)
     private fun initializeContent(initialPreferences: Preferences) {
         val initialHdrOutput = initialPreferences.glassHdrOutputEnabled()
@@ -422,8 +422,14 @@ class MainActivity : ComponentActivity() {
                 (navigationPreferences?.get(BottomFloatingContentExtraSpacingKey)
                     ?: DefaultBottomFloatingContentExtraSpacing)
                     .coerceIn(0, MaxBottomFloatingContentExtraSpacing).dp
-            val liquidGlassEnabled = navigationPreferences?.get(LiquidGlassEnabledKey) ?: true
-            val reduceTransparency = navigationPreferences?.get(ReduceTransparencyKey) ?: false
+            val shaderEffectsSupported = isRuntimeShaderSupported()
+            val liquidGlassEnabled = shaderEffectsSupported &&
+                (navigationPreferences?.get(LiquidGlassEnabledKey) ?: true)
+            var compatibilityNoticeDismissed by rememberSaveable { mutableStateOf(false) }
+            val showCompatibilityNotice = !shaderEffectsSupported && !compatibilityNoticeDismissed &&
+                navigationPreferences?.get(LegacyApiCompatibilityNoticeShownKey) != true
+            val reduceTransparency = !shaderEffectsSupported ||
+                navigationPreferences?.get(ReduceTransparencyKey) == true
             val predictiveBackAnimationEnabled =
                 navigationPreferences?.get(PredictiveBackAnimationEnabledKey) ?: true
             val podcastsEnabled = navigationPreferences?.get(PodcastsEnabledKey) ?: true
@@ -1627,10 +1633,29 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                         if (!pictureInPictureMode) com.ljyh.mei.ui.screen.source.SourcePlatformEffectHost(sourceEffects)
-                        VersionUpdateAlert(
-                            result = startupUpdateResult,
-                            onDismiss = { startupUpdateResult = null },
-                        )
+                        if (!isRuntimeShaderSupported()) {
+                            val dismissNotice: () -> Unit = {
+                                compatibilityNoticeDismissed = true
+                                lifecycleScope.launch {
+                                    dataStore.edit { it[LegacyApiCompatibilityNoticeShownKey] = true }
+                                }
+                            }
+                            GlasmioAlertDialog(
+                                onDismissRequest = dismissNotice,
+                                visible = showCompatibilityNotice && !pictureInPictureMode,
+                                title = stringResource(R.string.legacy_appearance_notice_title),
+                                message = stringResource(R.string.legacy_appearance_notice_message),
+                                buttons = listOf(
+                                    GlasmioAlertButtonSpec(stringResource(android.R.string.ok), onClick = dismissNotice),
+                                ),
+                            )
+                        }
+                        if (!showCompatibilityNotice) {
+                            VersionUpdateAlert(
+                                result = startupUpdateResult,
+                                onDismiss = { startupUpdateResult = null },
+                            )
+                        }
                         }
                     }
                     }
@@ -1702,7 +1727,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private fun Preferences.glassHdrOutputEnabled(): Boolean =
-    (this[GlassHdrEffectsKey] ?: false) &&
+    isRuntimeShaderSupported() && (this[GlassHdrEffectsKey] ?: false) &&
         (this[LiquidGlassEnabledKey] ?: true) &&
         !(this[ReduceTransparencyKey] ?: false)
 
