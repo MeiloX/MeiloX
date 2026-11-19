@@ -53,7 +53,9 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
@@ -86,7 +88,9 @@ class DownloadWorker(
         const val KEY_DOWNLOAD_PATH = "download_path"
         const val CHANNEL_ID = "download_channel"
         const val NOTIFICATION_ID = 1001
-        private const val CONCURRENCY = 3
+        private const val PROGRESS_UPDATE_INTERVAL_MS = 250L
+        // WorkManager normally starts a separate worker for each song.
+        private val downloadSlots = Semaphore(3)
         private val notifications = DownloadNotificationState()
 
         @Volatile
@@ -169,19 +173,18 @@ class DownloadWorker(
         }
         try {
             notifications.start(id.toString(), totalCount, ::publishNotification)
-            val semaphore = Semaphore(CONCURRENCY)
             supervisorScope {
                 val jobs = songIds.map { songId ->
                     async(Dispatchers.IO) {
-                        if (isStopped) return@async
-                        semaphore.withPermit {
+                        downloadSlots.withPermit {
                             if (isStopped) return@withPermit
                             processSong(songId, db, tempDir, relativePath)
+                            currentCoroutineContext().ensureActive()
+                            val owned = db.downloadDao().getBySongId(songId)
+                            if (owned?.requestId == id.toString() && owned.status != DownloadStatus.PAUSED) {
+                                notifications.progress(id.toString(), completedCount.get() + failedCount.get(), ::publishNotification)
+                            }
                         }
-                        currentCoroutineContext().ensureActive()
-                        val owned = db.downloadDao().getBySongId(songId)
-                        if (owned?.requestId != id.toString() || owned.status == DownloadStatus.PAUSED) return@async
-                        notifications.progress(id.toString(), completedCount.get() + failedCount.get(), ::publishNotification)
                     }
                 }
                 jobs.awaitAll()
@@ -211,7 +214,7 @@ class DownloadWorker(
             failedCount.incrementAndGet()
             return@coroutineScope
         }
-        val existingSong = db.songDao().getSong(songId).first()
+        val existingSong = db.songDao().getById(songId)
         val existingPath = existingSong?.path
         if (existingPath != null) {
             val valid = runCatching {
@@ -282,13 +285,24 @@ class DownloadWorker(
             return@coroutineScope
         }
         try {
-            val onProgress: (Int) -> Unit = { progress ->
-                launch { updateTask(db, songId, DownloadStatus.DOWNLOADING, progress) }
+            val progress = MutableStateFlow(0)
+            val progressWriter = launch {
+                progress.collect { percent ->
+                    if (percent > 0) {
+                        updateTask(db, songId, DownloadStatus.DOWNLOADING, percent)
+                        delay(PROGRESS_UPDATE_INTERVAL_MS)
+                    }
+                }
             }
-            if (ScriptAudioDataSource.accepts(audioUrl.toUri())) {
-                downloadScriptAudio(applicationContext, audioUrl, tempFile, onProgress)
-            } else downloadAudioFile(okHttpClient, audioUrl, tempFile, audioHeaders, onProgress)
-            currentCoroutineContext().ensureActive()
+            try {
+                val onProgress: (Int) -> Unit = { progress.value = it }
+                if (ScriptAudioDataSource.accepts(audioUrl.toUri())) {
+                    downloadScriptAudio(applicationContext, audioUrl, tempFile, onProgress)
+                } else downloadAudioFile(okHttpClient, audioUrl, tempFile, audioHeaders, onProgress)
+            } finally {
+                progressWriter.cancelAndJoin()
+            }
+            updateTask(db, songId, DownloadStatus.DOWNLOADING, 99)
             val format = checkNotNull(detectAudioFileFormat(tempFile)) {
                 "Unsupported or malformed downloaded audio"
             }
@@ -326,7 +340,7 @@ class DownloadWorker(
                     published?.let { uri -> withContext(NonCancellable) {
                         // Keep publication cleanup inside the scanner's reconciliation lock.
                         // Cancellation may arrive after Room commits but before it returns.
-                        if (db.songDao().getSong(songId).first()?.path != uri.toString()) {
+                        if (db.songDao().getById(songId)?.path != uri.toString()) {
                             deleteDownloadedArtwork(applicationContext, uri.toString())
                             applicationContext.contentResolver.delete(uri, null, null)
                         }

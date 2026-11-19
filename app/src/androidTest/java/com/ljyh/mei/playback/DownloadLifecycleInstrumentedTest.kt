@@ -17,6 +17,8 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DataSpec
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.ljyh.mei.data.model.room.DownloadStatus
 import com.ljyh.mei.data.model.room.DownloadTask
 import com.ljyh.mei.data.model.room.Song
@@ -53,6 +55,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Dns
 import org.jaudiotagger.audio.AudioFileIO
@@ -560,6 +563,57 @@ class DownloadLifecycleInstrumentedTest {
                 songIds.forEach { songId -> db.downloadDao().delete(songId); db.songDao().deleteById(songId) }
             }
         } }
+    }
+
+    @Test fun bulkDownloadsStartAnotherTransferOnlyAfterASlotFreesUp() = runBlocking {
+        assumeNoOtherDownloads()
+        val db = AppDatabase.getDatabase(context)
+        val workManager = WorkManager.getInstance(context)
+        val songIds = List(6) { "bulk-download-fixture-${UUID.randomUUID()}" }
+        val servers = songIds.map { StalledAudio() }
+        val parallelLimit = 3
+        try {
+            val songs = songIds.zip(servers).map { (songId, server) ->
+                SongDownloadInfo(songId, server.url, "Bulk download fixture", listOf("Fixture"), "Fixture", "", 0, "wav")
+            }
+            DownloadManager.enqueue(context, songs, "Lifecycle fixture", downloadPath = "Music/MeiloX-test-fixtures")
+            val requestIds = songIds.map { songId ->
+                UUID.fromString(checkNotNull(db.downloadDao().getBySongId(songId)).requestId)
+            }.toSet()
+            withTimeout(10_000) {
+                workManager.getWorkInfosByTagFlow("download").first { work ->
+                    work.count { it.id in requestIds && it.state == WorkInfo.State.RUNNING } == songIds.size
+                }
+                while (servers.count { it.entered.count == 0L } < parallelLimit) delay(20)
+            }
+            assertNull("More than three transfers started while all slots were occupied", withTimeoutOrNull(1_000) {
+                while (servers.count { it.entered.count == 0L } <= parallelLimit) delay(20)
+            })
+
+            val pausedIndex = servers.indexOfFirst { it.entered.count == 0L }
+            val pausedId = songIds[pausedIndex]
+            DownloadManager.pauseSong(context, pausedId)
+            assertTrue(servers[pausedIndex].closed.await(5, TimeUnit.SECONDS))
+            withTimeout(5_000) {
+                while (servers.count { it.entered.count == 0L } <= parallelLimit) delay(20)
+            }
+            assertEquals(parallelLimit + 1, servers.count { it.entered.count == 0L })
+            assertEquals(DownloadStatus.PAUSED, db.downloadDao().getBySongId(pausedId)?.status)
+        } finally {
+            try {
+                withContext(NonCancellable) {
+                    songIds.forEach { songId ->
+                        db.downloadDao().getBySongId(songId)?.requestId?.let {
+                            workManager.cancelWorkById(UUID.fromString(it)).result.get(5, TimeUnit.SECONDS)
+                        }
+                        db.downloadDao().delete(songId)
+                        db.songDao().deleteById(songId)
+                    }
+                }
+            } finally {
+                servers.forEach { it.close() }
+            }
+        }
     }
 
     private fun assumeNoOtherDownloads() {
