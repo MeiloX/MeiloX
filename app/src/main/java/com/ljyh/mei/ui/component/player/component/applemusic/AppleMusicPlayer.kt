@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.Image
 import com.ljyh.mei.ui.component.player.LocalPlayerArtwork
+import com.ljyh.mei.ui.component.player.LocalPlayerLyricsRequest
 import com.ljyh.mei.ui.component.player.PlayerArtworkTransition
 import com.ljyh.mei.ui.component.sheet.playerArtwork
 import com.ljyh.mei.ui.component.sheet.PlayerArtworkGeometry
@@ -133,7 +134,16 @@ fun AppleMusicPlayer(
     val configuration = LocalConfiguration.current
 
     // --- Apple Music 特定状态 ---
-    var page by remember { mutableStateOf(AppleMusicPlayerPage.Artwork) }
+    val lyricsRequest = LocalPlayerLyricsRequest.current
+    var page by remember {
+        mutableStateOf(if (lyricsRequest?.value == true) AppleMusicPlayerPage.Lyrics else AppleMusicPlayerPage.Artwork)
+    }
+    LaunchedEffect(lyricsRequest?.value) {
+        if (lyricsRequest?.value == true) {
+            page = AppleMusicPlayerPage.Lyrics
+            lyricsRequest.value = false
+        }
+    }
     val showLyrics = page == AppleMusicPlayerPage.Lyrics
     val showQueue = page == AppleMusicPlayerPage.Queue
     val showDetail = page != AppleMusicPlayerPage.Artwork

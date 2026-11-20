@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_apple_recommendations">Recommendations</string>
+    <string name="widget_apple_now_playing">Now Playing</string>
+    <string name="widget_apple_live_radio">Live Radio</string>
+    <string name="widget_apple_no_recent">No Recently Played Music</string>
+    <string name="widget_apple_top_charts">Top Charts</string>
+    <string name="widget_apple_no_pins">No Pinned Music</string>
+    <string name="widget_apple_no_recommendations">Keep listening and personalized recommendations will appear.</string>
+</resources>

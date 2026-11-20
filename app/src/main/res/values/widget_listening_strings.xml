@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_listening_monthly">Listening time</string>
+    <string name="widget_listening_local">Listening days</string>
+    <string name="widget_listening_unit_days">d</string>
+    <string name="widget_listening_unit_hours">h</string>
+    <string name="widget_listening_unit_minutes">min</string>
+    <plurals name="widget_listening_days">
+        <item quantity="one">%d day listened</item>
+        <item quantity="other">%d days listened</item>
+    </plurals>
+    <string name="widget_listening_active_dates">Days with listening: %1$s</string>
+</resources>

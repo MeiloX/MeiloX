@@ -214,6 +214,7 @@ import com.ljyh.mei.di.repository.ColorRepository
 import com.ljyh.mei.playback.MusicService
 import com.ljyh.mei.playback.PlayerConnection
 import com.ljyh.mei.playback.queue.ListQueue
+import com.ljyh.mei.data.model.metadata
 import com.ljyh.mei.recognition.RecognitionSource
 import com.ljyh.mei.recognition.SongRecognitionSession
 import com.ljyh.mei.ui.component.ClipboardLinkPrompt
@@ -222,6 +223,7 @@ import com.ljyh.mei.ui.component.VersionUpdateAlert
 import com.ljyh.mei.ui.component.player.BottomSheetPlayer
 import com.ljyh.mei.ui.component.player.FloatingLyricsPipBackdrop
 import com.ljyh.mei.ui.component.player.FloatingLyricsPipScreen
+import com.ljyh.mei.ui.component.player.LocalPlayerLyricsRequest
 import com.ljyh.mei.ui.component.player.floatingLyricsPipParams
 import com.ljyh.mei.playback.ENABLE_FLOATING_LYRICS
 import com.ljyh.mei.playback.DISABLE_FLOATING_LYRICS
@@ -280,6 +282,7 @@ import com.ljyh.mei.ui.screen.search.SearchScreen
 import com.ljyh.mei.ui.screen.playlist.component.LocalPlaylistLocateHost
 import com.ljyh.mei.ui.screen.playlist.component.PlaylistLocateChromeLayer
 import com.ljyh.mei.ui.screen.playlist.component.PlaylistLocateHostState
+import com.ljyh.mei.ui.screen.source.navigateSourceContent
 import com.ljyh.mei.ui.navigation.MeiNavEntryViewModelStoreOwner
 import com.ljyh.mei.ui.navigation.MeiNavigator
 import com.ljyh.mei.ui.navigation.MeiRoute
@@ -288,6 +291,8 @@ import com.ljyh.mei.ui.theme.LocalAccentSeedColor
 import com.ljyh.mei.utils.log.CrashHandler
 import com.ljyh.mei.utils.cache.preloadImage
 import com.ljyh.mei.playback.nextPlaybackMediaItemIndex
+import com.ljyh.mei.ui.model.MoreAction
+import com.ljyh.mei.ui.model.availableFor
 import com.ljyh.mei.utils.dataStore
 import com.ljyh.mei.utils.get
 import com.ljyh.mei.utils.netease.NeteaseUtils.getAndroidId
@@ -295,6 +300,8 @@ import com.ljyh.mei.utils.rememberPreference
 import com.ljyh.mei.utils.rememberEnumPreference
 import com.ljyh.mei.utils.VersionUpdateChecker
 import com.ljyh.mei.utils.VersionUpdateResult
+import com.ljyh.mei.widget.MusicWidgets
+import com.ljyh.mei.widget.decodeWidgetContent
 import io.github.neoruaa.glasmio.glass.render.backdrops.layerBackdrop
 import io.github.neoruaa.glasmio.glass.render.Backdrop
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberCanvasBackdrop
@@ -338,6 +345,7 @@ class MainActivity : ComponentActivity() {
     private var musicService: MusicService? = null
     private var openSongRecognition by mutableStateOf(false)
     private var recognitionProviderId: String? = null
+    private var widgetDestination by mutableStateOf<Pair<String, String?>?>(null)
 
 
     @androidx.annotation.OptIn(UnstableApi::class)
@@ -347,6 +355,7 @@ class MainActivity : ComponentActivity() {
         pictureInPictureMode = isInPictureInPictureMode
         readFloatingLyricsIntent(intent)
         if (savedInstanceState == null) readRecognitionIntent(intent)
+        readWidgetDestination(intent)
         enableEdgeToEdge()
         val contentRoot = findViewById<android.view.View>(android.R.id.content)
         fun pageInsets(insets: WindowInsetsCompat) = applyPageTopInsets(
@@ -447,6 +456,7 @@ class MainActivity : ComponentActivity() {
                 ?: Index.DefaultOrder.joinToString(",", transform = Index::name)
             var playerConnection by remember { mutableStateOf<PlayerConnection?>(null) }
             var playerVisibilitySynchronized by remember { mutableStateOf(false) }
+            val playerLyricsRequest = remember { mutableStateOf(false) }
             var clipboardLink by remember { mutableStateOf<com.ljyh.mei.source.core.OwnedSourceLink?>(null) }
             var clipboardInspected by rememberSaveable { mutableStateOf(false) }
             var startupUpdateResult by remember { mutableStateOf<VersionUpdateResult?>(null) }
@@ -1013,6 +1023,70 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     val selectionToolbar = remember { com.ljyh.mei.ui.local.SelectionToolbarState() }
+                    LaunchedEffect(widgetDestination, playerConnection, playerVisibilitySynchronized, playerBottomSheetState) {
+                        val request = widgetDestination ?: return@LaunchedEffect
+                        val (action, mediaId) = request
+                        when (action) {
+                            MusicWidgets.ACTION_OPEN_PLAYER,
+                            MusicWidgets.ACTION_OPEN_LYRICS,
+                            MusicWidgets.ACTION_OPEN_COMMENTS,
+                            -> {
+                                val connection = playerConnection ?: return@LaunchedEffect
+                                if (!playerVisibilitySynchronized) return@LaunchedEffect
+                                connection.service.awaitPlaybackRestore()
+                                val item = connection.player.currentMediaItem
+                                if (item != null) {
+                                    if (action == MusicWidgets.ACTION_OPEN_COMMENTS) {
+                                        val track = item.metadata
+                                        val ref = track?.trackRef
+                                        val provider = ref?.let { sourceRouter.registry.provider(it.providerId) }
+                                        if ((mediaId == null || mediaId == item.mediaId) && ref != null &&
+                                            MoreAction.COMMENT.availableFor(track, provider)
+                                        ) {
+                                            playerBottomSheetState.collapseSoft()
+                                            Screen.Comment.navigate(navController) {
+                                                addPath(Uri.encode(ref.trackId))
+                                                addQuery("providerId", Uri.encode(ref.providerId))
+                                            }
+                                        }
+                                    } else {
+                                        selectionToolbar.content.value = null
+                                        playerLyricsRequest.value = action == MusicWidgets.ACTION_OPEN_LYRICS
+                                        if (!playerBottomSheetState.isExpanded) playerBottomSheetState.expandSoft()
+                                    }
+                                }
+                            }
+                            else -> {
+                                playerLyricsRequest.value = false
+                                if (playerBottomSheetState.isContentVisible) playerBottomSheetState.collapseSoft()
+                                when (action) {
+                                    MusicWidgets.ACTION_OPEN_HISTORY -> Screen.History.navigate(navController)
+                                    MusicWidgets.ACTION_OPEN_DAILY -> Screen.EveryDay.navigate(navController)
+                                    MusicWidgets.ACTION_OPEN_FAVORITES -> Screen.LibraryCategory.navigate(navController) {
+                                        addPath(LibraryPage.Songs.name)
+                                    }
+                                    MusicWidgets.ACTION_OPEN_STATS -> Screen.ListeningStats.navigate(navController)
+                                    MusicWidgets.ACTION_OPEN_SEARCH -> {
+                                        focusSearchOnEntry = true
+                                        Screen.Search.navigate(navController)
+                                    }
+                                    MusicWidgets.ACTION_OPEN_CHARTS -> Screen.PlaylistCategory.navigate(navController) {
+                                        addPath(Uri.encode("排行榜"))
+                                        addPath(Uri.encode(getString(R.string.search_category_rankings)))
+                                    }
+                                    MusicWidgets.ACTION_OPEN_LIBRARY -> Screen.Library.navigate(navController)
+                                    MusicWidgets.ACTION_OPEN_PLAYLISTS -> Screen.FindMusic.navigate(navController)
+                                    MusicWidgets.ACTION_OPEN_CONTENT -> mediaId?.let(::decodeWidgetContent)?.let {
+                                        navigateSourceContent(navController, it)
+                                    }
+                                }
+                            }
+                        }
+                        if (widgetDestination === request) {
+                            widgetDestination = null
+                            if (intent.action == action) intent.action = null
+                        }
+                    }
                     val pageVisible = remember(playerBottomSheetState, playerBackgroundReady) {
                         derivedStateOf {
                             !playerBottomSheetState.isExpanded || !playerBackgroundReady.value
@@ -1124,25 +1198,27 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         overlay = {
-                            if (selectionToolbar.content.value == null) AnimatedMiniPlayerLayer(
-                                motion = miniPlayerChromeMotion,
-                                hint = miniPlayerHint,
-                                centerTravel = miniPlayerCenterTravel,
-                                searchVerticalOffset = searchMiniPlayerOffset,
-                                searchBounds = adaptiveNavigation.tabBarBounds.value,
-                                locatorBottomPadding = {
-                                    val miniAnchor = if (playerBottomSheetState.progress == 0f &&
-                                        !playerBottomSheetState.isDragging
-                                    ) playerBottomSheetState.value else playerBottomSheetState.collapsedBound
-                                    miniAnchor + NavigationBarBottomMargin
-                                },
-                                playlistLocateHost = playlistLocateHost,
-                                topBarMode = isLandscape,
-                                state = playerBottomSheetState,
-                                backdrop = bottomControlsBackdrop,
-                                pageDarkAppearance = pageDarkAppearance,
-                                onBackgroundReadyChanged = onPlayerBackgroundReadyChanged,
-                            )
+                            CompositionLocalProvider(LocalPlayerLyricsRequest provides playerLyricsRequest) {
+                                if (selectionToolbar.content.value == null) AnimatedMiniPlayerLayer(
+                                    motion = miniPlayerChromeMotion,
+                                    hint = miniPlayerHint,
+                                    centerTravel = miniPlayerCenterTravel,
+                                    searchVerticalOffset = searchMiniPlayerOffset,
+                                    searchBounds = adaptiveNavigation.tabBarBounds.value,
+                                    locatorBottomPadding = {
+                                        val miniAnchor = if (playerBottomSheetState.progress == 0f &&
+                                            !playerBottomSheetState.isDragging
+                                        ) playerBottomSheetState.value else playerBottomSheetState.collapsedBound
+                                        miniAnchor + NavigationBarBottomMargin
+                                    },
+                                    playlistLocateHost = playlistLocateHost,
+                                    topBarMode = isLandscape,
+                                    state = playerBottomSheetState,
+                                    backdrop = bottomControlsBackdrop,
+                                    pageDarkAppearance = pageDarkAppearance,
+                                    onBackgroundReadyChanged = onPlayerBackgroundReadyChanged,
+                                )
+                            }
                         },
                     ) {
                         if (pictureInPictureMode && playerConnection != null) {
@@ -1672,7 +1748,27 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         readFloatingLyricsIntent(intent)
         readRecognitionIntent(intent)
+        readWidgetDestination(intent)
         applyFloatingLyricsRequest()
+    }
+
+    private fun readWidgetDestination(intent: Intent?) {
+        val action = intent?.action ?: return
+        when (action) {
+            MusicWidgets.ACTION_OPEN_PLAYER,
+            MusicWidgets.ACTION_OPEN_LYRICS,
+            MusicWidgets.ACTION_OPEN_HISTORY,
+            MusicWidgets.ACTION_OPEN_DAILY,
+            MusicWidgets.ACTION_OPEN_FAVORITES,
+            MusicWidgets.ACTION_OPEN_STATS,
+            MusicWidgets.ACTION_OPEN_SEARCH,
+            MusicWidgets.ACTION_OPEN_CHARTS,
+            MusicWidgets.ACTION_OPEN_LIBRARY,
+            MusicWidgets.ACTION_OPEN_PLAYLISTS,
+            MusicWidgets.ACTION_OPEN_COMMENTS,
+            MusicWidgets.ACTION_OPEN_CONTENT,
+            -> widgetDestination = action to intent.getStringExtra(MusicWidgets.EXTRA_MEDIA_ID)
+        }
     }
 
     private fun readRecognitionIntent(intent: Intent) {

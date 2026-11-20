@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_ncm_comment_author">来自村民%1$s的评论</string>
+    <string name="widget_ncm_lyrics_intro">“让这几句歌词带你回去那个心动瞬间”</string>
+    <string name="widget_ncm_radio_welcome">欢迎使用「私人漫游」</string>
+    <string name="widget_ncm_radio_scene_sad">伤感</string>
+    <string name="widget_ncm_radio_scene_exercise">运动</string>
+    <string name="widget_ncm_radio_scene_relax">放松</string>
+    <string name="widget_ncm_radio_scene_cheerful">欢快</string>
+</resources>

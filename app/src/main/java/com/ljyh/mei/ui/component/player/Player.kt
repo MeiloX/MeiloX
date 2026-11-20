@@ -12,6 +12,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -62,6 +63,8 @@ import io.github.neoruaa.glasmio.glass.render.backdrops.rememberCombinedBackdrop
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberLayerBackdrop
 
 internal val LocalPlayerArtwork = staticCompositionLocalOf<Pair<String, Painter>?> { null }
+
+internal val LocalPlayerLyricsRequest = staticCompositionLocalOf<MutableState<Boolean>?> { null }
 
 internal class AutoMixVisuals(
     val incoming: MediaMetadata,

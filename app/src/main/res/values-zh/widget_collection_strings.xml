@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_collection_save">保存</string>
+    <string name="widget_collection_limit">最多选择 %1$d 个歌单</string>
+    <string name="widget_collection_empty">暂无可用歌单</string>
+    <string name="widget_collection_load_error">无法加载歌单</string>
+    <string name="widget_collection_save_error">保存失败，请重试</string>
+</resources>

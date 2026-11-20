@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_universal">Universal Widget</string>
+    <string name="widget_universal_description">Choose the music or shortcut shown on your home screen.</string>
+    <string name="widget_universal_playlists">Discover Playlists</string>
+</resources>

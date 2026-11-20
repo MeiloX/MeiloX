@@ -575,10 +575,10 @@ class PlaybackQueueManager(
         }
     }
 
-    fun startFmModeById(seedId: String?, providerId: String? = null) {
+    fun startFmModeById(seedId: String?, providerId: String? = null): Job {
         cancelActiveQueueBuild()
         val generation = queueBuildGeneration
-        activeQueueBuildJob = scope.launch(Dispatchers.Main) {
+        val build = scope.launch(Dispatchers.Main) {
             try {
                 if (generation != queueBuildGeneration) return@launch
                 if (seedId == null) {
@@ -598,6 +598,8 @@ class PlaybackQueueManager(
                 }
             }
         }
+        activeQueueBuildJob = build
+        return build
     }
 
     fun setPrivateFmMode(mode: PrivateFmMode, scene: PrivateFmScene? = null, refreshActiveSession: Boolean = true) {
@@ -620,8 +622,10 @@ class PlaybackQueueManager(
         scope.launch { fetchAndAppendFmRecommendations(player.currentMediaItem?.mediaId) }
     }
 
-    suspend fun loadPrivateFmScenes(): List<PrivateFmScene> = withContext(Dispatchers.IO) {
-        (fmSource ?: sources.open(fmProviderId ?: currentSourceProviderId())).scenes()
+    suspend fun loadPrivateFmScenes(providerId: String? = null): List<PrivateFmScene> = withContext(Dispatchers.IO) {
+        val source = if (providerId == null) fmSource ?: sources.open(fmProviderId ?: currentSourceProviderId())
+            else sources.open(providerId)
+        source.scenes()
     }
 
     private fun currentSourceProviderId(): String? = player.currentMediaItem?.let { item ->
@@ -923,16 +927,17 @@ class PlaybackQueueManager(
         playWhenReady: Boolean = true,
         repeatMode: Int = Player.REPEAT_MODE_ALL,
         randomStart: Boolean = false,
-    ) {
+        onQueueReady: () -> Unit = {},
+    ): Job {
         cancelServerShuffle()
         queueSelectionJob?.cancel()
         activeQueueBuildJob?.cancel()
         pendingSimilarGeneration = null
         val generation = ++queueBuildGeneration
-        activeQueueBuildJob = scope.launch(Dispatchers.Main) {
+        val build = scope.launch(Dispatchers.Main) {
+            val previousState = _queueState.value
             try {
                 if (generation != queueBuildGeneration) return@launch
-                val previousState = _queueState.value
                 _queueState.value = QueueState.Loading(queue.title ?: "加载中")
 
                 var status = queue.getInitialStatus()
@@ -1027,6 +1032,7 @@ class PlaybackQueueManager(
                 }
                 val mediaStartIndex = startIndex - sourceWindow.first
 
+                onQueueReady()
                 // 2. 停止并重置
                 cancelSourceContentQueue()
                 isFmMode = false
@@ -1076,6 +1082,9 @@ class PlaybackQueueManager(
                 loadSourceContentPageIfNeeded()
 
             } catch (e: CancellationException) {
+                if (generation == queueBuildGeneration) {
+                    _queueState.value = previousState
+                }
                 throw e
             } catch (e: Exception) {
                 if (generation != queueBuildGeneration) return@launch
@@ -1093,6 +1102,8 @@ class PlaybackQueueManager(
                 }
             }
         }
+        activeQueueBuildJob = build
+        return build
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
