@@ -104,6 +104,7 @@ import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalEdgeToEdge
 import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalContentPadding
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.core.defaultGlassColors
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
@@ -743,6 +744,7 @@ internal fun ArtistPopularSongs(
     onClick: (Int) -> Unit,
     onMore: (MediaMetadata, Rect) -> Unit,
     onHeightChanged: (Int) -> Unit,
+    menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     val spacing = homeCardSpacing(true)
     val columnWidth = minOf(
@@ -772,6 +774,7 @@ internal fun ArtistPopularSongs(
                         onMore = { onMore(track, it) },
                         moreModifier = Modifier.testTag("ArtistSongMore:${track.id}"),
                         coverSize = ArtistSongCoverSize,
+                        menuAnchorState = menuAnchorState,
                     )
                 }
             }

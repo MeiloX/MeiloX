@@ -135,6 +135,9 @@ import com.ljyh.mei.playback.playbackOrderIndices
 import com.ljyh.mei.playback.queueEntryId
 import io.github.neoruaa.glasmio.core.IosTypography
 import io.github.neoruaa.glasmio.core.LocalGlassColors
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
+import io.github.neoruaa.glasmio.glass.glasmioMenuGesture
+import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.ui.GlasmioAlertButtonRole
 import io.github.neoruaa.glasmio.ui.GlasmioAlertButtonSpec
 import io.github.neoruaa.glasmio.ui.GlasmioAlertDialog
@@ -711,7 +714,7 @@ fun PlayerQueuePage(
     var pendingHeaderAlignmentAnimated by remember(player) { mutableStateOf(false) }
     var pendingHeaderCollapsed by remember(player) { mutableStateOf(false) }
     var menuEntryKey by remember { mutableStateOf<String?>(null) }
-    var menuAnchorBounds by remember { mutableStateOf<Rect?>(null) }
+    val entryMenuAnchor = rememberGlasmioMenuAnchorState()
     var menuExpanded by remember { mutableStateOf(false) }
     var menuRemovalRequested by remember { mutableStateOf(false) }
     val currentQueueIndex = remember(entriesSnapshot, currentIndex) {
@@ -1345,10 +1348,12 @@ fun PlayerQueuePage(
     }
 
     val openEntryMenu: (String, Rect) -> Unit = { key, bounds ->
-        menuAnchorBounds = bounds
-        menuEntryKey = key
-        menuRemovalRequested = false
-        menuExpanded = true
+        if (menuEntryKey == null && !bounds.isEmpty) {
+            entryMenuAnchor.bind(null, bounds)
+            menuEntryKey = key
+            menuRemovalRequested = false
+            menuExpanded = true
+        }
     }
     val selectEntry: (String) -> Unit = { key ->
         // Keep the presentation chosen before the asynchronous track selection.
@@ -1433,6 +1438,7 @@ fun PlayerQueuePage(
                             additiveFade = additiveFade,
                             onClick = { selectEntry(entry.key) },
                             onLongClick = { openEntryMenu(entry.key, it) },
+                            menuAnchor = entryMenuAnchor,
                         )
                     }
                 }
@@ -1512,6 +1518,7 @@ fun PlayerQueuePage(
                                 additiveFade = additiveFade,
                                 onClick = { selectEntry(entry.key) },
                                 onLongClick = { openEntryMenu(entry.key, it) },
+                                menuAnchor = entryMenuAnchor,
                                 selected = !inlineCurrent && entry.rawIndex == currentIndex,
                                 dragHandleModifier = Modifier.longPressDraggableHandle(
                                     enabled = rowsTransition == null,
@@ -1658,7 +1665,8 @@ fun PlayerQueuePage(
         expanded = menuExpanded,
         onExpandedChange = { menuExpanded = it },
         itemCount = 1,
-        externalAnchorBounds = menuAnchorBounds,
+        externalAnchorBounds = entryMenuAnchor.liveBounds.takeIf { menuEntryKey != null },
+        menuAnchorState = entryMenuAnchor,
         alignToAnchorStart = true,
         expandFromAnchor = Alignment.Start,
         forceBelowAnchor = true,
@@ -1669,7 +1677,6 @@ fun PlayerQueuePage(
                 val selectedKey = menuEntryKey
                 val removeRequested = menuRemovalRequested
                 menuEntryKey = null
-                menuAnchorBounds = null
                 menuRemovalRequested = false
                 if (removeRequested && selectedKey != null) {
                     val currentEntries = player.phoneQueueEntries()
@@ -1772,8 +1779,16 @@ internal fun QueueSongRow(
     interactive: Boolean = true,
     landscapeSongListStyle: Boolean = false,
     showDivider: Boolean = true,
+    menuAnchor: GlasmioMenuAnchorState? = null,
 ) {
     var entryCoordinates by remember(entry.key) { mutableStateOf<LayoutCoordinates?>(null) }
+    val openMenu = {
+        entryCoordinates?.takeIf { it.isAttached }?.boundsInWindow()?.let(onLongClick)
+        Unit
+    }
+    val menuGesture = if (menuAnchor != null && interactive && enabled) {
+        Modifier.glasmioMenuGesture(menuAnchor, openMenu)
+    } else Modifier
     val metadata = entry.mediaItem.metadata
     val display = entry.mediaItem.mediaMetadata
     val title = metadata?.title ?: display.title?.toString().orEmpty()
@@ -1802,14 +1817,14 @@ internal fun QueueSongRow(
             Row(
                 modifier = Modifier.weight(1f).fillMaxHeight()
                     .onGloballyPositioned { entryCoordinates = it }
+                    .then(menuGesture)
                     .then(if (interactive) Modifier.combinedClickable(
                         enabled = enabled,
                         interactionSource = rowInteraction,
                         indication = null,
                         onClick = onClick,
-                        onLongClick = {
-                            entryCoordinates?.takeIf { it.isAttached }?.boundsInWindow()?.let(onLongClick)
-                        },
+                        // Keep long click for accessibility, keyboard and non-touch input.
+                        onLongClick = openMenu,
                     ) else Modifier),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

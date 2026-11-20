@@ -97,6 +97,8 @@ import io.github.neoruaa.glasmio.core.IosTypography
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.core.LocalGroupedListBackgroundAlpha
 import io.github.neoruaa.glasmio.core.LocalGroupedListIconColor
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
+import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 import com.ljyh.mei.ui.local.LocalNavController
@@ -284,6 +286,7 @@ fun LibraryMobileLayout(
         selectedPage == LibraryPage.History
     val pageSpacing = if (usesGroupedLazyRows || catalogRows) 12.dp else 0.dp
     var currentOverlay by remember { mutableStateOf<OverlayState>(OverlayState.None) }
+    val songMenuAnchor = rememberGlasmioMenuAnchorState()
     var searchQuery by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue())
     }
@@ -463,12 +466,13 @@ fun LibraryMobileLayout(
                                     val song = likedSongs[index]
                                     if (song != null) LibrarySongRow(
                                         song = song,
+                                        menuAnchorState = songMenuAnchor,
                                         showDivider = index < likedSongs.itemCount - 1,
                                         onClick = {
                                             playLikedSongs(song.id)
                                         },
                                         onMoreClick = {
-                                            currentOverlay = OverlayState.TrackActionMenu(song, it)
+                                            currentOverlay = OverlayState.TrackActionMenu(song, it, songMenuAnchor)
                                         },
                                     )
                                 }
@@ -721,6 +725,7 @@ private fun LibrarySongRow(
     song: MediaMetadata,
     onClick: () -> Unit,
     onMoreClick: (Rect) -> Unit,
+    menuAnchorState: GlasmioMenuAnchorState,
     showDivider: Boolean = true,
 ) {
     LandscapeMediaRow(
@@ -735,6 +740,7 @@ private fun LibrarySongRow(
         fullWidthTrackPress = true,
         showDivider = showDivider,
         onMore = onMoreClick,
+        menuAnchorState = menuAnchorState,
     )
 }
 

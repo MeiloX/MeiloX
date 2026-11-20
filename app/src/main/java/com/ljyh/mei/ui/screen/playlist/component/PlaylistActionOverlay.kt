@@ -52,6 +52,7 @@ fun PlaylistActionOverlay(
         is OverlayState.TrackActionMenu -> SourceTrackActions(
             metadata = overlay.track,
             anchorBounds = overlay.anchorBounds,
+            menuAnchorState = overlay.menuAnchorState,
             onDismiss = onDismiss,
             viewModel = sourceViewModel,
             playerViewModel = playerViewModel,

@@ -69,6 +69,7 @@ import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.core.LocalGroupedListBackgroundAlpha
 import io.github.neoruaa.glasmio.core.SheetGroupedListBackgroundAlpha
 import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
@@ -153,6 +154,7 @@ fun SongListDetailScreen(
     onTrackMore: (MediaMetadata, Rect) -> Unit,
     overlayContent: @Composable BoxScope.() -> Unit = {},
     artwork: DetailArtworkViewModel = hiltViewModel(),
+    trackMenuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     val playerConnection = LocalPlayerConnection.current
     val currentTrackId = playerConnection?.mediaMetadata?.collectAsState()?.value?.mediaId
@@ -328,6 +330,7 @@ fun SongListDetailScreen(
                         showLeadingDivider = useCoverBackground,
                         trackNumber = trackNumber,
                         onMoreClick = onTrackMore,
+                        menuAnchorState = trackMenuAnchorState,
                         emptyMessage =
                             playlistSearchQuery.takeIf { it.isNotBlank() && !searchResultsLoading }
                                 ?.let { "未找到匹配的歌曲" },

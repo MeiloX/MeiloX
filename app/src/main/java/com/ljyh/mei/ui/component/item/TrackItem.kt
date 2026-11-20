@@ -1,16 +1,11 @@
 package com.ljyh.mei.ui.component.item
 
 import io.github.neoruaa.glasmio.core.LocalGlassColors
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
@@ -64,8 +59,8 @@ fun Track(
     onMoreClick: ((Rect) -> Unit)?,
     detailInkBlend: Boolean = false,
     showPressIndication: Boolean = false,
+    menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
-    var menuAnchor by remember { mutableStateOf(Rect.Zero) }
     val indication = if (showPressIndication) LocalIndication.current else trackRowPressIndication()
     Row(
         modifier = Modifier
@@ -171,19 +166,21 @@ fun Track(
             ) {
                 val ripple = LocalRippleConfiguration.current.takeIf { showPressIndication }
                 CompositionLocalProvider(LocalRippleConfiguration provides ripple) {
-                    IconButton(
-                        onClick = { it(menuAnchor) },
-                        modifier = Modifier.size(44.dp)
-                            .then(if (detailInkBlend) Modifier.offset(x = 13.dp) else Modifier)
-                            .onGloballyPositioned { menuAnchor = it.boundsInWindow() },
-                    ) {
-                        io.github.neoruaa.glasmio.icons.SfIcon(
-                            symbol = io.github.neoruaa.glasmio.icons.SfSymbol.Ellipsis,
-                            contentDescription = androidx.compose.ui.res.stringResource(com.ljyh.mei.R.string.more_actions_title),
-                            modifier = Modifier.trackDetailInkBlend(detailInkBlend),
-                            tint = io.github.neoruaa.glasmio.core.LocalGlassColors.current.content,
-                            size = 18.dp,
-                        )
+                    TrackMenuTrigger(menuAnchorState, it) { trigger, openMenu ->
+                        IconButton(
+                            onClick = openMenu,
+                            modifier = Modifier.size(44.dp)
+                                .then(if (detailInkBlend) Modifier.offset(x = 13.dp) else Modifier)
+                                .then(trigger),
+                        ) {
+                            SfIcon(
+                                symbol = SfSymbol.Ellipsis,
+                                contentDescription = androidx.compose.ui.res.stringResource(com.ljyh.mei.R.string.more_actions_title),
+                                modifier = Modifier.trackDetailInkBlend(detailInkBlend),
+                                tint = LocalGlassColors.current.content,
+                                size = 18.dp,
+                            )
+                        }
                     }
                 }
             }

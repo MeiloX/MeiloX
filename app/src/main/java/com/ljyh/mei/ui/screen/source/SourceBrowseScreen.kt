@@ -636,6 +636,7 @@ fun SourceLibraryScreen(
     var query by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var selection by remember(selectedId, collection) { mutableStateOf<Pair<Track, Rect>?>(null) }
+    val trackMenuAnchor = rememberGlasmioMenuAnchorState()
     val focus = LocalFocusManager.current
     val play = rememberSourceQueuePlayer("source-library:$selectedId:${collection.name}", libraryCollectionTitle(collection),
         viewModel = viewModel, queueRequest = SourceContentRequest.Library(collection, selectedId))
@@ -916,7 +917,7 @@ fun SourceLibraryScreen(
                                 isCurrentTrack = item.ref == playingLikedTrack, fullWidthTrackPress = true,
                                 favorite = true, showDivider = item.ref != filtered.lastOrNull()?.ref,
                                 onClick = { val tracks = filtered.filterIsInstance<SourceItem.TrackItem>().map { it.track }; playVisible(tracks, tracks.indexOf(item.track)) },
-                                onMore = { selection = item.track to it })
+                                onMore = { selection = item.track to it }, menuAnchorState = trackMenuAnchor)
                             is SourceItem.PlaylistItem -> LandscapeMediaRow(modifier = Modifier.padding(horizontal = if (landscape) 0.dp else 4.dp), image = item.artworkUrl,
                                 title = item.title, artist = item.playlist.creatorName, detail = stringResource(R.string.playlist_song_count, item.playlist.trackCount),
                                 onClick = { navigateSourceContent(nav, item.ref) }, navigationArrow = true,
@@ -946,7 +947,7 @@ fun SourceLibraryScreen(
             }
         }
     }
-    SourceTrackActions(selection, { selection = null }, viewModel)
+    SourceTrackActions(selection, { selection = null }, viewModel, menuAnchorState = trackMenuAnchor)
 }
 
 

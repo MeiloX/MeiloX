@@ -45,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.utils.rememberPreference
+import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.ui.GlasmioSegmentedControl
 import io.github.neoruaa.glasmio.ui.GlasmioSearchBar
 import io.github.neoruaa.glasmio.ui.GlasmioGroupedList
@@ -75,6 +76,7 @@ fun SearchResultScreen(
     var searchQuery by rememberSaveable(query, type, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(query)) }
     var searchActive by remember { mutableStateOf(false) }
     var overlay by remember { mutableStateOf<OverlayState>(OverlayState.None) }
+    val trackMenuAnchor = rememberGlasmioMenuAnchorState()
     val playTracks: (List<MediaMetadata>, Int) -> Unit = { songs, index ->
         player?.playQueue(ListQueue(
             id = "SourceSearch-$providerId-$submittedQuery", title = "搜索: $submittedQuery",
@@ -89,7 +91,7 @@ fun SearchResultScreen(
         else -> ContentType.TRACK
     }
     val onTrackMore: (MediaMetadata, Rect) -> Unit = { metadata, anchor ->
-        overlay = OverlayState.TrackActionMenu(metadata, anchor)
+        overlay = OverlayState.TrackActionMenu(metadata, anchor, trackMenuAnchor)
     }
 
     LaunchedEffect(submittedQuery, providerId, selectedType) {
@@ -159,11 +161,12 @@ fun SearchResultScreen(
             else if (selectedType == SearchType.Song) SourceTrackResults(state, providers,
                 onPlay = { tracks, index -> playTracks(tracks.map { it.toMediaMetadata() }, index) },
                 onLoadMore = viewModel::loadMore, onRetry = { viewModel.search(submittedQuery, force = true) },
-                onSongMore = onTrackMore, showProviderName = false)
+                onSongMore = onTrackMore, showProviderName = false, menuAnchorState = trackMenuAnchor)
             else {
                 sourceContentItems(state.items, providers, { navigateSourceContent(navController, it) },
                     { tracks, index -> playTracks(tracks.map { it.toMediaMetadata() }, index) },
-                    { track, anchor -> overlay = OverlayState.TrackActionMenu(track.toMediaMetadata(), anchor) }, "typed-search",
+                    { track, anchor -> onTrackMore(track.toMediaMetadata(), anchor) }, "typed-search",
+                    menuAnchorState = trackMenuAnchor,
                     subtitle = { sourceSearchSubtitle(it) })
                 if (!state.loading && !state.hasMore && state.error == null && state.items.isEmpty()) {
                     item("typed-search-empty") { GlasmioGroupedList(Modifier.padding(top = 10.dp)) { EmptyView() } }

@@ -257,6 +257,7 @@ fun CommonOverlayHandler(
             SourceTrackActions(
                 metadata = overlay.track,
                 anchorBounds = overlay.anchorBounds,
+                menuAnchorState = overlay.menuAnchorState,
                 onDismiss = overlayHandler::dismiss,
                 viewModel = sourceViewModel,
                 playerViewModel = playerViewModel,

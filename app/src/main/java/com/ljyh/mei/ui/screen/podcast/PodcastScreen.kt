@@ -77,6 +77,7 @@ import com.ljyh.mei.ui.navigation.MeiloXPinnedListPage
 import io.github.neoruaa.glasmio.ui.GlasmioListRow
 import io.github.neoruaa.glasmio.core.IosTypography
 import io.github.neoruaa.glasmio.core.LocalGlassColors
+import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 import com.ljyh.mei.ui.local.LocalNavController
@@ -383,6 +384,7 @@ fun PodcastDetailScreen(
     val scope = rememberCoroutineScope()
     val sourceViewModel: com.ljyh.mei.ui.screen.source.SourceContentViewModel = hiltViewModel()
     var trackMenu by remember(id) { mutableStateOf<Pair<com.ljyh.mei.source.api.Track, androidx.compose.ui.geometry.Rect>?>(null) }
+    val trackMenuAnchor = rememberGlasmioMenuAnchorState()
     val selection = rememberDetailSelection(id)
     val listState = rememberLazyListState()
     var restoredListIndex by remember(id, listState) { androidx.compose.runtime.mutableIntStateOf(listState.firstVisibleItemIndex) }
@@ -547,7 +549,12 @@ fun PodcastDetailScreen(
             val index = tracks.indexOfFirst { it === track }
             if (displayedPrograms.getOrNull(index)?.mainTrackRef != null) trackMenu = track.toSourceTrack() to anchor
         },
-        overlayContent = { com.ljyh.mei.ui.screen.source.SourceTrackActions(trackMenu, { trackMenu = null }, sourceViewModel) },
+        trackMenuAnchorState = trackMenuAnchor,
+        overlayContent = {
+            com.ljyh.mei.ui.screen.source.SourceTrackActions(
+                trackMenu, { trackMenu = null }, sourceViewModel, menuAnchorState = trackMenuAnchor,
+            )
+        },
         detailMenu = menu, detailMenuTitle = stringResource(R.string.detail_podcast_menu),
         selectionMode = selection.active, selectedTrackIds = selection.ids, onSelectionDone = selection::finish,
         playlistSearchQuery = query, isPlaylistSearchActive = searchActive,

@@ -52,8 +52,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -90,6 +88,8 @@ import com.ljyh.mei.utils.rememberPreference
 import io.github.neoruaa.glasmio.core.swipeBackExcluded
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
+import com.ljyh.mei.ui.component.item.TrackMenuTrigger
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.scaffold.GlasmioHeaderAction
 import io.github.neoruaa.glasmio.ui.*
@@ -148,6 +148,7 @@ internal fun LazyListScope.sourceContentItems(
     onMore: (Track, Rect) -> Unit,
     keyPrefix: String = "source",
     firstItemTopPadding: Dp = 10.dp,
+    menuAnchorState: GlasmioMenuAnchorState,
     subtitle: @Composable (SourceItem) -> String = { sourceItemSubtitle(it) },
 ) {
     val tracks = items.filterIsInstance<SourceItem.TrackItem>().map { it.track }
@@ -166,10 +167,14 @@ internal fun LazyListScope.sourceContentItems(
                     modifier = Modifier.size(44.dp).clip(if (item is SourceItem.ArtistItem) CircleShape else ContinuousRoundedRectangle(10.dp)))
             },
             trailing = if (item is SourceItem.TrackItem) ({
-                var anchor by remember { mutableStateOf(Rect.Zero) }
-                Box(Modifier.size(40.dp).onGloballyPositioned { anchor = it.boundsInWindow() }
-                    .clickable(interactionSource = null, indication = null) { onMore(item.track, anchor) }, contentAlignment = Alignment.Center) {
-                    SfIcon("ellipsis", "更多操作", size = 18.dp)
+                TrackMenuTrigger(menuAnchorState, { onMore(item.track, it) }) { trigger, openMenu ->
+                    Box(
+                        Modifier.size(40.dp).then(trigger)
+                            .clickable(interactionSource = null, indication = null, onClick = openMenu),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        SfIcon("ellipsis", stringResource(R.string.more_actions_title), size = 18.dp)
+                    }
                 }
             }) else null,
             showDisclosure = item !is SourceItem.TrackItem,
@@ -219,6 +224,7 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
     val contentRevision by viewModel.contentRevision.collectAsState()
     val nav = LocalNavController.current
     var menu by remember(ref) { mutableStateOf<Pair<Track, Rect>?>(null) }
+    val trackMenuAnchor = rememberGlasmioMenuAnchorState()
     val savedResetRevision = contentRevision.takeUnless { ref is ArtistRef }
     var saved by remember(ref, state.providerVersion, state.accountRevision, savedResetRevision) { mutableStateOf<Boolean?>(null) }
     var savedLoading by remember(ref, state.providerVersion, state.accountRevision, contentRevision) { mutableStateOf(false) }
@@ -278,7 +284,7 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
         SourceArtistDetail(ref, state, provider, savedLoading, saved, viewModel,
             onFollow = { if (!busy) toggleCollection() }, selection = menu, onDismissMenu = { menu = null },
             onInformation = { Screen.ArtistInfo.navigate(nav) { addPath(Uri.encode(ref.contentId)); addQuery("providerId", ref.providerId) } }, onPlay = play,
-            onMore = { track, anchor -> menu = track to anchor })
+            onMore = { track, anchor -> menu = track to anchor }, menuAnchorState = trackMenuAnchor)
     } else {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
@@ -518,6 +524,7 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
             onTrackMore = { metadata, anchor ->
                 matchingTracks.firstOrNull { it.ref == metadata.trackRef }?.let { menu = it to anchor }
             },
+            trackMenuAnchorState = trackMenuAnchor,
             onBack = nav::navigateUp, detailMenu = detailMenu,
             selectionMode = selection.active, selectedTrackIds = selection.ids, onSelectionDone = selection::finish,
             detailMenuTitle = stringResource(if (ref is PlaylistRef) R.string.detail_playlist_menu else R.string.album_menu_title),
@@ -548,7 +555,7 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
                         modifier = Modifier.align(Alignment.BottomEnd),
                     )
                 }
-                SourceTrackActions(menu, { menu = null }, viewModel, playlist = playlist)
+                SourceTrackActions(menu, { menu = null }, viewModel, playlist = playlist, menuAnchorState = trackMenuAnchor)
             },
         )
         var retainedOrder by remember(ownerKey) { mutableStateOf<PlaylistOrderState<TrackRef>?>(null) }
@@ -644,6 +651,7 @@ private fun SourceArtistDetail(
     onFollow: () -> Unit,
     onPlay: (List<Track>, Int) -> Unit,
     onMore: (Track, Rect) -> Unit,
+    menuAnchorState: GlasmioMenuAnchorState,
 ) {
     val nav = LocalNavController.current
     val player = LocalPlayerConnection.current
@@ -680,7 +688,7 @@ private fun SourceArtistDetail(
                         DetailTrackRow(track.toMediaMetadata(), index + 1, showArtwork = true,
                             isCurrentTrack = track.toMediaMetadata().mediaId == currentId, isPlaying = playing,
                             isFavorite = track.toMediaMetadata().mediaId in favoriteIds, selected = null, onClick = { onPlay(tracks, index) },
-                            onMoreClick = { onMore(track, it) })
+                            onMoreClick = { onMore(track, it) }, menuAnchorState = menuAnchorState)
                         if (index < minOf(10, tracks.size) - 1) DetailTrackDivider()
                     }
                 }
@@ -731,6 +739,7 @@ private fun SourceArtistDetail(
                     ArtistPopularSongs(tracks.take(10).map { it.toMediaMetadata() }, favoriteIds, viewportWidth,
                         onClick = { onPlay(tracks, it) },
                         onMore = { metadata, bounds -> tracks.firstOrNull { it.ref == metadata.trackRef }?.let { onMore(it, bounds) } },
+                        menuAnchorState = menuAnchorState,
                         onHeightChanged = { popularHeightPx = it })
                 }
             }
@@ -754,7 +763,7 @@ private fun SourceArtistDetail(
                     GlasmioListRow(sourceErrorMessage(error), trailing = { Text("重试") }, onClick = viewModel::refresh)
                 } }
             })
-        SourceTrackActions(selection, onDismissMenu, viewModel)
+        SourceTrackActions(selection, onDismissMenu, viewModel, menuAnchorState = menuAnchorState)
     }
 }
 
@@ -823,6 +832,7 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
     var query by rememberSaveable(ref, albums, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
     var searchActive by remember(ref, albums) { mutableStateOf(false) }
     var menu by remember(ref) { mutableStateOf<Pair<Track, Rect>?>(null) }
+    val trackMenuAnchor = rememberGlasmioMenuAnchorState()
     val tracks = state.items.filterIsInstance<SourceItem.TrackItem>().map { it.track }
     val records = state.sections.flatMap { it.items }.filterIsInstance<SourceItem.AlbumItem>().map { it.album }
     val visibleTracks = remember(tracks, query.text) { sourceDetailMatches(tracks, query.text) }
@@ -891,7 +901,7 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
                     modifier = Modifier.padding(horizontal = if (landscape) 32.dp else 20.dp),
                     album = track.album.title, favorite = track.toMediaMetadata().mediaId in favoriteIds,
                     showDivider = indexed != visibleTracks.lastOrNull(), fullWidthTrackPress = true,
-                    onMore = { menu = track to it })
+                    onMore = { menu = track to it }, menuAnchorState = trackMenuAnchor)
             }
             sourceDetailPagingStatus(state, viewModel::refresh, {
                 if (query.text.isBlank()) viewModel.loadMore() else viewModel.continueArtistCatalogSearch()
@@ -908,7 +918,7 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
             GlasmioListRow(sourceErrorMessage(state.error!!), onClick = viewModel::refresh)
         }
     }
-    SourceTrackActions(menu, { menu = null }, viewModel)
+    SourceTrackActions(menu, { menu = null }, viewModel, menuAnchorState = trackMenuAnchor)
 }
 
 internal fun LazyListScope.sourceContentStatus(

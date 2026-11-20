@@ -44,6 +44,7 @@ import com.ljyh.mei.data.model.supportsNeteaseSongActions
 import com.ljyh.mei.data.model.MediaMetadata
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.core.LocalGroupedListBackgroundAlpha
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
 import com.ljyh.mei.ui.component.item.Track
 import com.ljyh.mei.utils.rememberPreference
 import com.ljyh.mei.ui.component.shimmer.ShimmerHost
@@ -62,6 +63,7 @@ fun PlaylistTrackList(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     emptyMessage: String? = null,
     flatDetailStyle: Boolean = false,
+    menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
 
     val playlistTrackTableHeader by rememberPreference(PlaylistTrackTableHeaderKey,  false)
@@ -91,6 +93,7 @@ fun PlaylistTrackList(
                     onTrackClick = onTrackClick, onMoreClick = onMoreClick,
                     emptyMessage = emptyMessage, flatDetailStyle = true,
                     showLeadingDivider = headerContent == null,
+                    menuAnchorState = menuAnchorState,
                 )
                 return@LazyColumn
             }
@@ -113,12 +116,14 @@ fun PlaylistTrackList(
                             onClick = { onTrackClick(track, index) },
                             selected = null,
                             onMoreClick = { onMoreClick(track, it) },
+                            menuAnchorState = menuAnchorState,
                         ) else Track(
                             track = track,
                             index = index,
                             isTablet = isTablet,
                             onClick = { onTrackClick(track, index) },
                             onMoreClick = { onMoreClick(track, it) },
+                            menuAnchorState = menuAnchorState,
                         )
                     }
                 }
@@ -186,12 +191,14 @@ fun PlaylistTrackList(
                         onClick = { onTrackClick(track, index) },
                         selected = null,
                         onMoreClick = { onMoreClick(track, it) },
+                        menuAnchorState = menuAnchorState,
                     ) else Track(
                         track = track,
                         index = index,
                         isTablet = isTablet,
                         onClick = { onTrackClick(track, index) },
                         onMoreClick = { onMoreClick(track, it) },
+                        menuAnchorState = menuAnchorState,
                     )
                 }
             }
@@ -224,6 +231,7 @@ fun LazyListScope.playlistTrackItems(
     isPlaying: Boolean = false,
     favoriteTrackIds: Set<String> = emptySet(),
     showLeadingDivider: Boolean = true,
+    menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     val itemCount = pagingItems?.itemCount ?: staticTracks.size
     val showsTableHeader = isTablet && showTableHeader && !flatDetailStyle
@@ -267,6 +275,7 @@ fun LazyListScope.playlistTrackItems(
                             isFavorite = track.mediaId in favoriteTrackIds,
                             onClick = { onTrackClick(track, index) },
                             onMoreClick = if (selectionMode) null else { { onMoreClick(track, it) } },
+                            menuAnchorState = menuAnchorState,
                             selected = if (selectionMode) track.mediaId in selectedTrackIds else null,
                         )
                     } else {
@@ -277,6 +286,7 @@ fun LazyListScope.playlistTrackItems(
                             showPressIndication = true,
                             onClick = { onTrackClick(track, index) },
                             onMoreClick = if (selectionMode) null else { { onMoreClick(track, it) } },
+                            menuAnchorState = menuAnchorState,
                             selected = if (selectionMode) track.mediaId in selectedTrackIds else null,
                         )
                     }
@@ -339,6 +349,7 @@ fun LazyListScope.playlistTrackItems(
                         isFavorite = track.mediaId in favoriteTrackIds,
                         onClick = { onTrackClick(track, index) },
                         onMoreClick = if (selectionMode) null else { { onMoreClick(track, it) } },
+                        menuAnchorState = menuAnchorState,
                         selected = if (selectionMode) track.mediaId in selectedTrackIds else null,
                     )
                 } else {
@@ -349,6 +360,7 @@ fun LazyListScope.playlistTrackItems(
                         showPressIndication = true,
                         onClick = { onTrackClick(track, index) },
                         onMoreClick = if (selectionMode) null else { { onMoreClick(track, it) } },
+                        menuAnchorState = menuAnchorState,
                         selected = if (selectionMode) track.mediaId in selectedTrackIds else null,
                     )
                 }

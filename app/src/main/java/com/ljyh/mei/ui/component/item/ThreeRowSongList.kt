@@ -127,13 +127,6 @@ internal fun HomeSongListRow(
     isPlaying: Boolean = false,
     menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
-    var anchor by remember(coverUrl, title) { mutableStateOf(Rect.Zero) }
-    val openMenu: () -> Unit = {
-        if (!anchor.isEmpty) {
-            menuAnchorState?.bind(null, anchor)
-            onMore(anchor)
-        }
-    }
     val landscape = rememberDeviceInfo().isLandscape
     val shape = ContinuousRoundedRectangle(songListCoverCornerRadius(landscape))
     val moreLabel = stringResource(R.string.more_actions_title)
@@ -182,19 +175,42 @@ internal fun HomeSongListRow(
             )
         }
         CompositionLocalProvider(LocalViewConfiguration provides actionConfiguration) {
-            Box(
-                modifier = moreModifier.size(HomeSongActionSize).offset(x = (-6).dp)
-                    .onGloballyPositioned { anchor = it.boundsInWindow() }
-                    .clip(ContinuousRoundedRectangle(HomeSongActionSize / 2))
-                    .then(menuAnchorState?.let { Modifier.glasmioMenuGesture(it, openMenu) } ?: Modifier)
-                    .clickable(
-                        interactionSource = null, indication = null, role = Role.Button,
-                        onClick = openMenu,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                SfIcon("ellipsis", moreLabel, size = 18.dp, tint = LocalGlassColors.current.secondaryContent)
+            TrackMenuTrigger(menuAnchorState, onMore) { trigger, openMenu ->
+                Box(
+                    modifier = moreModifier.size(HomeSongActionSize).offset(x = (-6).dp)
+                        .clip(ContinuousRoundedRectangle(HomeSongActionSize / 2))
+                        .then(trigger)
+                        .clickable(
+                            interactionSource = null, indication = null, role = Role.Button,
+                            onClick = openMenu,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    SfIcon("ellipsis", moreLabel, size = 18.dp, tint = LocalGlassColors.current.secondaryContent)
+                }
             }
         }
     }
+}
+
+/** The trigger and its external menu share the original pointer stream. */
+@Composable
+internal fun TrackMenuTrigger(
+    menuAnchorState: GlasmioMenuAnchorState?,
+    onMore: (Rect) -> Unit,
+    content: @Composable (Modifier, () -> Unit) -> Unit,
+) {
+    var bounds by remember { mutableStateOf(Rect.Zero) }
+    val openMenu: () -> Unit = {
+        val anchor = bounds
+        if (!anchor.isEmpty) {
+            menuAnchorState?.bind(null, anchor)
+            onMore(anchor)
+        }
+    }
+    val position = Modifier.onGloballyPositioned { bounds = it.boundsInWindow() }
+    val trigger = if (menuAnchorState == null) position else {
+        position.glasmioMenuGesture(menuAnchorState, openMenu)
+    }
+    content(trigger, openMenu)
 }

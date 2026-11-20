@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Rect
 
 import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.source.api.TrackRef
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
 
 sealed interface OverlayState {
     data object None : OverlayState
@@ -31,5 +32,9 @@ sealed interface OverlayState {
     data class Share(val metadata: MediaMetadata): OverlayState
     data object BottomAction: OverlayState
 
-    data class TrackActionMenu(val track: MediaMetadata, val anchorBounds: Rect? = null): OverlayState
+    data class TrackActionMenu(
+        val track: MediaMetadata,
+        val anchorBounds: Rect? = null,
+        val menuAnchorState: GlasmioMenuAnchorState? = null,
+    ) : OverlayState
 }
