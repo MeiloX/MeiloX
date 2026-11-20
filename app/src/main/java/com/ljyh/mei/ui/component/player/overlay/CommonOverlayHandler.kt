@@ -114,6 +114,7 @@ fun CommonOverlayHandler(
                     artists = overlay.artists,
                     playlistTitle = overlay.playlistTitle,
                     anchorBounds = anchor,
+                    menuAnchorState = overlayHandler.navigationMenuAnchor,
                     viewportBounds = overlay.viewportBounds,
                     onAlbumClick = onAlbumClick,
                     onArtistClick = onArtistClick,

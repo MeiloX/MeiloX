@@ -2113,6 +2113,7 @@ private fun QueueCollectionMenu(tracks: List<TrackRef>, queueTitle: String?) {
         expanded = menuOpen,
         onExpandedChange = { menuOpen = it },
         itemCount = (if (likeTracks.isEmpty()) 0 else 1) + (if (canSave) 1 else 0),
+        anchorEnabled = !busy,
         fullScreen = true,
         keepAnchorVisible = true,
         anchor = { open ->

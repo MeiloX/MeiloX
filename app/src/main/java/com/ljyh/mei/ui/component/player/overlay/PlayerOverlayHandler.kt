@@ -24,6 +24,7 @@ import com.ljyh.mei.ui.model.availableFor
 import com.ljyh.mei.source.api.ProviderIds
 import com.ljyh.mei.utils.lyric.lyricStorageKey
 import com.ljyh.mei.ui.component.player.enterFloatingLyricsPip
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
 
 /**
  * 播放器弹窗处理器
@@ -39,6 +40,8 @@ class PlayerOverlayHandler(
 
     val currentOverlayValue: OverlayState
         get() = _currentOverlay.value
+
+    internal val navigationMenuAnchor = GlasmioMenuAnchorState()
 
     /** Optional inline queue route supplied by the active player layout. */
     internal var onShowPlaylist: (() -> Unit)? = null
@@ -95,6 +98,7 @@ class PlayerOverlayHandler(
         viewportBounds: Rect? = null,
     ) {
         val connection = stateContainer.playerConnection
+        anchorBounds?.let { navigationMenuAnchor.bind(null, it) }
         _currentOverlay.value = OverlayState.AlbumArtist(
             album, artists, cover, anchorBounds,
             playlistTitle = connection.queueTitle.value,

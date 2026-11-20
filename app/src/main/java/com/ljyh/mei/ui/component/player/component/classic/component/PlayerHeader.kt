@@ -46,6 +46,8 @@ import com.ljyh.mei.ui.component.player.LocalPlayerRoamingModeLabel
 import com.ljyh.mei.ui.component.player.autoMixIncomingMetadataDominant
 import com.ljyh.mei.ui.component.player.component.applemusic.AppleMusicMarqueeText
 import com.ljyh.mei.ui.component.player.component.applemusic.PlayerTitleWithMode
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
+import io.github.neoruaa.glasmio.glass.glasmioMenuGesture
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 
@@ -64,11 +66,15 @@ fun PlayerHeader(
     onTextPositioned: (LayoutCoordinates) -> Unit = {},
     onRowPositioned: (LayoutCoordinates) -> Unit = {},
     modeLabel: String? = LocalPlayerRoamingModeLabel.current,
+    navigationMenuAnchor: GlasmioMenuAnchorState? = null,
 ) {
     var metadataWidth by remember { mutableIntStateOf(0) }
     val favoriteMotion = rememberPlayerFavoriteMotion(isLiked, mediaMetadata.id)
     val marqueeEnabled = LocalPlayerSheet.current?.state?.isExpanded != false
     val actionsEnabled = !autoMixIncomingMetadataDominant()
+    val menuGesture = if (actionsEnabled && navigationMenuAnchor != null) {
+        Modifier.glasmioMenuGesture(navigationMenuAnchor, onClick)
+    } else Modifier
     val metadataClick = if (appleMusicStyle) {
         Modifier.clickable(
             interactionSource = remember { MutableInteractionSource() },
@@ -95,6 +101,7 @@ fun PlayerHeader(
                     end = (if (appleMusicStyle) 0.dp else 8.dp) +
                         (if (showLikeButton) 0.dp else 2.dp),
                 )
+                .then(menuGesture)
                 .onGloballyPositioned(onTextPositioned)
                 .onSizeChanged { metadataWidth = it.width }
         ) {

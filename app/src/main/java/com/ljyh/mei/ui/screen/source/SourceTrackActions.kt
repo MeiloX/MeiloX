@@ -14,6 +14,7 @@ import com.ljyh.mei.ui.component.playlist.TrackActionMenu
 import com.ljyh.mei.ui.local.LocalNavController
 import com.ljyh.mei.ui.screen.Screen
 import com.ljyh.mei.utils.setClipboard
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.ui.*
 
 internal fun sourceContentSupported(ref: ContentRef, providers: List<MusicProvider>): Boolean {
@@ -38,6 +39,7 @@ internal fun SourceTrackActionMessage(viewModel: SourceContentViewModel) {
 internal fun SourceTrackActions(
     selection: Pair<Track, Rect>?, onDismiss: () -> Unit, viewModel: SourceContentViewModel,
     playlist: SourcePlaylist? = null,
+    menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     val context = LocalContext.current
     val playerViewModel: PlayerViewModel = hiltViewModel()
@@ -47,6 +49,7 @@ internal fun SourceTrackActions(
         key(selected.first.ref, selected.second) {
             SourceTrackActions(metadata = metadata, onDismiss = onDismiss, viewModel = viewModel,
                 anchorBounds = selected.second, playerViewModel = playerViewModel, playlist = playlist,
+                menuAnchorState = menuAnchorState,
                 onShare = { onDismiss(); share = metadata },
                 onDownloadTrack = { quality -> playerViewModel.downloadSong(metadata, context, quality) })
         }
@@ -66,6 +69,7 @@ internal fun SourceTrackActions(
     onShare: (() -> Unit)? = null,
     onDownloadTrack: ((MusicQuality) -> Unit)? = null,
     playlist: SourcePlaylist? = null,
+    menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     val context = LocalContext.current
     val nav = LocalNavController.current
@@ -85,6 +89,7 @@ internal fun SourceTrackActions(
         TrackActionMenu(
             targetTrack = metadata,
             anchorBounds = anchorBounds,
+            menuAnchorState = menuAnchorState,
             onDismiss = onDismiss,
             onAddToPlaylist = if (canAdd) {
                 {

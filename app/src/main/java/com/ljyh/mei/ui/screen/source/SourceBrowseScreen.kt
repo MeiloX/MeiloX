@@ -177,6 +177,8 @@ import com.ljyh.mei.ui.screen.search.libraryProviders
 import com.ljyh.mei.ui.screen.playlist.component.TrackItemShimmer
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.core.swipeBackExcluded
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
+import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 import io.github.neoruaa.glasmio.scaffold.GlasmioPullToRefreshBox
@@ -208,6 +210,7 @@ fun SourceFeedScreen(
     val providers by viewModel.providers.collectAsState()
     var categoryId by rememberSaveable(kind, selectedId) { mutableStateOf(initialCategory) }
     var selection by remember(selectedId) { mutableStateOf<Pair<Track, Rect>?>(null) }
+    val trackMenuAnchor = rememberGlasmioMenuAnchorState()
     val listState = rememberSaveable(kind, selectedId, categoryId, saver = LazyListState.Saver) { LazyListState() }
     val nav = LocalNavController.current
     val bottom = LocalPlayerAwareWindowInsets.current.asPaddingValues().calculateBottomPadding()
@@ -322,13 +325,14 @@ fun SourceFeedScreen(
                     if (state.providerId == selectedId) {
                         if (kind == FeedKind.DISCOVER) {
                             sourceDiscoverItems(state.sections, discoverColumns, !device.isTablet, { navigateSourceContent(nav, it) }, play,
-                                { track, anchor -> selection = track to anchor }, ::openCard, loadingCard)
+                                { track, anchor -> selection = track to anchor }, ::openCard, loadingCard, trackMenuAnchor)
                         } else state.sections.forEachIndexed { index, section ->
                             item(key = "source-feed:${state.providerId}:${section.id}") {
                                 SourceFeedSectionContent(if (index == 0 && section.layout == SourceFeedLayout.HERO) section.copy(title = getGreeting()) else section,
                                     onOpen = { navigateSourceContent(nav, it) }, onPlay = play,
                                     onMore = { track, anchor -> selection = track to anchor }, onAction = ::openCard,
-                                    loadingCard = loadingCard, homeTrackRows = kind == FeedKind.HOME)
+                                    loadingCard = loadingCard, homeTrackRows = kind == FeedKind.HOME,
+                                    menuAnchorState = trackMenuAnchor)
                             }
                         }
                         sourceBrowseStatus(state, state.sections.sumOf { if (it.cards.isNotEmpty()) it.cards.size else it.items.size },
@@ -342,7 +346,7 @@ fun SourceFeedScreen(
             }
         }
     }
-    SourceTrackActions(selection, { selection = null }, viewModel)
+    SourceTrackActions(selection, { selection = null }, viewModel, menuAnchorState = trackMenuAnchor)
 }
 
 /** Uses the native home-feed card and song-row primitives for every provider. */
@@ -355,6 +359,7 @@ internal fun SourceFeedSectionContent(
     onAction: (SourceFeedCard) -> Unit = {},
     loadingCard: String? = null,
     homeTrackRows: Boolean = false,
+    menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     val landscape = rememberDeviceInfo().isLandscape
     val spacing = homeCardSpacing(landscape)
@@ -425,6 +430,7 @@ internal fun SourceFeedSectionContent(
                             isPlaying = playingTrack == track.ref,
                             moreModifier = Modifier.testTag("HomeSongMore:${track.ref.trackId}"),
                             onMore = { onMore(track, it) },
+                            menuAnchorState = menuAnchorState,
                         )
                     }
                 }
@@ -474,12 +480,17 @@ private fun LazyListScope.sourceDiscoverItems(
     sections: List<SourceFeedSection>, columns: Int, featured: Boolean,
     onOpen: (ContentRef) -> Unit, onPlay: (List<Track>, Int) -> Unit, onMore: (Track, Rect) -> Unit,
     onAction: (SourceFeedCard) -> Unit, loadingCard: String?,
+    menuAnchorState: GlasmioMenuAnchorState,
 ) {
     sections.forEachIndexed { sectionIndex, section ->
         if (section.cards.isNotEmpty()) {
-            item("source-discover-cards:${section.id}") { SourceFeedSectionContent(section, onOpen, onPlay, onMore, onAction, loadingCard) }
+            item("source-discover-cards:${section.id}") {
+                SourceFeedSectionContent(section, onOpen, onPlay, onMore, onAction, loadingCard, menuAnchorState = menuAnchorState)
+            }
         } else if (section.layout == SourceFeedLayout.TRACKS) {
-            item("source-discover-tracks:${section.id}") { SourceFeedSectionContent(section, onOpen, onPlay, onMore) }
+            item("source-discover-tracks:${section.id}") {
+                SourceFeedSectionContent(section, onOpen, onPlay, onMore, menuAnchorState = menuAnchorState)
+            }
         } else {
             val hero = section.items.firstOrNull()?.takeIf { featured && sectionIndex == 0 && it is SourceItem.PlaylistItem }
             if (sections.size > 1 && section.title.isNotBlank()) item("source-discover-heading:${section.id}") {

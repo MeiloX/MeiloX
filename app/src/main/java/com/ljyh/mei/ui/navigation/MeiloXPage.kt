@@ -255,7 +255,9 @@ fun MeiloXPinnedPage(
                 trailingActions.forEach { action ->
                     key(action.key) {
                         GlasmioIconButton(action.onClick, enabled = action.enabled,
-                            modifier = action.menuAnchor?.let { Modifier.glasmioMenuAnchor(it) } ?: Modifier,
+                            modifier = action.menuAnchor?.let {
+                                Modifier.glasmioMenuAnchor(it, action.onClick.takeIf { action.enabled })
+                            } ?: Modifier,
                         ) { action.content() }
                     }
                 }

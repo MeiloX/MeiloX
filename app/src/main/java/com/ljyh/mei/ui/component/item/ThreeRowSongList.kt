@@ -56,6 +56,8 @@ import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.component.playlist.PlayingImageView
 import com.ljyh.mei.ui.component.playlist.TrackPlaybackWave
 import io.github.neoruaa.glasmio.core.LocalGlassColors
+import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
+import io.github.neoruaa.glasmio.glass.glasmioMenuGesture
 import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalContentPadding
 import io.github.neoruaa.glasmio.scaffold.glasmioHorizontalEdgeToEdge
 
@@ -123,8 +125,15 @@ internal fun HomeSongListRow(
     moreModifier: Modifier = Modifier,
     coverSize: Dp = songListCoverSize(rememberDeviceInfo().isLandscape),
     isPlaying: Boolean = false,
+    menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     var anchor by remember(coverUrl, title) { mutableStateOf(Rect.Zero) }
+    val openMenu: () -> Unit = {
+        if (!anchor.isEmpty) {
+            menuAnchorState?.bind(null, anchor)
+            onMore(anchor)
+        }
+    }
     val landscape = rememberDeviceInfo().isLandscape
     val shape = ContinuousRoundedRectangle(songListCoverCornerRadius(landscape))
     val moreLabel = stringResource(R.string.more_actions_title)
@@ -177,9 +186,10 @@ internal fun HomeSongListRow(
                 modifier = moreModifier.size(HomeSongActionSize).offset(x = (-6).dp)
                     .onGloballyPositioned { anchor = it.boundsInWindow() }
                     .clip(ContinuousRoundedRectangle(HomeSongActionSize / 2))
+                    .then(menuAnchorState?.let { Modifier.glasmioMenuGesture(it, openMenu) } ?: Modifier)
                     .clickable(
                         interactionSource = null, indication = null, role = Role.Button,
-                        onClick = { onMore(anchor) },
+                        onClick = openMenu,
                     ),
                 contentAlignment = Alignment.Center,
             ) {

@@ -188,6 +188,7 @@ fun PlayerQualityDropdown(
             centerHorizontally = true,
             expandFromAnchor = Alignment.CenterHorizontally,
             viewportBounds = viewportBounds,
+            anchorEnabled = !isMixing,
             anchor = { onClick ->
                 Row(
                     modifier = Modifier
