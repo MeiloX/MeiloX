@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
   <string name="artist_latest_release">最新のリリース</string>
   <string name="player_find_lyrics">歌詞を探す</string>
@@ -1031,8 +1031,49 @@
   <string name="search_history_remove">「%1$s」を最近の検索から削除</string>
   <string name="search_history_show_all">すべて表示</string>
     <string name="legacy_appearance_notice_title">Android 12 での表示</string>
-    <string name="legacy_appearance_notice_message">この端末では「透明度を下げる」が常にオンになります。プレイヤーにはジャケット画像の色に合わせた静止背景が表示されます。Liquid Glass、段階的なぼかし、ガラスの HDR 効果、流動背景には Android 13 以降が必要です。</string>
+    <string name="legacy_appearance_notice_message">このデバイスでは「透明度を下げる」が常にオンになります。プレーヤーにはジャケット画像の色に合わせた静止背景が表示されます。Liquid Glass、段階的なぼかし、ガラスの HDR 効果、流動的なプレーヤー背景には Android 13 以降が必要です。</string>
     <string name="legacy_appearance_reduce_transparency_description">Android 12 と 12L では常にオンになります。</string>
     <string name="legacy_appearance_shader_requirement">Android 13 以降が必要です。</string>
-    <string name="legacy_appearance_fluid_description">流動背景には Android 13 以降が必要です。プレイヤーにはジャケット画像の色に合わせた静止背景が表示されます。</string>
+    <string name="legacy_appearance_fluid_description">流動的なプレーヤー背景には Android 13 以降が必要です。プレーヤーにはジャケット画像の色に合わせた静止背景が表示されます。</string>
+    <string name="mcp_title">ローカル MCP サービス</string>
+    <string name="mcp_status">サービスの状態</string>
+    <string name="mcp_listener">%1$s · %2$d 件の接続</string>
+    <string name="mcp_enable">サービスを有効にする</string>
+    <string name="mcp_port">ポート</string>
+    <string name="mcp_lan">ローカルネットワークからのアクセス</string>
+    <string name="mcp_lan_description">信頼できるネットワークでのみ有効にしてください。接続には HTTP を使用します。</string>
+    <string name="mcp_lan_permission">システム設定でローカルネットワークへのアクセスを許可してください。</string>
+    <string name="mcp_lan_address_missing">アドレスをコピーするには、ローカルネットワークに接続してください。</string>
+    <string name="mcp_authentication">認証</string>
+    <string name="mcp_token">Bearer トークン</string>
+    <string name="mcp_copy_token">トークンをコピー</string>
+    <string name="mcp_rotate_token">トークンをリセット</string>
+    <string name="mcp_rotate_confirmation">リセットするとすべてのクライアントが切断され、現在のトークンは無効になります。</string>
+    <string name="mcp_copy_config">クライアント設定をコピー</string>
+    <string name="mcp_copied">コピーしました</string>
+    <string name="mcp_permissions">クライアントの権限</string>
+    <string name="mcp_allow_read">再生状態とライブラリの読み取り</string>
+    <string name="mcp_allow_playback">再生とキューの操作</string>
+    <string name="mcp_allow_write">お気に入りとプレイリストの編集</string>
+    <string name="mcp_stopped">停止中</string>
+    <string name="mcp_starting">起動中</string>
+    <string name="mcp_running">実行中</string>
+    <string name="mcp_port_in_use">ポートを使用中</string>
+    <string name="mcp_failed">起動できません</string>
+    <string name="mcp_save_failed">ローカル MCP の設定を保存できませんでした。</string>
+    <string name="queue_modes_intro_title">再生モード</string>
+    <string name="queue_automix_description">曲の切り替えを自動でミックスします</string>
+    <string name="queue_actions">再生キューの操作</string>
+    <string name="queue_like_all">キューの曲をお気に入りに追加</string>
+    <string name="queue_like_all_confirm">%1$d 曲をお気に入りに追加しますか？</string>
+    <string name="queue_liked_count">%2$d 曲中 %1$d 曲がお気に入りに追加済み</string>
+    <string name="queue_save_playlist">キューをプレイリストに保存</string>
+    <string name="queue_playlist_count">%2$d 曲中 %1$d 曲をプレイリストに保存しました</string>
+    <string name="queue_collection_failed">キューを保存できませんでした</string>
+    <string name="detail_save_cover">カバーを保存</string>
+    <string name="detail_cover_saving">カバーを保存中…</string>
+    <string name="detail_cover_saved">カバーを写真に保存しました</string>
+    <string name="detail_cover_save_failed">カバーを保存できませんでした</string>
+    <string name="comment_voice">音声コメント</string>
+    <string name="comment_voice_seconds">音声コメント · %1$d 秒</string>
 </resources>
