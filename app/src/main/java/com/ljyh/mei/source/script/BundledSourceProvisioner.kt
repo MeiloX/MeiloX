@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.first
 /** Only these bundled, pinned bytes may receive the former built-in source's credentials. */
 internal object BundledSourceProvisioner {
     const val NETEASE_ID = "org.meilox.source.netease"
-    const val NETEASE_SHA256 = "94c73f7b6b9c76c0a0fa21b98bf6ea22939e1dbfe63fb41e57ad5c03a25bd47e"
+    const val NETEASE_SHA256 = "97591b04b704e476493d5d7aa6a1758746ef14a0a5ec5e08c90faaa35f569713"
     private const val MARKER = ".netease-default-v1"
     private const val JOURNAL = ".netease-bundle-transaction"
     private val packageFiles = setOf("manifest.json", "index.js", "LICENSE", "NOTICE")

@@ -208,6 +208,17 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                                 } else {
                                     if (envelope?.has("error") == true) {
                                         val code = runCatching { SourceErrorCode.valueOf(envelope.get("error").asString) }.getOrDefault(SourceErrorCode.PLUGIN)
+                                        if (code == SourceErrorCode.INVALID_RESPONSE) {
+                                            val action = params.get("action")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+                                                ?.asString?.takeIf { candidate ->
+                                                    operation == "feature.invoke" && manifest.features.values.any { candidate in it }
+                                                }
+                                            val status = response?.get("status")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt
+                                            Timber.tag("ScriptRuntime").w(
+                                                "Invalid source response plugin=%s version=%s operation=%s action=%s requests=%d httpStatus=%s",
+                                                manifest.id, manifest.version, operation, action, hop, status,
+                                            )
+                                        }
                                         throw SourceException(code)
                                     }
                                     val updated = envelope?.getAsJsonObject("storage")?.let { values ->
