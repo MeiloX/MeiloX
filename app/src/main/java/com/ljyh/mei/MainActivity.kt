@@ -629,9 +629,7 @@ class MainActivity : ComponentActivity() {
                 )
                 // The regular page backdrop is a static color, so avoid recording a full-screen
                 // layer just to replay the same pixels for every glass consumer.
-                val staticGlassBackdrop = rememberCanvasBackdrop {
-                    drawRect(glassColors.groupedBackground)
-                }
+                val staticGlassBackdrop = rememberCanvasBackdrop(glassColors.groupedBackground)
                 // Picture-in-picture still needs a recorded cover image backdrop.
                 val pipBackdrop = rememberLayerBackdrop()
                 val glassBackdrop = if (pictureInPictureMode && playerConnection != null) {
