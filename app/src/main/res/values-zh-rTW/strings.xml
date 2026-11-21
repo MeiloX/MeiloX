@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="artist_latest_release">最新發行</string>
     <string name="player_find_lyrics">尋找歌詞</string>
@@ -1029,4 +1030,45 @@
     <string name="search_history_clear">清除</string>
     <string name="search_history_remove">從最近搜尋中移除%1$s</string>
     <string name="search_history_show_all">顯示全部</string>
+    <string name="mcp_title">本機 MCP 服務</string>
+    <string name="mcp_status">服務狀態</string>
+    <string name="mcp_listener">%1$s · %2$d 個連線</string>
+    <string name="mcp_enable">啟用服務</string>
+    <string name="mcp_port">監聽連接埠</string>
+    <string name="mcp_lan">允許區域網路存取</string>
+    <string name="mcp_lan_description">僅在受信任的網路中啟用。連線使用 HTTP。</string>
+    <string name="mcp_lan_permission">請在系統設定中允許存取區域網路。</string>
+    <string name="mcp_lan_address_missing">連線至區域網路後即可複製位址。</string>
+    <string name="mcp_authentication">身分驗證</string>
+    <string name="mcp_token">存取權杖</string>
+    <string name="mcp_copy_token">複製權杖</string>
+    <string name="mcp_rotate_token">重設權杖</string>
+    <string name="mcp_rotate_confirmation">重設後將中斷所有用戶端的連線，舊權杖隨即失效。</string>
+    <string name="mcp_copy_config">複製用戶端設定</string>
+    <string name="mcp_copied">已複製</string>
+    <string name="mcp_permissions">用戶端權限</string>
+    <string name="mcp_allow_read">讀取播放與曲庫</string>
+    <string name="mcp_allow_playback">控制播放與佇列</string>
+    <string name="mcp_allow_write">修改喜愛與播放清單</string>
+    <string name="mcp_stopped">已停止</string>
+    <string name="mcp_starting">啟動中</string>
+    <string name="mcp_running">執行中</string>
+    <string name="mcp_port_in_use">連接埠已占用</string>
+    <string name="mcp_failed">啟動失敗</string>
+    <string name="mcp_save_failed">無法儲存本機 MCP 設定。</string>
+    <string name="queue_modes_intro_title">播放模式</string>
+    <string name="queue_automix_description">自動混合歌曲之間的轉場</string>
+    <string name="queue_actions">佇列操作</string>
+    <string name="queue_like_all">將佇列加入喜愛歌曲</string>
+    <string name="queue_like_all_confirm">將 %1$d 首歌曲加入喜愛歌曲？</string>
+    <string name="queue_liked_count">%2$d 首歌曲中有 %1$d 首已加入喜愛歌曲</string>
+    <string name="queue_save_playlist">將佇列儲存為歌單</string>
+    <string name="queue_playlist_count">已將 %2$d 首歌曲中的 %1$d 首存入歌單</string>
+    <string name="queue_collection_failed">無法儲存佇列</string>
+    <string name="detail_save_cover">儲存封面</string>
+    <string name="detail_cover_saving">正在儲存封面…</string>
+    <string name="detail_cover_saved">封面已儲存至相簿</string>
+    <string name="detail_cover_save_failed">無法儲存封面</string>
+    <string name="comment_voice">語音留言</string>
+    <string name="comment_voice_seconds">語音留言 · %1$d 秒</string>
 </resources>
