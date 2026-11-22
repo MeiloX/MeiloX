@@ -564,7 +564,7 @@ class SourceContentViewModel internal constructor(
         artistLogoJob?.cancel()
         artistLogoJob = viewModelScope.launch {
             val logo = try {
-                resolver.resolve(ref, artist, tracks)
+                resolver.resolve(ref, artist, tracks, nameHint = router.artistNameHint(ref))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

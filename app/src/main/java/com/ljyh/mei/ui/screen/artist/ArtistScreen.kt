@@ -48,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -67,7 +68,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.nativePaint
-import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onLayoutRectChanged
 import androidx.compose.ui.platform.LocalContext
@@ -96,9 +96,11 @@ import coil3.size.Scale
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberCanvasBackdrop
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.kyant.shapes.Capsule
+import com.ljyh.mei.AppContext
 import com.ljyh.mei.R
 import com.ljyh.mei.constants.DetailPageHorizontalPadding
 import com.ljyh.mei.source.core.AppleArtistLogo
+import com.ljyh.mei.source.core.displayUrl
 import com.ljyh.mei.ui.component.playlist.CoverBackground
 import com.ljyh.mei.ui.component.playlist.FavoriteTrackStar
 import com.ljyh.mei.ui.component.playlist.rememberCoverBackground
@@ -435,7 +437,8 @@ internal fun ArtistDetailHeader(
             val logoAspect = logo?.let { it.width.toFloat() / it.height } ?: 1f
             val logoWidth = minOf(availableWidth, ArtistLogoMaxWidth, ArtistLogoMaxHeight * logoAspect)
             val logoHeight = logoWidth / logoAspect
-            val logoPainter = logo?.let { rememberArtistLogoPainter(it.url, logoWidth, logoHeight) }
+            val logoState = logo?.let { rememberArtistLogoState(it, logoWidth, logoHeight) }
+            val logoPainter = (logoState as? AsyncImagePainter.State.Success)?.painter
             val appleAccent = logo?.keyColorRgb?.takeIf { logoPainter != null }?.let {
                 Color(it or 0xFF000000.toInt())
             }
@@ -452,6 +455,14 @@ internal fun ArtistDetailHeader(
                             contentDescription = name,
                             modifier = Modifier.size(logoWidth, logoHeight),
                             contentScale = ContentScale.Fit,
+                        )
+                    }
+                } else if (logoState != null && logoState !is AsyncImagePainter.State.Error) {
+                    ShimmerHost(modifier = titlePadding.semantics { contentDescription = name }) {
+                        Spacer(
+                            Modifier.size(logoWidth, logoHeight)
+                                .clip(ContinuousRoundedRectangle(8.dp))
+                                .background(colors.content)
                         )
                     }
                 } else {
@@ -544,25 +555,44 @@ internal fun ArtistDetailHeader(
 }
 
 @Composable
-private fun rememberArtistLogoPainter(url: String, width: Dp, height: Dp): Painter? {
+private fun rememberArtistLogoState(logo: AppleArtistLogo, width: Dp, height: Dp): AsyncImagePainter.State {
     val context = LocalContext.current
     val density = LocalDensity.current
     val widthPx = with(density) { width.roundToPx().coerceAtLeast(1) }
     val heightPx = with(density) { height.roundToPx().coerceAtLeast(1) }
-    val request = remember(context, url, widthPx, heightPx) {
-        ImageRequest.Builder(context)
-            .data(url)
-            .size(widthPx, heightPx)
-            .scale(Scale.FIT)
-            .precision(Precision.INEXACT)
-            .crossfade(false)
-            .build()
+    val displayUrl = remember(logo, widthPx, heightPx) { logo.displayUrl(maxOf(widthPx, heightPx)) }
+    val primaryUrl = if (displayUrl == logo.url) logo.url else {
+        key(logo.url, displayUrl) {
+            val cachedUrl by produceState<String?>(null) {
+                value = if (AppContext.instance.hasCachedImage(logo.url)) logo.url else displayUrl
+            }
+            cachedUrl
+        }
     }
-    val state by key(url) {
-        rememberAsyncImagePainter(request, contentScale = ContentScale.Fit)
-            .state.collectAsStateWithLifecycle()
+    if (primaryUrl == null) return AsyncImagePainter.State.Empty
+    return key(logo.url, displayUrl, primaryUrl) {
+        var tryAlternate by remember { mutableStateOf(false) }
+        val alternateUrl = (if (primaryUrl == logo.url) displayUrl else logo.url)
+            .takeIf { it != primaryUrl }
+        val url = if (tryAlternate) alternateUrl ?: primaryUrl else primaryUrl
+        val request = remember(context, url, widthPx, heightPx) {
+            ImageRequest.Builder(context)
+                .data(url)
+                .size(widthPx, heightPx)
+                .scale(Scale.FIT)
+                .precision(Precision.INEXACT)
+                .crossfade(false)
+                .build()
+        }
+        val state by key(url) {
+            rememberAsyncImagePainter(request, contentScale = ContentScale.Fit)
+                .state.collectAsStateWithLifecycle()
+        }
+        if (state is AsyncImagePainter.State.Error && alternateUrl != null && !tryAlternate) {
+            LaunchedEffect(url) { tryAlternate = true }
+            AsyncImagePainter.State.Empty
+        } else state
     }
-    return (state as? AsyncImagePainter.State.Success)?.painter
 }
 
 @Composable

@@ -33,6 +33,7 @@ import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.StuckPlayerException
 import androidx.media3.common.util.UnstableApi
 import com.ljyh.mei.source.api.*
+import com.ljyh.mei.source.core.AppleArtistLogoResolver
 import com.ljyh.mei.source.core.SourceFeatureClient
 import com.ljyh.mei.source.api.TrackRefCodec
 import com.ljyh.mei.source.core.SourceRouter
@@ -99,6 +100,7 @@ import com.ljyh.mei.data.model.room.PlaylistType
 import com.ljyh.mei.data.model.room.Song
 import com.ljyh.mei.data.model.toMediaItem
 import com.ljyh.mei.data.model.toMediaMetadata
+import com.ljyh.mei.data.model.toSourceTrack
 import com.ljyh.mei.di.repository.HistoryRepository
 import com.ljyh.mei.di.repository.LocalPlaylistRepository
 import com.ljyh.mei.di.repository.PlaylistSongCrossRefRepository
@@ -143,6 +145,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import timber.log.Timber
 import java.lang.ref.WeakReference
@@ -206,6 +209,8 @@ class MusicService : MediaLibraryService(),
     private var playbackSnapshotJob: Job? = null
     private var periodicSnapshotJob: Job? = null
     private var playbackRestoreJob: Job? = null
+    private var artistLogoPrefetchTarget: ContentRef? = null
+    private var artistLogoPrefetchJob: Job? = null
     private var widgetLyricsJob: Job? = null
     private var widgetProgressJob: Job? = null
     private var widgetQueueCommandJob: Job? = null
@@ -270,6 +275,9 @@ class MusicService : MediaLibraryService(),
     lateinit var automaticCacheController: AutomaticCacheController
     @Inject
     lateinit var sourceRouter: SourceRouter
+
+    @Inject
+    lateinit var artistLogoResolver: AppleArtistLogoResolver
     @Inject
     lateinit var scriptRuntime: com.ljyh.mei.source.script.ScriptRuntime
     @Inject
@@ -1204,6 +1212,14 @@ class MusicService : MediaLibraryService(),
         }
         if (events.containsAny(
                 Player.EVENT_MEDIA_ITEM_TRANSITION,
+                Player.EVENT_MEDIA_METADATA_CHANGED,
+                Player.EVENT_IS_PLAYING_CHANGED,
+            )
+        ) {
+            updateArtistLogoPrefetch()
+        }
+        if (events.containsAny(
+                Player.EVENT_MEDIA_ITEM_TRANSITION,
                 Player.EVENT_IS_PLAYING_CHANGED,
                 Player.EVENT_PLAYBACK_STATE_CHANGED,
                 Player.EVENT_PLAY_WHEN_READY_CHANGED,
@@ -1245,6 +1261,49 @@ class MusicService : MediaLibraryService(),
         ) {
             schedulePlaybackSnapshot()
         }
+    }
+
+    private fun updateArtistLogoPrefetch() {
+        val target = player.currentMetadata?.takeIf { player.isPlaying }?.artistLogoTarget()
+        if (target == artistLogoPrefetchTarget) return
+        artistLogoPrefetchTarget = target
+        artistLogoPrefetchJob?.cancel()
+        artistLogoPrefetchJob = if (target == null) null else scope.launch {
+            delay(2_500)
+            withTimeoutOrNull(10_000L) {
+                sourceRouter.registry.awaitInitialized()
+                val playing = player.currentMetadata?.takeIf {
+                    player.isPlaying && it.artistLogoTarget() == target
+                } ?: return@withTimeoutOrNull
+                val owner = sourceRouter.registry.provider(playing.trackRef.providerId) ?: return@withTimeoutOrNull
+                if (owner !is ArtistCapability || SourceCapability.ARTIST !in owner.capabilities) return@withTimeoutOrNull
+                try {
+                    val track = if (target is ArtistRef) playing.toSourceTrack() else {
+                        sourceRouter.getTrack(playing.trackRef) ?: return@withTimeoutOrNull
+                    }
+                    val artist = target as? ArtistRef ?: track.artists.firstNotNullOfOrNull {
+                        it.ref?.takeIf { ref -> ref.providerId == track.ref.providerId }
+                    } ?: return@withTimeoutOrNull
+                    artistLogoResolver.prefetch(
+                        ref = artist,
+                        artist = { sourceRouter.artist(artist) },
+                        tracks = { sourceRouter.artistTracks(artist).items + track },
+                        nameHint = track.artists.firstOrNull { it.ref == artist }?.name,
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // Artist artwork is optional and must not interrupt playback.
+                }
+            }
+        }
+    }
+
+    private fun MediaMetadata.artistLogoTarget(): ContentRef? {
+        if (isLocal || isPodcast || trackRef.providerId == ProviderIds.LOCAL) return null
+        return artists.firstNotNullOfOrNull {
+            it.ref?.takeIf { ref -> ref.providerId == trackRef.providerId }
+        } ?: trackRef
     }
 
     private fun monitorFailureRecovery() {
@@ -1658,6 +1717,7 @@ class MusicService : MediaLibraryService(),
         periodicSnapshotJob?.cancel()
         playbackRestoreJob?.cancel()
         playbackSnapshotJob?.cancel()
+        artistLogoPrefetchJob?.cancel()
         automaticCachePlayback.reset()
         if (::playbackHistoryReporter.isInitialized) {
             recordPlaybackDuration(playbackHistorySession.finish(SystemClock.elapsedRealtime()))

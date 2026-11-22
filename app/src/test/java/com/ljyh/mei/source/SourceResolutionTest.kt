@@ -180,6 +180,17 @@ class SourceResolutionTest {
         assertTrue(findAppleArtistLogo(partial, identity).isFailure)
     }
 
+    @Test fun appleArtistArtworkSizesOnlyRecognizedLargeApplePngs() {
+        val base = "https://is1-ssl.mzstatic.com/image/thumb/MusicSource/v4/path"
+        val large = AppleArtistLogo("$base/4826x1264bb.png", 4826, 1264)
+        assertEquals("$base/896x235bb.png", large.displayUrl(864))
+        assertEquals(large.url, large.displayUrl(4826))
+        assertEquals(large.url, large.copy(width = 4827).displayUrl(864))
+
+        val compact = AppleArtistLogo("$base/2880x865bb.png", 2880, 865)
+        assertEquals(compact.url, compact.displayUrl(864))
+    }
+
     private fun appleArtworkCatalog(load: suspend (String) -> AppleArtistLogo?): AppleArtistCatalog =
         object : AppleArtistCatalog {
             override suspend fun searchArtists(name: String, storefront: String): List<AppleArtistCandidate> =

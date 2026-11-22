@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -45,51 +46,109 @@ class AppleArtistLogoResolver @Inject internal constructor(
 ) {
     private val mappings = context.getSharedPreferences("apple-artist-mappings-v1", Context.MODE_PRIVATE)
     private val artworkCache = LruCache<ArtistRef, CachedLogo>(MAX_CACHE_ENTRIES)
-    private val artistLocks = Array(16) { Mutex() }
+    private val artistLocks = mutableMapOf<ArtistRef, ArtistLock>()
 
     internal suspend fun resolve(
         ref: ArtistRef,
         artist: suspend () -> SourceArtistInfo,
         tracks: suspend () -> List<Track>,
+        nameHint: String? = null,
+    ): AppleArtistLogo? = resolve(ref, artist, tracks, nameHint, prefetch = false)
+
+    internal suspend fun prefetch(
+        ref: ArtistRef,
+        artist: suspend () -> SourceArtistInfo,
+        tracks: suspend () -> List<Track>,
+        nameHint: String? = null,
+    ) {
+        resolve(ref, artist, tracks, nameHint, prefetch = true)
+    }
+
+    private suspend fun resolve(
+        ref: ArtistRef,
+        artist: suspend () -> SourceArtistInfo,
+        tracks: suspend () -> List<Track>,
+        nameHint: String?,
+        prefetch: Boolean,
     ): AppleArtistLogo? = withContext(Dispatchers.IO) {
-        val lockIndex = (ref.hashCode() and Int.MAX_VALUE) % artistLocks.size
-        artistLocks[lockIndex].withLock { resolveLocked(ref, artist, tracks) }
+        val lock = synchronized(artistLocks) {
+            artistLocks.getOrPut(ref, ::ArtistLock).also { it.users++ }
+        }
+        try {
+            lock.mutex.withLock { resolveLocked(ref, artist, tracks, nameHint, prefetch) }
+        } finally {
+            synchronized(artistLocks) {
+                if (--lock.users == 0) artistLocks.remove(ref)
+            }
+        }
     }
 
     private suspend fun resolveLocked(
         ref: ArtistRef,
         artist: suspend () -> SourceArtistInfo,
         tracks: suspend () -> List<Track>,
+        nameHint: String?,
+        playbackPrefetch: Boolean,
     ): AppleArtistLogo? = coroutineScope resolve@{
         val now = System.currentTimeMillis()
-        artworkCache.get(ref)?.takeIf { now < it.expiresAt }?.let { return@resolve it.logo }
+        artworkCache.get(ref)?.takeIf {
+            now < it.expiresAt && (playbackPrefetch || !it.prefetchOnly)
+        }?.let { return@resolve it.logo }
         val existing = readMapping(ref, now)
         existing?.artwork?.takeUnless { it.needsKeyColorRefresh }?.let {
             artworkCache.put(ref, it)
             return@resolve it.logo
         }
         var prefetch: Pair<AppleArtistIdentity, Deferred<Result<AppleArtistLogo?>>>? = null
+        var earlySearch: Deferred<List<AppleArtistCandidate>?>? = null
         try {
             val mapping = existing ?: run {
+                val hintedName = nameHint?.trim()?.takeIf { it.length in 1..256 }
+                earlySearch = hintedName?.let { name ->
+                    async {
+                        try {
+                            catalog.searchArtists(name, STOREFRONTS.first())
+                        } catch (_: IOException) {
+                            null
+                        }
+                    }
+                }
                 val info = artist()
                 if (info.ref != ref) return@resolve null
                 val names = (listOf(info.name) + info.alternateNames + info.translatedNames + info.aliases)
                     .map(String::trim).filter(String::isNotEmpty).distinctBy(::normalizedAppleArtistName)
                 if (names.isEmpty()) return@resolve null
+                val preferredSearch = earlySearch?.takeIf { hintedName in names.take(MAX_SEARCH_NAMES) }
+                if (preferredSearch == null) earlySearch?.cancel()
                 val match = withTimeoutOrNull(MATCH_TIMEOUT_MS) {
-                    findAppleArtist(catalog, names, onLeadCandidate = { candidate ->
-                        if (prefetch?.first != candidate) {
-                            prefetch?.second?.cancel()
-                            // The match deadline must not wait for speculative artwork.
-                            prefetch = candidate to this@resolve.async {
-                                appleArtworkResult { catalog.artistLogo(candidate.id, candidate.storefront, candidate.pageUrl) }
+                    val evidence = async(start = CoroutineStart.LAZY) { appleArtistSourceSongs(info, tracks(), names) }
+                    try {
+                        findAppleArtist(
+                            catalog, names,
+                            onLeadCandidate = { candidate ->
+                                evidence.start()
+                                if (prefetch?.first != candidate) {
+                                    prefetch?.second?.cancel()
+                                    // The match deadline must not wait for speculative artwork.
+                                    prefetch = candidate to this@resolve.async {
+                                        appleArtworkResult { catalog.artistLogo(candidate.id, candidate.storefront, candidate.pageUrl) }
+                                    }
+                                }
+                            },
+                            searchArtists = { name, storefront ->
+                                val ready = if (name == hintedName && storefront == STOREFRONTS.first()) {
+                                    preferredSearch?.await()
+                                } else null
+                                ready ?: catalog.searchArtists(name, storefront)
                             }
-                        }
-                    }) { appleArtistSourceSongs(info, tracks(), names) }
+                        ) { evidence.await() }
+                    } finally {
+                        evidence.cancel()
+                    }
                 }
                 currentCoroutineContext().ensureActive()
                 if (match == null) {
-                    cacheLogo(ref, null, RETRY_DELAY_MS)
+                    cacheLogo(ref, null, RETRY_DELAY_MS, prefetchOnly = playbackPrefetch)
                     return@resolve null
                 }
                 CachedMapping(match, System.currentTimeMillis()).also { saveMapping(ref, it) }
@@ -117,12 +176,13 @@ class AppleArtistLogoResolver @Inject internal constructor(
                 logo != null -> LOGO_CACHE_MS
                 result.isSuccess -> NO_LOGO_CACHE_MS
                 else -> RETRY_DELAY_MS
-            })
+            }, prefetchOnly = playbackPrefetch && result.isFailure)
             if (result.isSuccess) {
                 saveMapping(ref, mapping.copy(artwork = artwork))
             }
             logo
         } finally {
+            earlySearch?.cancel()
             prefetch?.second?.cancel()
         }
     }
@@ -182,8 +242,10 @@ class AppleArtistLogoResolver @Inject internal constructor(
         editor.putString(key, entry + suffix).apply()
     }
 
-    private fun cacheLogo(ref: ArtistRef, logo: AppleArtistLogo?, lifetime: Long): CachedLogo =
-        CachedLogo(logo, System.currentTimeMillis() + lifetime).also { artworkCache.put(ref, it) }
+    private fun cacheLogo(ref: ArtistRef, logo: AppleArtistLogo?, lifetime: Long, prefetchOnly: Boolean): CachedLogo =
+        CachedLogo(logo, System.currentTimeMillis() + lifetime, prefetchOnly = prefetchOnly).also {
+            artworkCache.put(ref, it)
+        }
 
     private fun ArtistRef.cacheKey(): String = "${providerId.length}:$providerId$artistId"
 
@@ -197,7 +259,13 @@ class AppleArtistLogoResolver @Inject internal constructor(
         val logo: AppleArtistLogo?,
         val expiresAt: Long,
         val needsKeyColorRefresh: Boolean = false,
+        val prefetchOnly: Boolean = false,
     )
+
+    private class ArtistLock {
+        val mutex = Mutex()
+        var users = 0
+    }
 }
 
 internal data class AppleArtistIdentity(val id: String, val storefront: String, val pageUrl: String? = null)
@@ -262,6 +330,7 @@ internal suspend fun findAppleArtist(
     catalog: AppleArtistCatalog,
     names: List<String>,
     onLeadCandidate: (AppleArtistIdentity) -> Unit = {},
+    searchArtists: suspend (name: String, storefront: String) -> List<AppleArtistCandidate> = catalog::searchArtists,
     sourceSongs: suspend () -> List<Track>,
 ): AppleArtistIdentity? {
     val queries = names.take(MAX_SEARCH_NAMES)
@@ -278,7 +347,7 @@ internal suspend fun findAppleArtist(
         }
         val candidates = try {
             coroutineScope {
-                val pending = queries.map { name -> async { catalog.searchArtists(name, storefront) } }
+                val pending = queries.map { name -> async { searchArtists(name, storefront) } }
                 val primary = pending.first().await()
                 primary.firstOrNull { normalizedAppleArtistName(it.name) in acceptedNames }?.let(::prefetch)
                 primary + pending.drop(1).awaitAll().flatten()

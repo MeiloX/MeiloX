@@ -17,7 +17,10 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 
 private const val MAX_ARTWORK_EDGE = 8192
+private const val LOGO_SIZE_BUCKET_PX = 128
+private const val LARGE_LOGO_PIXELS = 3_000_000
 private val APPLE_ARTIST_KEY_COLOR = Regex("[0-9a-fA-F]{6}")
+private val APPLE_LOGO_SIZE = Regex("([0-9]+)x([0-9]+)([a-z]{2})\\.png")
 
 internal fun appleArtistKeyColorRgb(value: String?): Int? =
     value?.takeIf(APPLE_ARTIST_KEY_COLOR::matches)?.toInt(16)
@@ -30,6 +33,24 @@ internal fun validatedAppleArtistLogo(url: String, width: Int, height: Int): App
             it.encodedPath.startsWith("/image/thumb/") && it.pathSegments.last().endsWith(".png")
     } ?: return null
     return AppleArtistLogo(url = artwork.toString(), width = width, height = height)
+}
+
+internal fun AppleArtistLogo.displayUrl(targetEdgePx: Int): String {
+    val original = validatedAppleArtistLogo(url, width, height) ?: return url
+    if (width * height <= LARGE_LOGO_PIXELS) return url
+    val originalEdge = maxOf(width, height)
+    val edge = targetEdgePx.coerceIn(1, originalEdge)
+    val bucket = ((edge + LOGO_SIZE_BUCKET_PX - 1) / LOGO_SIZE_BUCKET_PX) * LOGO_SIZE_BUCKET_PX
+    if (bucket >= originalEdge) return url
+    val artwork = original.url.toHttpUrl()
+    val size = APPLE_LOGO_SIZE.matchEntire(artwork.pathSegments.last()) ?: return url
+    if (size.groupValues[1].toIntOrNull() != width || size.groupValues[2].toIntOrNull() != height) return url
+    val crop = size.groupValues[3]
+    val scaledWidth = (width * bucket + originalEdge - 1) / originalEdge
+    val scaledHeight = (height * bucket + originalEdge - 1) / originalEdge
+    return artwork.newBuilder()
+        .setPathSegment(artwork.pathSegments.lastIndex, "${scaledWidth}x${scaledHeight}$crop.png")
+        .build().toString()
 }
 
 @Singleton

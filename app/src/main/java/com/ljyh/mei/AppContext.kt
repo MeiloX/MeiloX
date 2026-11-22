@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import javax.inject.Inject
 import com.ljyh.mei.source.script.ScriptPluginManager
@@ -102,6 +103,16 @@ class AppContext : Application(), SingletonImageLoader.Factory {
                 add(AnimatedImageDecoder.Factory())
             }
             .build()
+    }
+
+    internal suspend fun hasCachedImage(url: String): Boolean = withContext(Dispatchers.IO) {
+        imageCacheSettings.await()
+        try {
+            SingletonImageLoader.get(this@AppContext).diskCache
+                ?.openSnapshot(url)?.use { true } ?: false
+        } catch (_: IOException) {
+            false
+        }
     }
 
     internal suspend fun clearImageCache() {

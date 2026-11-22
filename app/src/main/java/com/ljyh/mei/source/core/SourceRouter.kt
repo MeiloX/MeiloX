@@ -54,6 +54,10 @@ class SourceRouter @Inject constructor(
     private val mutableTrackLikeRevision = MutableStateFlow(0L)
     internal val trackLikeRevision = mutableTrackLikeRevision.asStateFlow()
     private val accountReads = mutableMapOf<String, AccountRead>()
+    private val artistNameHints = linkedMapOf<ArtistRef, String>()
+
+    internal fun artistNameHint(ref: ArtistRef): String? = synchronized(artistNameHints) { artistNameHints[ref] }
+
     fun searchTypes(providerId: String): Set<ContentType> {
         val provider = registry.provider(providerId) ?: return emptySet()
         if (SourceCapability.SEARCH !in provider.capabilities) return emptySet()
@@ -68,7 +72,16 @@ class SourceRouter @Inject constructor(
             else if (type == ContentType.TRACK) search(providerId, query, page).let {
                 SourcePage<SourceItem>(it.items.map { track -> SourceItem.TrackItem(track) }, it.hasMore, it.nextCursor)
             } else unsupported()
-        return result.also { validateItems(providerId, it.items, type) }
+        return result.also { page ->
+            validateItems(providerId, page.items, type)
+            if (type == ContentType.ARTIST) synchronized(artistNameHints) {
+                for (item in page.items.filterIsInstance<SourceItem.ArtistItem>()) {
+                    artistNameHints.remove(item.ref)
+                    artistNameHints[item.ref] = item.title
+                }
+                while (artistNameHints.size > 64) artistNameHints.remove(artistNameHints.keys.first())
+            }
+        }
     }
 
     suspend fun getFeed(providerId: String, kind: FeedKind, categoryId: String? = null, page: PageRequest = PageRequest()): SourceFeedPage {
