@@ -89,6 +89,9 @@ class NetEaseScriptInstrumentedTest {
                 "catalog.search" to "{\"query\":\"HOYO-MiX\",\"type\":\"track\",\"limit\":3}",
                 "catalog.track" to "{\"trackId\":\"29897918\"}",
                 "playback.resolve" to "{\"trackId\":\"29897918\",\"quality\":\"standard\"}",
+                "library.createdPlaylists" to "{\"limit\":3}",
+                "library.savedPlaylists" to "{\"limit\":3}",
+                "library.likedTracks" to "{\"limit\":3,\"metadataOnly\":true,\"metadataLimit\":3}",
             )) {
                 try {
                     val result = runtime.invoke(script, manifest, operation, json(parameters), configuration, storage,
@@ -102,6 +105,13 @@ class NetEaseScriptInstrumentedTest {
                         } })
                     result.storage?.let { storage = it }
                     assertFalse("$operation returned null", result.result.isJsonNull)
+                    if (operation.startsWith("library.")) {
+                        val page = result.result.asJsonObject
+                        val rows = (page.getAsJsonArray("trackIds") ?: page.getAsJsonArray("items")).size()
+                        instrumentation.sendStatus(0, android.os.Bundle().apply {
+                            putString("stream", "Private-session read: $operation rows=$rows\n")
+                        })
+                    }
                 } catch (error: com.ljyh.mei.source.api.SourceException) {
                     failures += "$operation:${error.code.name}"
                 }
@@ -122,9 +132,16 @@ class NetEaseScriptInstrumentedTest {
         val parser = ScriptContentParser(manifest.providerId, manifest.apiVersion, emptySet()) { "" }
         val preferences = context.dataStore.data.first()
         val configuration = mapOf("cookie" to "MUSIC_U=fixture-session", "sessionType" to "mobile", "userId" to "7")
-        suspend fun invoke(operation: String, parameters: String, replies: List<String>): com.google.gson.JsonElement {
+        suspend fun invoke(
+            operation: String,
+            parameters: String,
+            replies: List<String>,
+            expectedPaths: List<String>? = null,
+            verifiedUserId: String? = null,
+        ): com.google.gson.JsonElement {
             var calls = 0
-            val invocation = runtime.invoke(script, manifest, operation, json(parameters), configuration, emptyMap(), request = { frame ->
+            val invocation = runtime.invoke(script, manifest, operation, json(parameters), configuration, emptyMap(),
+                verifiedUserId = verifiedUserId, request = { frame ->
                 val url = Uri.parse(frame["url"].asString)
                 assertTrue("Every recipe must use a declared network domain", url.host in manifest.permissions.network)
                 assertEquals("https", url.scheme)
@@ -140,6 +157,7 @@ class NetEaseScriptInstrumentedTest {
                 assertEquals(original.url, encoded.url)
                 assertTrue(encoded.body is FormBody)
                 assertTrue("Fixture response count must match the real recipe", calls < replies.size)
+                expectedPaths?.let { assertEquals(it[calls], url.path) }
                 JsonObject().apply { addProperty("status", 200); addProperty("body", replies[calls++]) }
             })
             assertEquals(replies.size, calls)
@@ -160,6 +178,46 @@ class NetEaseScriptInstrumentedTest {
             val reversed = song.replace("\"id\":42", "\"id\":43")
             val page = invoke("playlist.tracks", """{"playlistId":"10","limit":2}""", listOf(playlist, """{"code":200,"songs":[$song,$reversed]}"""))
             assertEquals(listOf("43", "42"), page.asJsonObject.getAsJsonArray("items").map { it.asJsonObject["trackId"].asString })
+
+            val likedPlaylist = """{"id":10,"name":"Liked songs","specialType":5,"creator":{"userId":7}}"""
+            val likedSnapshot = invoke("library.likedTracks", """{"metadataOnly":true,"limit":2}""",
+                listOf(profile, """{"code":200,"data":{"playlist":[$likedPlaylist],"more":false}}""", playlist),
+                listOf("/eapi/w/nuser/account/get", "/weapi/user/playlist/create", "/api/v6/playlist/detail")).asJsonObject
+            assertEquals("10", likedSnapshot["playlistId"].asString)
+            assertEquals(listOf("43", "42"), likedSnapshot.getAsJsonArray("trackIds").map { it.asString })
+
+            val collected = """{"id":11,"name":"Saved playlist","creator":{"userId":8}}"""
+            val savedPage = invoke("library.savedPlaylists", """{"limit":1}""",
+                listOf(profile, """{"code":200}""", """{"code":200,"data":{"playlist":[$collected],"more":true}}"""),
+                listOf("/eapi/w/nuser/account/get", "/weapi/user/playlist/collect", "/eapi/user/playlist/collect")).asJsonObject
+            assertEquals("11", savedPage.getAsJsonArray("items")[0].asJsonObject.getAsJsonObject("playlist")["playlistId"].asString)
+            assertEquals(1, json(savedPage["nextCursor"].asString)["rawOffset"].asInt)
+
+            val diagnostics = mutableListOf<String>()
+            val tree = object : timber.log.Timber.Tree() {
+                override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+                    if (tag == "ScriptRuntime" && message.startsWith("NetEase library failure")) diagnostics += message
+                }
+            }
+            timber.log.Timber.plant(tree)
+            try {
+                invoke("library.createdPlaylists", """{"limit":1}""",
+                    listOf("<html>private-response", """{"code":404}""", """{"code":200}""", """{"code":200,"playlist":{}}"""),
+                    listOf("/weapi/user/playlist/create", "/eapi/user/playlist/create", "/weapi/user/playlist", "/eapi/user/playlist"),
+                    verifiedUserId = "7")
+                fail("Malformed responses must fail after the read fallbacks")
+            } catch (error: com.ljyh.mei.source.api.SourceException) {
+                assertEquals(com.ljyh.mei.source.api.SourceErrorCode.INVALID_RESPONSE, error.code)
+            } finally {
+                timber.log.Timber.uproot(tree)
+            }
+            val failure = diagnostics.single()
+            for (reason in listOf("invalid-json", "api-error", "missing-playlist-list", "invalid-playlist-list")) {
+                assertTrue(failure.contains("reason=$reason"))
+            }
+            assertTrue(failure.contains("session=mobile"))
+            assertFalse(failure.contains("private-response"))
+            assertFalse(failure.contains("fixture-session"))
         }
         assertTrue("Offline script fixtures must never change the host account or preferences", preferences == context.dataStore.data.first())
     }

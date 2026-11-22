@@ -610,6 +610,19 @@ class ScriptPluginPolicyTest {
         }
     }
 
+    @Test fun libraryDiagnosticsOnlySummarizeKnownRoutesAndResponseFields() {
+        val frame = json("""{"url":"https://music.163.com/weapi/user/playlist/collect?uid=private-query","headers":{"Cookie":"private-cookie"}}""")
+        val label = libraryRequestLabel(frame)
+        assertEquals("music.163.com/weapi/user/playlist/collect", label)
+        assertEquals("other-route", libraryRequestLabel(json("""{"url":"https://music.163.com/weapi/user/playlist/private-id"}""")))
+        assertEquals("other-route", libraryRequestLabel(json("""{"url":"https://example.org/weapi/user/playlist/collect"}""")))
+        val response = json("""{"status":200,"body":" <html>private-body","setCookies":["private-cookie"]}""")
+        assertEquals("$label http=200 body=markup chars=19 apiCode=200 reason=invalid-json",
+            libraryResponseSummary(label, response, json("""{"reason":"invalid-json","apiCode":200,"extra":"private-body"}""")))
+        assertEquals("$label http=200 body=markup chars=19 apiCode=- reason=-",
+            libraryResponseSummary(label, response, json("""{"reason":"private-body","apiCode":200}""")))
+    }
+
     @Test fun queuedScriptOperationsHaveBoundedAdmissionAndNeverRunAfterCancellation() = runTest {
         val operations = Mutex()
         var expiredStarted = false

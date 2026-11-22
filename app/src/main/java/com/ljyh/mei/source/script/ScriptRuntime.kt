@@ -44,6 +44,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import timber.log.Timber
 
 data class ScriptInvocation(val result: JsonElement, val storage: Map<String, String>? = null)
@@ -112,6 +113,27 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
         val resultLimit = scriptResultLimit(manifest, operation, params)
         var phase = ScriptRuntimePhase.CONNECTION
         var requestSent = false
+        val traceLibrary = manifest.id == BundledSourceProvisioner.NETEASE_ID && operation in libraryTraceOperations
+        val libraryVersion = manifest.version.takeIf { traceLibrary && libraryTraceVersion.matches(it) } ?: "unknown"
+        val attempts = mutableListOf<String>()
+        var requestLabel: String? = null
+        var response: JsonObject? = null
+        var diagnostic: JsonElement? = null
+        var pluginError = false
+        fun logLibraryFailure(code: SourceErrorCode, kind: String) {
+            if (!traceLibrary) return
+            requestLabel?.let { attempts += libraryResponseSummary(it, response, diagnostic) }
+            if (attempts.isEmpty() && diagnostic != null) attempts += libraryResponseSummary("no-request", null, diagnostic)
+            val session = when ((storage["sessionType"] ?: configuration["sessionType"])?.lowercase()) {
+                "mobile" -> "mobile"
+                "web" -> "web"
+                else -> "unknown"
+            }
+            Timber.tag("ScriptRuntime").w(
+                "NetEase library failure version=%s operation=%s session=%s code=%s phase=%s kind=%s attempts=[%s]",
+                libraryVersion, operation, session, code, phase, kind, attempts.joinToString(" -> "),
+            )
+        }
         val memoryLimited = java.util.concurrent.atomic.AtomicBoolean(false)
         val terminated = CompletableDeferred<Unit>()
         return try {
@@ -147,7 +169,6 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                             withTimeout(3_000) { isolate.evaluateJavaScriptAsync(script + "\n;'loaded';").await() }
                             val gson = Gson()
                             val entropy = SecureRandom()
-                            var response: JsonObject? = null
                             var state: JsonElement? = null
                             repeat(5) { hop ->
                                 guard()
@@ -184,6 +205,11 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                                 phase = ScriptRuntimePhase.RESULT
                                 val result = parseScriptResult(raw, resultLimit)
                                 val envelope = result.takeIf(JsonElement::isJsonObject)?.asJsonObject
+                                if (traceLibrary) {
+                                    diagnostic = envelope?.get("diagnostic")
+                                    requestLabel?.let { attempts += libraryResponseSummary(it, response, diagnostic) }
+                                    requestLabel = null
+                                }
                                 if (envelope?.has("request") == true) {
                                     if (hop == 4) throw SourceException(SourceErrorCode.PLUGIN, "Source request limit exceeded")
                                     guard()
@@ -194,6 +220,11 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                                     } ?: false
                                     phase = ScriptRuntimePhase.REQUEST
                                     requestSent = true
+                                    if (traceLibrary) {
+                                        requestLabel = libraryRequestLabel(frame)
+                                        response = null
+                                        diagnostic = null
+                                    }
                                     response = try {
                                         requestWhileAlive(shared, terminated) { request(frame) }
                                     }
@@ -208,7 +239,8 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                                 } else {
                                     if (envelope?.has("error") == true) {
                                         val code = runCatching { SourceErrorCode.valueOf(envelope.get("error").asString) }.getOrDefault(SourceErrorCode.PLUGIN)
-                                        if (code == SourceErrorCode.INVALID_RESPONSE) {
+                                        pluginError = true
+                                        if (!traceLibrary && code == SourceErrorCode.INVALID_RESPONSE) {
                                             val action = params.get("action")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
                                                 ?.asString?.takeIf { candidate ->
                                                     operation == "feature.invoke" && manifest.features.values.any { candidate in it }
@@ -229,6 +261,15 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                                         values.entrySet().associate { it.key to it.value.asString }
                                     }
                                     guard()
+                                    if (traceLibrary && diagnostic != null) {
+                                        val continuation = envelope?.get("result")?.takeIf(JsonElement::isJsonObject)?.asJsonObject
+                                        if (continuation?.get("hostEffect")?.isJsonObject == true) {
+                                            Timber.tag("ScriptRuntime").w(
+                                                "NetEase library retry version=%s operation=%s attempts=[%s]",
+                                                libraryVersion, operation, attempts.joinToString(" -> "),
+                                            )
+                                        }
+                                    }
                                     return@withSandbox ScriptInvocation(envelope?.get("result") ?: result, updated)
                                 }
                             }
@@ -240,12 +281,22 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
         } catch (_: TimeoutCancellationException) {
             currentCoroutineContext().ensureActive()
             ensureCurrent()
+            logLibraryFailure(SourceErrorCode.TIMEOUT, "deadline")
             throw SourceException(SourceErrorCode.TIMEOUT)
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (error: SourceException) {
             ensureCurrent()
-            if (memoryLimited.get()) throw SourceException(SourceErrorCode.PLUGIN, outcomeUnknown = requestSent)
-            if (error is SourceRuntimeUnavailableException) {
+            if (memoryLimited.get()) {
+                logLibraryFailure(SourceErrorCode.PLUGIN, "heap-limit")
+                throw SourceException(SourceErrorCode.PLUGIN, outcomeUnknown = requestSent)
+            }
+            val kind = when {
+                pluginError -> "plugin-error"
+                error is SourceResponseSizeException -> "response-size-limit"
+                else -> error.javaClass.simpleName
+            }
+            logLibraryFailure(error.code, kind)
+            if (!traceLibrary && error is SourceRuntimeUnavailableException) {
                 Timber.tag("ScriptRuntime").w(
                     "Sandbox failure plugin=%s operation=%s code=%s phase=%s requestSent=%s kind=%s",
                     manifest.id, operation, error.code, phase, requestSent, error.javaClass.simpleName,
@@ -257,10 +308,12 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
             var cause: Throwable = error
             repeat(8) { (cause as? java.util.concurrent.ExecutionException)?.cause?.let { cause = it } }
             if (resultLimit == MAX_CATALOG_RESULT_BYTES && cause is QuickJsEvaluationResultSizeLimitExceededException) {
+                logLibraryFailure(SourceErrorCode.INVALID_RESPONSE, "script-result-size-limit")
                 throw SourceResponseSizeException()
             }
             val failure = scriptRuntimeFailure(error, phase, memoryLimited.get(), requestSent)
-            if (failure.code in setOf(SourceErrorCode.UNAVAILABLE, SourceErrorCode.PLUGIN, SourceErrorCode.INVALID_RESPONSE)) {
+            logLibraryFailure(failure.code, cause.javaClass.simpleName)
+            if (!traceLibrary && failure.code in setOf(SourceErrorCode.UNAVAILABLE, SourceErrorCode.PLUGIN, SourceErrorCode.INVALID_RESPONSE)) {
                 // Engine exception messages may contain script data. Record fixed metadata only.
                 val kind = (error as? java.util.concurrent.ExecutionException)?.cause?.javaClass?.simpleName ?: error.javaClass.simpleName
                 Timber.tag("ScriptRuntime").w(
@@ -318,6 +371,50 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                 ByteArray(SECURE_RANDOM_BYTES).also(entropy::nextBytes)))
         }
     }
+}
+
+private val libraryTraceOperations = setOf(
+    "library.likedTracks", "library.createdPlaylists", "library.savedPlaylists", "catalog.tracks",
+)
+private val libraryTraceVersion = Regex("[0-9]{1,5}\\.[0-9]{1,5}\\.[0-9]{1,5}")
+private val libraryTraceHosts = setOf("music.163.com", "interface.music.163.com", "interface3.music.163.com")
+private val libraryTracePaths = setOf(
+    "/weapi/user/playlist", "/weapi/user/playlist/create", "/weapi/user/playlist/collect",
+    "/eapi/user/playlist", "/eapi/user/playlist/create", "/eapi/user/playlist/collect",
+    "/eapi/w/nuser/account/get", "/eapi/nuser/account/get", "/api/v6/playlist/detail", "/api/v3/song/detail",
+)
+private val libraryTraceReasons = setOf(
+    "invalid-json", "invalid-envelope", "missing-api-code", "invalid-api-code", "api-error", "invalid-library-cursor",
+    "invalid-playlist-data", "missing-playlist-list", "invalid-playlist-list", "empty-playlist-page",
+    "missing-playlist-detail", "playlist-id-mismatch", "missing-track-index", "invalid-track-index",
+    "invalid-track-ids", "invalid-song-list",
+)
+
+internal fun libraryRequestLabel(frame: JsonObject): String {
+    val url = frame.get("url")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+        ?.asString?.toHttpUrlOrNull()
+    return if (url != null && url.host in libraryTraceHosts && url.encodedPath in libraryTracePaths) {
+        "${url.host}${url.encodedPath}"
+    } else "other-route"
+}
+
+internal fun libraryResponseSummary(label: String, response: JsonObject?, diagnostic: JsonElement?): String {
+    val status = response?.get("status")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
+        ?.asString?.toIntOrNull()?.takeIf { it in 100..599 }
+    val body = response?.get("body")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+    val shape = when (body?.firstOrNull { !it.isWhitespace() }) {
+        null -> if (body == null) "none" else "empty"
+        '{' -> "object"
+        '[' -> "array"
+        '<' -> "markup"
+        else -> "other"
+    }
+    val details = diagnostic?.takeIf(JsonElement::isJsonObject)?.asJsonObject
+    val reason = details?.get("reason")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+        ?.asString?.takeIf { it in libraryTraceReasons }
+    val apiCode = details?.get("apiCode")?.takeIf { reason != null && it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
+        ?.asString?.toIntOrNull()?.takeIf { it in 0..99_999 }
+    return "$label http=${status ?: "-"} body=$shape chars=${body?.length ?: 0} apiCode=${apiCode ?: "-"} reason=${reason ?: "-"}"
 }
 
 internal fun scriptResultLimit(manifest: PluginManifest, operation: String, parameters: JsonObject): Int {
