@@ -23,6 +23,178 @@ import org.junit.Test
 import okhttp3.RequestBody.Companion.toRequestBody
 
 class SourceResolutionTest {
+    @Test fun appleArtistIdentityRequiresTwoDistinctCorroboratedRecordings() {
+        val first = artistEvidenceSong("one", "爱如火", 204_705L)
+        val second = artistEvidenceSong("two", "谁能给我爱", 184_487L)
+        val appleFirst = AppleArtistSong("爱如火", "爱如火 - Single", 204_768L)
+        val appleSecond = AppleArtistSong("谁能给我爱", "谁能给我爱 - Single", 184_488L)
+
+        assertTrue(hasAppleArtistEvidence(listOf(first, second)))
+        assertFalse(hasAppleArtistEvidence(listOf(first)))
+        assertTrue(confirmsAppleArtist(listOf(first, second), listOf(appleFirst, appleSecond)))
+        assertFalse(confirmsAppleArtist(listOf(first, second), listOf(appleFirst, appleFirst)))
+        assertFalse(confirmsAppleArtist(listOf(first, second), listOf(appleFirst, appleSecond.copy(durationMs = 210_000))))
+        assertFalse(confirmsAppleArtist(listOf(first, second), listOf(appleFirst, appleSecond.copy(durationMs = null))))
+    }
+
+    @Test fun appleArtistIdentityDoesNotCountVersionsOrCoversAsSeparateWorks() {
+        val first = artistEvidenceSong("one", "Song", 150_000L)
+        val alternate = artistEvidenceSong("two", "Song (Live)", 180_000L)
+        val second = artistEvidenceSong("three", "Another Song", 170_000L)
+        val appleFirst = AppleArtistSong("Song", null, 150_000L)
+        val appleLive = AppleArtistSong("Song (Live)", null, 180_000L)
+        val appleSecond = AppleArtistSong("Another Song", null, 170_000L)
+
+        assertFalse(hasAppleArtistEvidence(listOf(first, alternate)))
+        assertFalse(confirmsAppleArtist(listOf(first, alternate), listOf(appleFirst, appleLive)))
+        assertFalse(confirmsAppleArtist(listOf(first, second.copy(version = "Live")), listOf(appleFirst, appleSecond)))
+        assertFalse(confirmsAppleArtist(
+            listOf(first, second),
+            listOf(appleFirst, appleSecond.copy(album = "Record (Cover)")),
+        ))
+        assertFalse(confirmsAppleArtist(
+            listOf(first, second.copy(title = "Another Song (Inst.)")),
+            listOf(appleFirst, appleSecond.copy(title = "Another Song (Inst.)")),
+        ))
+        assertFalse(confirmsAppleArtist(
+            listOf(first, first.copy(ref = alternate.ref, title = "Song (合唱Live版)")),
+            listOf(appleFirst, appleLive.copy(title = "Song (合唱Live版)", durationMs = first.durationMs)),
+        ))
+    }
+
+    @Test fun appleArtistIdentityCanUseMatchingIsrcOrIndependentAlbumEvidence() {
+        val original = artistEvidenceSong("one", "Song", 150_000L).copy(isrc = "US-ABC-24-00001")
+        val byIsrc = AppleArtistSong("Localized Song", null, 149_500L, "USABC2400001")
+
+        assertTrue(hasAppleArtistEvidence(listOf(original)))
+        assertTrue(confirmsAppleArtist(listOf(original), listOf(byIsrc)))
+        assertFalse(confirmsAppleArtist(listOf(original), listOf(byIsrc.copy(durationMs = 220_000L))))
+        assertFalse(confirmsAppleArtist(
+            listOf(original, artistEvidenceSong("two", "Another Song", 180_000L)),
+            listOf(byIsrc.copy(title = "Song", isrc = "USABC2400002"), AppleArtistSong("Another Song", null, 180_000L)),
+        ))
+
+        val album = SourceAlbum("The Album")
+        val sameRelease = listOf(
+            artistEvidenceSong("three", "North", 0L).copy(album = album),
+            artistEvidenceSong("four", "South", 0L).copy(album = album),
+        )
+        assertTrue(confirmsAppleArtist(
+            sameRelease,
+            listOf(AppleArtistSong("North", "The Album - EP", null), AppleArtistSong("South", "The Album - EP", null)),
+        ))
+    }
+
+    @Test fun appleArtistSearchPrefersChinaAndRejectsConflictingMatches() = runTest {
+        val names = listOf("Nirvana", "涅槃")
+        val evidence = listOf(
+            artistEvidenceSong("one", "Come As You Are", 218_966L),
+            artistEvidenceSong("two", "Smells Like Teen Spirit", 301_133L),
+        )
+        val matchingSongs = listOf(
+            AppleArtistSong("Come As You Are", "Nevermind", 218_971L),
+            AppleArtistSong("Smells Like Teen Spirit", "Nevermind", 301_096L),
+        )
+        val storefrontsSearched = mutableListOf<String>()
+        val batches = mutableListOf<Set<String>>()
+        val homonyms = setOf("112018", "256176428", "1757499341", "1144913134", "1724751379", "1811614609")
+        val aliasId = "1720204148"
+        var matchingIds = setOf("112018", "201")
+        val catalog = object : AppleArtistCatalog {
+            override suspend fun searchArtists(name: String, storefront: String): List<AppleArtistCandidate> {
+                storefrontsSearched += storefront
+                return when (storefront) {
+                    "cn" -> if (name == "Nirvana") homonyms else setOf(aliasId)
+                    "hk" -> if (name == "Nirvana") setOf("201") else emptySet()
+                    else -> emptySet()
+                }.map { AppleArtistCandidate(it, name) }
+            }
+
+            override suspend fun artistSongs(artistIds: Set<String>, storefront: String): Map<String, List<AppleArtistSong>> {
+                batches += artistIds
+                return artistIds.associateWith { if (it in matchingIds) matchingSongs else matchingSongs.take(1) }
+            }
+
+            override suspend fun artistLogo(artistId: String, storefront: String, pageUrl: String?): AppleArtistLogo? = null
+        }
+
+        assertEquals(AppleArtistIdentity("112018", "cn"), findAppleArtist(catalog, names) { evidence })
+        assertEquals(listOf("cn", "cn"), storefrontsSearched)
+        assertEquals(listOf(homonyms + aliasId), batches)
+
+        storefrontsSearched.clear()
+        matchingIds = setOf("201")
+        assertEquals(AppleArtistIdentity("201", "hk"), findAppleArtist(catalog, names) { evidence })
+        assertEquals(listOf("cn", "cn", "hk", "hk"), storefrontsSearched)
+
+        storefrontsSearched.clear()
+        matchingIds = setOf("112018", aliasId, "201")
+        assertNull(findAppleArtist(catalog, names) { evidence })
+        assertEquals(listOf("cn", "cn"), storefrontsSearched)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun appleArtistArtworkFallbackStartsAllRegionsAndPreservesPriority() = runTest {
+        val calls = mutableListOf<Pair<String, Long>>()
+        val china = AppleArtistLogo("china", 100, 50)
+        val hongKong = AppleArtistLogo("hong-kong", 100, 50)
+        val unitedStates = AppleArtistLogo("united-states", 100, 50)
+        val identity = AppleArtistIdentity("112018", "cn")
+        val catalog = appleArtworkCatalog { storefront ->
+            calls += storefront to testScheduler.currentTime
+            when (storefront) {
+                "cn" -> china
+                else -> error("A preferred hit must not request other storefronts")
+            }
+        }
+        assertEquals(china, findAppleArtistLogo(catalog, identity).getOrThrow())
+        assertEquals(listOf("cn" to 0L), calls)
+
+        calls.clear()
+        val fallback = appleArtworkCatalog { storefront ->
+            calls += storefront to testScheduler.currentTime
+            when (storefront) {
+                "hk" -> {
+                    delay(300)
+                    hongKong
+                }
+                "us" -> unitedStates
+                "tw" -> awaitCancellation()
+                else -> null
+            }
+        }
+        assertEquals(hongKong, findAppleArtistLogo(fallback, identity).getOrThrow())
+        assertEquals(setOf("cn", "hk", "tw", "us", "jp"), calls.map { it.first }.toSet())
+        assertEquals(1, calls.map { it.second }.distinct().size)
+        assertEquals(300L, testScheduler.currentTime)
+    }
+
+    @Test fun appleArtistArtworkDistinguishesMissingFromTimeout() = runTest {
+        val identity = AppleArtistIdentity("112018", "cn")
+        assertNull(findAppleArtistLogo(appleArtworkCatalog { null }, identity).getOrThrow())
+
+        val partial = appleArtworkCatalog { storefront ->
+            if (storefront == "hk") awaitCancellation()
+            null
+        }
+        assertTrue(findAppleArtistLogo(partial, identity).isFailure)
+    }
+
+    private fun appleArtworkCatalog(load: suspend (String) -> AppleArtistLogo?): AppleArtistCatalog =
+        object : AppleArtistCatalog {
+            override suspend fun searchArtists(name: String, storefront: String): List<AppleArtistCandidate> =
+                error("Artwork lookup already has a confirmed identity")
+
+            override suspend fun artistSongs(artistIds: Set<String>, storefront: String): Map<String, List<AppleArtistSong>> =
+                error("Artwork lookup already has a confirmed identity")
+
+            override suspend fun artistLogo(artistId: String, storefront: String, pageUrl: String?): AppleArtistLogo? =
+                load(storefront)
+        }
+
+    private fun artistEvidenceSong(id: String, title: String, durationMs: Long): Track =
+        Track(TrackRef("netease", id), title, listOf(SourceArtist("Artist")), SourceAlbum(title), durationMs)
+
     @Test fun sharedArtistInformationPreservesOriginalFieldsAndOpaqueIdentity() = runTest {
         val parser = com.ljyh.mei.source.script.ScriptContentParser("qq", 2, emptySet()) { it }
         val artist = parser.artist(com.google.gson.JsonParser.parseString("""{

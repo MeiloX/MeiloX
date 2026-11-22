@@ -7,6 +7,8 @@ import java.security.MessageDigest
 import com.ljyh.mei.playback.queue.Queue
 import com.ljyh.mei.playback.queue.SourceContentQueue
 import com.ljyh.mei.source.api.*
+import com.ljyh.mei.source.core.AppleArtistLogo
+import com.ljyh.mei.source.core.AppleArtistLogoResolver
 import com.ljyh.mei.source.core.ProviderRegistry
 import com.ljyh.mei.source.core.SourcePreferences
 import com.ljyh.mei.source.core.SourceRouter
@@ -17,6 +19,7 @@ import com.ljyh.mei.source.shared.SourceShareResource
 import com.ljyh.mei.source.shared.shareResourceLink
 import com.ljyh.mei.source.shared.whileCurrent
 import com.ljyh.mei.data.model.melox.ShareResourceKind
+import com.ljyh.mei.source.script.ScriptMusicProvider
 import com.ljyh.mei.source.script.ScriptPluginManager
 import com.ljyh.mei.source.script.InstalledPlugin
 import com.ljyh.mei.source.script.SourceCatalogInvalidatedException
@@ -25,12 +28,14 @@ import com.ljyh.mei.di.dao.SourceTrackSearchIndexDao
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.*
@@ -91,6 +96,7 @@ data class SourceContentState(
     val albumsNextOffset: Int = 0,
     val albumsLoading: Boolean = false,
     val albumsError: SourceErrorCode? = null,
+    val artistLogo: AppleArtistLogo? = null,
 )
 
 /** Every page is pinned to its provider and account; stale work cannot refill a replacement page. */
@@ -104,16 +110,19 @@ class SourceContentViewModel internal constructor(
     private val features: SourceFeatureClient? = null,
     private val homeCache: SourceHomeFeedCache? = null,
     private val searchIndexDao: SourceTrackSearchIndexDao? = null,
+    private val artistLogos: AppleArtistLogoResolver? = null,
 ) : ViewModel() {
     @Inject constructor(router: SourceRouter, preferences: SourcePreferences, registry: ProviderRegistry,
         plugins: ScriptPluginManager, features: SourceFeatureClient, homeCache: SourceHomeFeedCache,
-        searchIndexDao: SourceTrackSearchIndexDao) :
-        this(router, preferences, registry, plugins.installed, { id, values -> plugins.configure(id, values); Unit }, features, homeCache, searchIndexDao)
+        searchIndexDao: SourceTrackSearchIndexDao, artistLogos: AppleArtistLogoResolver) :
+        this(router, preferences, registry, plugins.installed, { id, values -> plugins.configure(id, values); Unit },
+            features, homeCache, searchIndexDao, artistLogos)
     val providers = registry.providers
     val contentRevision = router.contentRevision
     val selectedProviderId = preferences.settings.map { it.preferredBrowseProvider }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
     private val request = MutableStateFlow<SourceContentRequest?>(null)
+    private var artistLogoRequested = false
     private val refreshVersion = MutableStateFlow(0L)
     private var consumedRefreshVersion = 0L
     private val mutableState = MutableStateFlow(SourceContentState(loading = true))
@@ -127,6 +136,7 @@ class SourceContentViewModel internal constructor(
     private var displayedProvider: MusicProvider? = null
     private var pagination: Job? = null
     private var albumPagination: Job? = null
+    private var artistLogoJob: Job? = null
     private var artistSearchJob: Job? = null
     private var artistSearchPage: Job? = null
     private var artistSearchSelection: Triple<ArtistRef, Boolean, String>? = null
@@ -247,11 +257,16 @@ class SourceContentViewModel internal constructor(
         playlistPreload = null
         pagination?.cancel()
         albumPagination?.cancel()
+        artistLogoJob?.cancel()
+        artistLogoJob = null
         artistSearchJob?.cancel()
         seenPages.clear()
         seenCursors.clear()
     }
-    fun open(value: SourceContentRequest) { request.value = value }
+    fun open(value: SourceContentRequest, artistLogo: Boolean = false) {
+        artistLogoRequested = artistLogo
+        request.value = value
+    }
     fun prepareEditor(providerId: String) { request.value = SourceContentRequest.Editor(providerId) }
     fun refresh() { refreshVersion.value++ }
 
@@ -419,20 +434,36 @@ class SourceContentViewModel internal constructor(
                             detail = SourceItem.AlbumItem(info), items = mergeTrackItems(previous.items, tracks.items, append),
                             hasMore = tracks.hasMore, nextCursor = tracks.nextCursor)
                     }
-                    is ArtistRef -> {
+                    is ArtistRef -> supervisorScope {
+                        val pendingInfo = if (!append && artistLogoRequested && artistLogos != null) {
+                            async(start = CoroutineStart.UNDISPATCHED) { router.artist(ref) }
+                        } else null
+                        val pendingTracks = if (pendingInfo != null) {
+                            val manifest = (boundProvider as? ScriptMusicProvider)?.manifest
+                            val parallel = manifest != null && (!manifest.permissions.storage ||
+                                ("artist.get" in manifest.concurrentReadOperations && "artist.tracks" in manifest.concurrentReadOperations))
+                            val start = if (parallel) CoroutineStart.DEFAULT else CoroutineStart.LAZY
+                            async(start = start) { router.artistTracks(ref, page) }.also { tracks ->
+                                loadArtistLogo(requested, ref, boundProvider, previous, token,
+                                    artist = { pendingInfo.await() }, tracks = { tracks.await().items })
+                            }
+                        } else null
                         if (!append) loadInitialArtistAlbums(ref, boundProvider, previous, token)
-                        val info = if (append) (previous.detail as? SourceItem.ArtistItem)?.artist ?: router.artist(ref) else router.artist(ref)
-                        currentCoroutineContext().ensureActive()
-                        if (token != generation || !sameOwner(boundProvider, previous)) return
+                        val retained = (previous.detail as? SourceItem.ArtistItem)?.artist?.takeIf { append }
+                        val info = pendingInfo?.await() ?: retained ?: router.artist(ref)
+                        if (!ownsActivePage()) {
+                            pendingTracks?.cancel()
+                            return@supervisorScope null
+                        }
                         if (!append) mutableState.value = state.value.copy(title = info.name, artworkUrl = info.artworkUrl,
                             description = info.description, detail = SourceItem.ArtistItem(info))
-                        val tracks = router.artistTracks(ref, page)
+                        val tracks = pendingTracks?.await() ?: router.artistTracks(ref, page)
                         received = tracks.items.size
                         incomingRefs = tracks.items.map { it.ref }
                         previous.copy(title = info.name, artworkUrl = info.artworkUrl, description = info.description,
                             detail = SourceItem.ArtistItem(info), items = mergeTrackItems(previous.items, tracks.items, append),
                             hasMore = tracks.hasMore, nextCursor = tracks.nextCursor)
-                    }
+                    } ?: return
                     is TrackRef -> {
                         val track = router.getTrack(ref) ?: throw SourceException(SourceErrorCode.NOT_FOUND)
                         received = 1
@@ -469,6 +500,7 @@ class SourceContentViewModel internal constructor(
             val updated = if (requested is SourceContentRequest.Detail && requested.ref is ArtistRef) progressed.copy(
                 sections = latest.sections, albumsHasMore = latest.albumsHasMore, albumsNextCursor = latest.albumsNextCursor,
                 albumsNextOffset = latest.albumsNextOffset, albumsLoading = latest.albumsLoading, albumsError = latest.albumsError,
+                artistLogo = latest.artistLogo,
             ) else progressed
             val published = updated.copy(providerId = id, loading = false, error = null, cachedSnapshot = false,
                 hasSnapshotContent = requested.canCacheSnapshot(), nextOffset = page.offset + received)
@@ -516,6 +548,33 @@ class SourceContentViewModel internal constructor(
             if (token == generation) mutableState.value = state.value.copy(loading = false, refreshing = false, error = code,
                 account = state.value.account.takeUnless { authFailure },
                 hasMore = state.value.hasMore && code != SourceErrorCode.INVALID_RESPONSE)
+        }
+    }
+
+    private fun loadArtistLogo(
+        requested: SourceContentRequest.Detail,
+        ref: ArtistRef,
+        provider: MusicProvider,
+        snapshot: SourceContentState,
+        token: Long,
+        artist: suspend () -> SourceArtistInfo,
+        tracks: suspend () -> List<Track>,
+    ) {
+        val resolver = artistLogos ?: return
+        artistLogoJob?.cancel()
+        artistLogoJob = viewModelScope.launch {
+            val logo = try {
+                resolver.resolve(ref, artist, tracks)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (sameOwner(provider, snapshot) && token == generation &&
+                request.value == requested && displayedRequest == requested && displayedProvider === provider
+            ) {
+                mutableState.update { it.copy(artistLogo = logo) }
+            }
         }
     }
 

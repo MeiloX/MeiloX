@@ -239,7 +239,7 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
     val shuffle = rememberSourceQueuePlayer("source-${ref.providerId}-${ref.type.wireName}-${ref.contentId}", state.title,
         viewModel = viewModel, queueRequest = SourceContentRequest.Detail(ref), shuffle = true,
         preserveRepeatMode = false, randomStart = true)
-    LaunchedEffect(ref) { viewModel.open(SourceContentRequest.Detail(ref)) }
+    LaunchedEffect(ref) { viewModel.open(SourceContentRequest.Detail(ref), artistLogo = ref is ArtistRef) }
     val provider = providers.firstOrNull { it.id == ref.providerId && it.status == SourceStatus.READY }
     val collections = (provider as? CollectionCapability)?.takeIf {
         SourceCapability.COLLECTIONS in provider.capabilities && ref.type in it.collectionTypes
@@ -756,7 +756,8 @@ private fun SourceArtistDetail(
                     onInfoClick = onInformation,
                     onPlayHotSongs = { if (tracks.isNotEmpty()) onPlay(tracks, 0) },
                     onFollowClick = onFollow,
-                    landscape = landscape, canFollow = canFollow)
+                    landscape = landscape, canFollow = canFollow,
+                    artistLogo = state.artistLogo.takeIf { artist?.ref == ref })
             }, latestRelease = latestRelease, songSection = songSection, albumSection = albumSection,
             popularSongs = popularSongs, footer = {
                 state.error?.let { error -> item("artist-error") {

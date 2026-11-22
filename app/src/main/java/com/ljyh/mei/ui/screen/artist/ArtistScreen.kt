@@ -13,6 +13,7 @@ import com.ljyh.mei.constants.homeCardSpacing
 import com.ljyh.mei.constants.HomeSongNextPagePeek
 import com.ljyh.mei.data.model.mediaId
 import com.ljyh.mei.data.model.MediaMetadata
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,6 +45,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,8 +67,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.nativePaint
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onLayoutRectChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -81,12 +85,20 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import coil3.size.Precision
+import coil3.size.Scale
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberCanvasBackdrop
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.kyant.shapes.Capsule
 import com.ljyh.mei.R
 import com.ljyh.mei.constants.DetailPageHorizontalPadding
+import com.ljyh.mei.source.core.AppleArtistLogo
 import com.ljyh.mei.ui.component.playlist.CoverBackground
 import com.ljyh.mei.ui.component.playlist.FavoriteTrackStar
 import com.ljyh.mei.ui.component.playlist.rememberCoverBackground
@@ -109,12 +121,15 @@ import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 import io.github.neoruaa.glasmio.ui.GlasmioButton
+import io.github.neoruaa.glasmio.ui.GlasmioTooltip
 import kotlinx.coroutines.CancellationException
 
 private val ArtistSongCoverSize = com.ljyh.mei.constants.LandscapeSongCoverSize
 private val ArtistPopularSongsHeight = ArtistSongCoverSize * 3 + HomeSongRowSpacing * 2
 private val ArtistCardStrokeWidth = 0.5.dp
 private val ArtistCardStrokeColor = Color.White.copy(alpha = 0.15f)
+private val ArtistLogoMaxWidth = 288.dp
+private val ArtistLogoMaxHeight = 96.dp
 
 /** The original artist detail layout, shared by every source. */
 @Composable
@@ -395,6 +410,7 @@ internal fun ArtistDetailHeader(
     onFollowClick: () -> Unit,
     landscape: Boolean = false,
     canFollow: Boolean = true,
+    artistLogo: AppleArtistLogo? = null,
 ) {
     val colors = LocalGlassColors.current
     val playHotSongsLabel = stringResource(R.string.artist_play_hot_songs)
@@ -413,35 +429,53 @@ internal fun ArtistDetailHeader(
                 Spacer(imageModifier.fillMaxWidth().aspectRatio(1f))
             }
         },
-        information = {
+        information = { heroWidth ->
+            val availableWidth = heroWidth - DetailPageHorizontalPadding * 2
+            val logo = artistLogo?.takeIf { it.width > 0 && it.height > 0 && availableWidth > 0.dp }
+            val logoAspect = logo?.let { it.width.toFloat() / it.height } ?: 1f
+            val logoWidth = minOf(availableWidth, ArtistLogoMaxWidth, ArtistLogoMaxHeight * logoAspect)
+            val logoHeight = logoWidth / logoAspect
+            val logoPainter = logo?.let { rememberArtistLogoPainter(it.url, logoWidth, logoHeight) }
+            val appleAccent = logo?.keyColorRgb?.takeIf { logoPainter != null }?.let {
+                Color(it or 0xFF000000.toInt())
+            }
+            val buttonAccent = appleAccent ?: accent
+            val titlePadding = Modifier.padding(horizontal = DetailPageHorizontalPadding).padding(top = 8.dp)
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = name,
-                    style = if (landscape) IosTypography.title2.copy(fontSize = 32.sp, lineHeight = 36.sp)
-                    else IosTypography.title2.copy(fontSize = 24.sp),
-                    color = colors.content,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier =
-                        Modifier.padding(horizontal = DetailPageHorizontalPadding)
-                            .padding(top = 8.dp),
-                )
-                if (subtitle.isNotBlank()) {
+                if (logoPainter != null) {
+                    GlasmioTooltip(text = subtitle, modifier = titlePadding) {
+                        Image(
+                            painter = logoPainter,
+                            contentDescription = name,
+                            modifier = Modifier.size(logoWidth, logoHeight),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                } else {
                     Text(
-                        text = subtitle,
-                        style = IosTypography.subheadline,
-                        color = colors.secondaryContent,
+                        text = name,
+                        style = if (landscape) IosTypography.title2.copy(fontSize = 32.sp, lineHeight = 36.sp)
+                        else IosTypography.title2.copy(fontSize = 24.sp),
+                        color = colors.content,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier =
-                            Modifier.padding(horizontal = DetailPageHorizontalPadding)
-                                .padding(top = 4.dp),
+                        modifier = titlePadding,
                     )
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            text = subtitle,
+                            style = IosTypography.subheadline,
+                            color = colors.secondaryContent,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = DetailPageHorizontalPadding).padding(top = 4.dp),
+                        )
+                    }
                 }
 
                 Row(
@@ -449,19 +483,25 @@ internal fun ArtistDetailHeader(
                     horizontalArrangement = Arrangement.spacedBy(24.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    ArtistActionButton(onClick = onInfoClick, accent = accent, landscape = landscape) {
+                    ArtistActionButton(
+                        onClick = onInfoClick,
+                        accent = buttonAccent,
+                        useAppleAccent = appleAccent != null,
+                        landscape = landscape,
+                    ) {
                         SfIcon(
                             "info",
                             stringResource(R.string.artist_info_title),
                             size = if (landscape) 28.dp else 24.dp,
                             weight = FontWeight.SemiBold,
-                            tint = accent,
+                            tint = buttonAccent,
                         )
                     }
                     ArtistActionButton(
                         onClick = onPlayHotSongs,
                         modifier = Modifier.semantics { contentDescription = playHotSongsLabel },
-                        accent = accent,
+                        accent = buttonAccent,
+                        useAppleAccent = appleAccent != null,
                         enabled = canPlayHotSongs,
                         prominent = true,
                         landscape = landscape,
@@ -481,7 +521,8 @@ internal fun ArtistDetailHeader(
                     }
                     if (canFollow) ArtistActionButton(
                         onClick = onFollowClick,
-                        accent = accent,
+                        accent = buttonAccent,
+                        useAppleAccent = appleAccent != null,
                         enabled = !isFollowLoading,
                         landscape = landscape,
                     ) {
@@ -493,7 +534,7 @@ internal fun ArtistDetailHeader(
                             ),
                             size = if (landscape) 28.dp else 24.dp,
                             weight = FontWeight.SemiBold,
-                            tint = accent,
+                            tint = buttonAccent,
                         )
                     }
                 }
@@ -503,9 +544,32 @@ internal fun ArtistDetailHeader(
 }
 
 @Composable
+private fun rememberArtistLogoPainter(url: String, width: Dp, height: Dp): Painter? {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val widthPx = with(density) { width.roundToPx().coerceAtLeast(1) }
+    val heightPx = with(density) { height.roundToPx().coerceAtLeast(1) }
+    val request = remember(context, url, widthPx, heightPx) {
+        ImageRequest.Builder(context)
+            .data(url)
+            .size(widthPx, heightPx)
+            .scale(Scale.FIT)
+            .precision(Precision.INEXACT)
+            .crossfade(false)
+            .build()
+    }
+    val state by key(url) {
+        rememberAsyncImagePainter(request, contentScale = ContentScale.Fit)
+            .state.collectAsStateWithLifecycle()
+    }
+    return (state as? AsyncImagePainter.State.Success)?.painter
+}
+
+@Composable
 private fun ArtistActionButton(
     onClick: () -> Unit,
     accent: Color,
+    useAppleAccent: Boolean,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     prominent: Boolean = false,
@@ -517,8 +581,12 @@ private fun ArtistActionButton(
         modifier = modifier
             .size(if (landscape) { if (prominent) 72.dp else 48.dp } else { if (prominent) 68.dp else 44.dp })
             .graphicsLayer {
-                blendMode = BlendMode.Luminosity
-                compositingStrategy = CompositingStrategy.Offscreen
+                blendMode = if (useAppleAccent) BlendMode.SrcOver else BlendMode.Luminosity
+                compositingStrategy = if (useAppleAccent && !prominent) {
+                    CompositingStrategy.Auto
+                } else {
+                    CompositingStrategy.Offscreen
+                }
                 alpha = if (enabled) 1f else 0.4f
             }
             .clip(Capsule())
@@ -641,10 +709,11 @@ fun ArtistHeaderShimmer(landscape: Boolean = false) {
 private fun ArtistHeroLayout(
     landscape: Boolean,
     image: @Composable (Modifier) -> Unit,
-    information: @Composable () -> Unit,
+    information: @Composable (Dp) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val avatarSize = minOf(maxWidth * 0.20f, 200.dp)
+        val heroWidth = maxWidth
+        val avatarSize = minOf(heroWidth * 0.20f, 200.dp)
         if (landscape) {
             Column(
                 Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
@@ -663,12 +732,12 @@ private fun ArtistHeroLayout(
                         .clip(CircleShape)
                 )
                 Spacer(Modifier.height(24.dp))
-                information()
+                information(heroWidth)
             }
         } else {
             image(Modifier)
-            Box(Modifier.fillMaxWidth().padding(top = (maxWidth - 64.dp).coerceAtLeast(0.dp))) {
-                information()
+            Box(Modifier.fillMaxWidth().padding(top = (heroWidth - 64.dp).coerceAtLeast(0.dp))) {
+                information(heroWidth)
             }
         }
     }
