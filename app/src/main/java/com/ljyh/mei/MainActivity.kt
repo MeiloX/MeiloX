@@ -590,11 +590,16 @@ class MainActivity : ComponentActivity() {
             }
             val scrollPlayerSheet = remember { mutableStateOf<GlasmioBottomSheetState?>(null) }
             val navigationScrollAllowed = remember { mutableStateOf(false) }
-            val scrollSheet = scrollPlayerSheet.value
+            val scrollSheetAllowsNavigation by remember(scrollPlayerSheet) {
+                derivedStateOf {
+                    val scrollSheet = scrollPlayerSheet.value
+                    scrollSheet == null || scrollSheet.isCollapsed || scrollSheet.isDismissed
+                }
+            }
             val navigationScroll = rememberMeiloXNavigationScrollState(
                 viewport = pageHeaders.entry(navController.currentRoute ?: Screen.Home.route).viewport,
                 enabled = navigationScrollAllowed.value && !active && !keepBottomBarExpanded &&
-                    (scrollSheet == null || scrollSheet.isCollapsed || scrollSheet.isDismissed),
+                    scrollSheetAllowsNavigation,
             )
             val navigationBarExpanded = keepBottomBarExpanded || !navigationScroll.compactTarget
             LaunchedEffect(keepBottomBarExpanded) {
