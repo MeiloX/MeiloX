@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -69,10 +68,7 @@ fun ClassicPlayer(
     val device = rememberDeviceInfo()
     val sheetPresentation = rememberPlayerSheetPresentation(state)
     val playerVisible = sheetPresentation.isContentVisible
-    val overlayActive by remember(overlayHandler) {
-        derivedStateOf { overlayHandler.currentOverlayValue != com.ljyh.mei.ui.component.player.OverlayState.None }
-    }
-    val queueBackdrop = rememberRasterizedBackdrop(playerBackgroundBackdrop, enabled = playerVisible && overlayActive)
+    val queueBackdrop = rememberRasterizedBackdrop(playerBackgroundBackdrop, enabled = playerVisible)
 
     val playerStyle by rememberEnumPreference(PlayerStyleKey, PlayerStyle.AppleMusic)
     val sheetLayers = LocalPlayerSheet.current

@@ -140,6 +140,11 @@ fun BottomSheetPlayer(
     val playerCoverBackdrop = rememberLayerBackdrop()
     val presentation = rememberPlayerSheetPresentation(state)
     val progressUpdatesEnabled = presentation.isContentVisible
+    val playerBackdrop = rememberCombinedBackdrop(
+        rememberRasterizedBackdrop(playerBackgroundBackdrop, enabled = progressUpdatesEnabled),
+        rememberRasterizedBackdrop(playerContentBackdrop, enabled = progressUpdatesEnabled),
+        rememberRasterizedBackdrop(playerCoverBackdrop, enabled = progressUpdatesEnabled),
+    )
 
     // 获取播放器样式
     val playerStyle by rememberEnumPreference(PlayerStyleKey, defaultValue = PlayerStyle.AppleMusic)
@@ -174,15 +179,6 @@ fun BottomSheetPlayer(
     // 创建弹窗处理器
     val sheetLayers = rememberPlayerSheetLayers(state)
     val overlayHandler = rememberOverlayHandler(stateContainer)
-    val overlayActive by remember(overlayHandler) {
-        derivedStateOf { overlayHandler.currentOverlayValue != OverlayState.None }
-    }
-    val rasterizationEnabled = progressUpdatesEnabled && overlayActive
-    val playerBackdrop = rememberCombinedBackdrop(
-        rememberRasterizedBackdrop(playerBackgroundBackdrop, enabled = rasterizationEnabled),
-        rememberRasterizedBackdrop(playerContentBackdrop, enabled = rasterizationEnabled),
-        rememberRasterizedBackdrop(playerCoverBackdrop, enabled = rasterizationEnabled),
-    )
 
     val currentMetadata = stateContainer.mediaMetadata.value
     val upcomingMixTrack by playerConnection.upcomingAutoMixTrack.collectAsStateWithLifecycle()
