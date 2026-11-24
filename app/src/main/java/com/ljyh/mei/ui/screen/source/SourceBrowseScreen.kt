@@ -85,8 +85,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -264,12 +267,13 @@ fun SourceFeedScreen(
         val device = rememberDeviceInfo()
         val discoverColumns = if (device.isTablet) ((maxWidth - 20.dp) / 176.dp).toInt().coerceAtLeast(1) else 2
         val refreshing = state.providerId == selectedId && state.refreshing
+        val collapseProgress = if (device.isLandscape) 1f else rememberGlasmioHeaderCollapse(listState)
         registerMeiloXNavigationViewport(listState)
         MeiloXPinnedPage(
             title = title,
             onNavigateBack = if (isNavigationTab) null else ({ nav.navigateUp() }),
             bottomPadding = bottom,
-            collapseProgress = if (device.isLandscape) 1f else rememberGlasmioHeaderCollapse(listState),
+            collapseProgress = collapseProgress,
             topBarBlurProgress = rememberGlasmioHeaderScrollEdge(listState),
             backgroundColor = if (glassColors.isDark) glassColors.groupedBackground else Color.White,
             actions = {
@@ -304,7 +308,12 @@ fun SourceFeedScreen(
                 ) {
                     if (!device.isLandscape) item("source-feed-title") {
                         Text(title, style = IosTypography.largeTitle, color = glassColors.content,
-                            modifier = if (kind == FeedKind.HOME) Modifier.padding(horizontal = 16.dp)
+                            modifier = if (kind == FeedKind.HOME) Modifier.graphicsLayer {
+                                alpha = 1f - collapseProgress
+                                scaleX = 1f - .04f * collapseProgress
+                                scaleY = scaleX
+                                transformOrigin = TransformOrigin(0f, .5f)
+                            }.blur(6.dp * collapseProgress).padding(horizontal = 16.dp)
                                 else Modifier.offset(y = (-10).dp).padding(horizontal = 16.dp, vertical = 6.dp))
                     }
                     if (kind == FeedKind.DISCOVER && categories.isNotEmpty()) item("source-feed-categories") {
