@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -98,6 +100,9 @@ fun RecommendCard(
     Box(
         modifier = Modifier
             .size(cardWidth, cardHeight)
+            // Cache the static squircle-clipped card (cover, blur strip, text, border) in a GPU
+            // layer so scrolling, nav transitions, and player morphs never re-upload 731x975 SW path masks.
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .clip(RecommendCardShape)
             .homeArtworkBorder(RecommendCardShape)
             .background(Color.DarkGray)

@@ -28,8 +28,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,7 +73,6 @@ fun PlaylistCard(
     Column(
         modifier = Modifier
             .width(cardSize)
-            .clip(PlaylistCardShape) // 整个组件裁切，防止水波纹溢出
             .clickable(
                 interactionSource = null,
                 indication = null,
@@ -79,7 +80,11 @@ fun PlaylistCard(
             )
     ) {
         Box(
-            modifier = Modifier.size(cardSize)
+            modifier = Modifier
+                .size(cardSize)
+                // Cache the static squircle-clipped artwork + border tile in a GPU layer to avoid
+                // per-frame SW path mask texture uploads during scrolling and nav transitions.
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                 .homeArtworkBorder(PlaylistCardShape)
         ) {
             HomeCoverImage(
