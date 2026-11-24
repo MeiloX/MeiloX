@@ -162,13 +162,22 @@ internal class PlayerSheetGlassMorphRenderer(
     private var nativeRecipeMultiplier = Float.NaN
     private val untintedRecipes = arrayOfNulls<NavigationMaterialRecipe>(10)
     private val dropShadow = NavigationDropShadowRenderer(
-        renderScale = renderScale,
+        renderScale = minOf(renderScale, 0.25f),
+        cacheBlurResult = true,
         shadowRadius = materialPreset?.shadowRadius ?: 15.dp,
         shadowOffsetY = materialPreset?.shadowOffsetY ?: 8.dp,
         shadowAlpha = materialPreset?.let { if (materialDark) it.darkShadowAlpha else it.lightShadowAlpha } ?: 0.02f,
         useNativeProfile = true,
         nativeMaterial = materialPreset,
     )
+    private val sourceDropShadowDelegate = lazy(LazyThreadSafetyMode.NONE) {
+        NavigationDropShadowRenderer(
+            renderScale = 0.25f,
+            cacheBlurResult = true,
+            useNativeProfile = true,
+        )
+    }
+    private val sourceDropShadow by sourceDropShadowDelegate
     private val shadowLiftShader = if (isRuntimeShaderSupported() && appearance.usesBackdrop) RuntimeShader(NavigationShadowLiftShader) else null
     private val shadowLiftEffect = if (isRuntimeShaderSupported()) {
         shadowLiftShader?.let { RenderEffect.createRuntimeShaderEffect(it, "content") }
@@ -262,6 +271,7 @@ internal class PlayerSheetGlassMorphRenderer(
         }
         innerShadows.release()
         dropShadow.release()
+        if (sourceDropShadowDelegate.isInitialized()) sourceDropShadow.release()
         nativeFilterScope.reset()
         atlasPasses?.release()
         atlasPasses = null
@@ -334,6 +344,10 @@ internal class PlayerSheetGlassMorphRenderer(
         val completeNativeMaterial = nativeBackgroundFilter && !NativeGlassAtlasBackingCopy &&
             atlasProducer != null && atlasBacking != null &&
             (sourceNativeMaterial != null || (recipe != null && materialEffect == null))
+        val targetRecipe = if (completeNativeMaterial) (recipe ?: resolveRecipe(isDark, materialTint, tintMultiplier)) else null
+        val sourceRecipe = sourceNativeMaterial?.recipe
+        val decoupleCompleteShadow = completeNativeMaterial &&
+            targetRecipe?.hasTintMatrix() != true && sourceRecipe?.hasTintMatrix() != true
         // A player contour needs no menu/source-material blend. Use the same single
         // atlas/material program as GlassSurface, without packing raw/filtered copies.
         val directNativeMaterial = completeNativeMaterial && referenceSize != null &&
@@ -386,8 +400,31 @@ internal class PlayerSheetGlassMorphRenderer(
             if (isRuntimeShaderSupported() && contourField) fieldAdapter(effectScale, effectOffset, effectOrigin) else null
         val edgeField: NativeGlassFilterField? =
             if (isRuntimeShaderSupported() && contourField) fieldAdapter(Offset(1f, 1f), Offset.Zero, bounds.topLeft) else null
-        if (dropShadowAlpha > 0f && !completeNativeMaterial) {
-            drawDropShadow(this, shape, bounds, dropShadowAlpha)
+        val progress = sourceFilterProgress?.coerceIn(0f, 1f) ?: 1f
+        if (!completeNativeMaterial) {
+            if (dropShadowAlpha > 0f) drawDropShadow(this, shape, bounds, dropShadowAlpha)
+        } else if (decoupleCompleteShadow) {
+            if (sourceRecipe != null && secondaryLensBounds != null && 1f - progress > 0f) {
+                val originalExtent = sourceNativeMaterial.minimumDimension.takeIf { it.isFinite() }
+                    ?: secondaryLensBounds.size.minDimension / scope.density
+                val sourceProfile = navigationNativeShadowProfile(originalExtent, sourceFilterMaterial)
+                if (sourceProfile.radius > 0f && sourceProfile.opacity > 0f) {
+                    val radii = secondaryLensRadii ?: Offset(radius, radius)
+                    val sourceShape = androidx.compose.foundation.shape.RoundedCornerShape(minOf(radii.x, radii.y))
+                    val canvas = drawContext.canvas.nativeCanvas
+                    val save = canvas.save()
+                    try {
+                        canvas.clipOutPath(path.asAndroidPath())
+                        sourceDropShadow.draw(this, sourceShape, secondaryLensBounds, 1f - progress, null, sourceProfile)
+                    } finally {
+                        canvas.restoreToCount(save)
+                    }
+                }
+            }
+            if (dropShadowAlpha > 0f) {
+                val targetProfile = navigationNativeShadowProfile(materialExtent, materialPreset)
+                dropShadow.draw(this, shape, bounds, dropShadowAlpha, edgeField, profileOverride = targetProfile)
+            }
         }
         if (appearance.usesBackdrop && recordedViewport != viewport) {
             val bufferSize = IntSize(
@@ -440,7 +477,7 @@ internal class PlayerSheetGlassMorphRenderer(
         val directCompletion: NativeGlassCompletion? = if (directNativeMaterial) {
             NativeGlassCompletion(requireNotNull(recipe), isDark, clearFraction,
                 darkFraction = presentationDarkFraction, edgeAlpha = innerShadowProgress,
-                shadow = navigationNativeShadowProfile(materialExtent, materialPreset),
+                shadow = if (decoupleCompleteShadow) null else navigationNativeShadowProfile(materialExtent, materialPreset),
                 shadowAlpha = dropShadowAlpha,
                 outputSize = Size(bounds.width * sampleScale.x, bounds.height * sampleScale.y),
                 outputDensity = scope.density * minOf(sampleScale.x, sampleScale.y) * opticalScale,
@@ -651,9 +688,8 @@ internal class PlayerSheetGlassMorphRenderer(
             material.compositingStrategy = CompositingStrategy.Offscreen
             material.renderEffect = null
             material.record(this@PlayerSheetGlassMorphRenderer.density, recordedLayoutDirection, base) { drawLayer(refracted) }
-            val progress = sourceFilterProgress?.coerceIn(0f, 1f) ?: 1f
-            val sourceRecipe: NavigationMaterialRecipe? = sourceNativeMaterial?.recipe
-            val sourceShadow: NativeGlassSourceShadow? = if (sourceRecipe != null && secondaryLensBounds != null && progress < 1f) {
+            val sourceShadow: NativeGlassSourceShadow? = if (!decoupleCompleteShadow && sourceRecipe != null &&
+                secondaryLensBounds != null && progress < 1f) {
                 val originalExtent = sourceNativeMaterial.minimumDimension.takeIf { it.isFinite() }
                     ?: secondaryLensBounds.size.minDimension / scope.density
                 NativeGlassSourceShadow(navigationNativeShadowProfile(originalExtent, sourceFilterMaterial),
@@ -661,11 +697,11 @@ internal class PlayerSheetGlassMorphRenderer(
                     Offset((secondaryLensRadii?.x ?: radius) * sampleScale.x,
                         (secondaryLensRadii?.y ?: radius) * sampleScale.y), 1f - progress)
             } else null
-            val targetRecipe: NavigationMaterialRecipe = recipe ?: resolveRecipe(isDark, materialTint, tintMultiplier)
-            val completion: NativeGlassCompletion = NativeGlassCompletion(targetRecipe, isDark, clearFraction, darkFraction = presentationDarkFraction,
+            val resolvedTargetRecipe: NavigationMaterialRecipe = requireNotNull(targetRecipe)
+            val completion: NativeGlassCompletion = NativeGlassCompletion(resolvedTargetRecipe, isDark, clearFraction, darkFraction = presentationDarkFraction,
                 materialAlpha = if (sourceRecipe != null) progress else 1f,
                 edgeAlpha = innerShadowProgress,
-                shadow = navigationNativeShadowProfile(materialExtent, materialPreset),
+                shadow = if (decoupleCompleteShadow) null else navigationNativeShadowProfile(materialExtent, materialPreset),
                 shadowAlpha = dropShadowAlpha,
                 sourceRecipe = sourceRecipe, sourceAlpha = if (sourceRecipe != null) 1f - progress else 0f,
                 outputSize = Size(bounds.width * sampleScale.x, bounds.height * sampleScale.y),
