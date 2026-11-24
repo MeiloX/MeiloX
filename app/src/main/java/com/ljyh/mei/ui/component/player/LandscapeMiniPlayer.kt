@@ -63,6 +63,7 @@ internal fun LandscapeMiniPlayer(
 ) {
     val connection = LocalPlayerConnection.current ?: return
     val sheet = LocalPlayerSheet.current
+    val sheetPresentation = rememberPlayerSheetPresentation(sheet?.state)
     SideEffect { sheet?.miniArtworkCornerRadius = 6.dp }
     val colors = LocalGlassColors.current
     val metadata by connection.mediaMetadata.collectAsState()
@@ -220,13 +221,13 @@ internal fun LandscapeMiniPlayer(
                         AppleMusicMarqueeText(
                             text = visibleTrack.title, style = titleStyle,
                             color = colors.content, edgeWidth = if (allowMarquee) 8.dp else 0.dp,
-                            enabled = allowMarquee && sheet?.state?.isCollapsed != false,
+                            enabled = allowMarquee && sheetPresentation.isCollapsed,
                         )
                         val artists = visibleTrack.artists.joinToString { it.name }
                         if (artists.isNotBlank()) AppleMusicMarqueeText(
                             text = artists, style = artistStyle,
                             color = colors.content, edgeWidth = if (allowMarquee) 8.dp else 0.dp,
-                            enabled = allowMarquee && sheet?.state?.isCollapsed != false,
+                            enabled = allowMarquee && sheetPresentation.isCollapsed,
                         )
                     } else Text(stringResource(R.string.landscape_player_not_playing), style = titleStyle,
                         color = colors.secondaryContent, maxLines = 1)

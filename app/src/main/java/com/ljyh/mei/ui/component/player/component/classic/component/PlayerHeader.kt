@@ -44,6 +44,7 @@ import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
 import com.ljyh.mei.ui.component.player.LocalPlayerRoamingModeLabel
 import com.ljyh.mei.ui.component.player.autoMixIncomingMetadataDominant
+import com.ljyh.mei.ui.component.player.rememberPlayerSheetPresentation
 import com.ljyh.mei.ui.component.player.component.applemusic.AppleMusicMarqueeText
 import com.ljyh.mei.ui.component.player.component.applemusic.PlayerTitleWithMode
 import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
@@ -70,7 +71,7 @@ fun PlayerHeader(
 ) {
     var metadataWidth by remember { mutableIntStateOf(0) }
     val favoriteMotion = rememberPlayerFavoriteMotion(isLiked, mediaMetadata.id)
-    val marqueeEnabled = LocalPlayerSheet.current?.state?.isExpanded != false
+    val marqueeEnabled = rememberPlayerSheetPresentation(LocalPlayerSheet.current?.state).isExpanded
     val actionsEnabled = !autoMixIncomingMetadataDominant()
     val menuGesture = if (actionsEnabled && navigationMenuAnchor != null) {
         Modifier.glasmioMenuGesture(navigationMenuAnchor, onClick)

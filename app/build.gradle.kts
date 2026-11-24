@@ -90,6 +90,14 @@ android {
     ndkVersion = "27.1.12297006"
     useLibrary("android.test.mock")
     testBuildType = providers.gradleProperty("mei.instrumentationBuildType").orElse("debug").get()
+    sourceSets.named("main") {
+        val integration = if (providers.gradleProperty("glasmio.source").orNull == "true") {
+            "glasmioSource"
+        } else {
+            "glasmioMaven"
+        }
+        kotlin.srcDir("src/$integration/kotlin")
+    }
     defaultConfig {
         applicationId = providers.gradleProperty("mei.applicationId")
             .orElse("com.neoruaa.meilox")

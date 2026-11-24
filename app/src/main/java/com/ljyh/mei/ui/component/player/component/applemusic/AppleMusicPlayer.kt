@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
+import com.ljyh.mei.ui.component.player.rememberPlayerSheetPresentation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -185,6 +186,7 @@ fun AppleMusicPlayer(
     val isLiked by stateContainer.isLiked
     val canLike by stateContainer.canLike
     val sheetLayers = LocalPlayerSheet.current
+    val sheetPresentation = rememberPlayerSheetPresentation(state)
     val expandPlayer: () -> Unit = { sheetLayers?.expand() }
     val sheetExpanded by remember(state, sheetLayers) {
         derivedStateOf { state.isExpanded && sheetLayers?.isTransitioning != true }
@@ -407,7 +409,7 @@ fun AppleMusicPlayer(
                 stateContainer.playerConnection.player.stop()
                 stateContainer.playerConnection.player.clearMediaItems()
             },
-            onHorizontalSwipe = if (state.isCollapsed) null else { direction ->
+            onHorizontalSwipe = if (sheetPresentation.isCollapsed) null else { direction ->
                 if (!sheetExpanded) {
                     when (direction) {
                         HorizontalSwipeDirection.Left -> stateContainer.playerConnection.seekToNext()

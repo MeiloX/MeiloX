@@ -57,6 +57,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.animation.core.Animatable
 import com.kyant.capsule.ContinuousRoundedRectangle
 import androidx.compose.foundation.layout.PaddingValues
@@ -212,7 +214,7 @@ fun SourceFeedScreen(
     val selectedId = providerId ?: preferredId
     val providers by viewModel.providers.collectAsState()
     var categoryId by rememberSaveable(kind, selectedId) { mutableStateOf(initialCategory) }
-    var selection by remember(selectedId) { mutableStateOf<Pair<Track, Rect>?>(null) }
+    val selection = remember(selectedId) { mutableStateOf<Pair<Track, Rect>?>(null) }
     val trackMenuAnchor = rememberGlasmioMenuAnchorState()
     val listState = rememberSaveable(kind, selectedId, categoryId, saver = LazyListState.Saver) { LazyListState() }
     val nav = LocalNavController.current
@@ -334,12 +336,12 @@ fun SourceFeedScreen(
                     if (state.providerId == selectedId) {
                         if (kind == FeedKind.DISCOVER) {
                             sourceDiscoverItems(state.sections, discoverColumns, !device.isTablet, { navigateSourceContent(nav, it) }, play,
-                                { track, anchor -> selection = track to anchor }, ::openCard, loadingCard, trackMenuAnchor)
+                                { track, anchor -> selection.value = track to anchor }, ::openCard, loadingCard, trackMenuAnchor)
                         } else state.sections.forEachIndexed { index, section ->
                             item(key = "source-feed:${state.providerId}:${section.id}") {
                                 SourceFeedSectionContent(if (index == 0 && section.layout == SourceFeedLayout.HERO) section.copy(title = getGreeting()) else section,
                                     onOpen = { navigateSourceContent(nav, it) }, onPlay = play,
-                                    onMore = { track, anchor -> selection = track to anchor }, onAction = ::openCard,
+                                    onMore = { track, anchor -> selection.value = track to anchor }, onAction = ::openCard,
                                     loadingCard = loadingCard, homeTrackRows = kind == FeedKind.HOME,
                                     menuAnchorState = trackMenuAnchor)
                             }
@@ -355,7 +357,7 @@ fun SourceFeedScreen(
             }
         }
     }
-    SourceTrackActions(selection, { selection = null }, viewModel, menuAnchorState = trackMenuAnchor)
+    SourceTrackActions(selection, viewModel, menuAnchorState = trackMenuAnchor)
 }
 
 /** Uses the native home-feed card and song-row primitives for every provider. */
@@ -644,7 +646,7 @@ fun SourceLibraryScreen(
     val title = if (showArtists) "关注歌手" else stringResource(if (category == null) R.string.app_tab_library else page.titleRes)
     var query by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     var searchActive by rememberSaveable { mutableStateOf(false) }
-    var selection by remember(selectedId, collection) { mutableStateOf<Pair<Track, Rect>?>(null) }
+    val selection = remember(selectedId, collection) { mutableStateOf<Pair<Track, Rect>?>(null) }
     val trackMenuAnchor = rememberGlasmioMenuAnchorState()
     val focus = LocalFocusManager.current
     val play = rememberSourceQueuePlayer("source-library:$selectedId:${collection.name}", libraryCollectionTitle(collection),
@@ -833,6 +835,30 @@ fun SourceLibraryScreen(
     }
     val emptyText = if (query.text.isNotBlank()) stringResource(R.string.no_search_results) else libraryCollectionEmpty(collection, playlistFilter)
     val rankAccount = ownState.account ?: extra?.account
+    val shareContent = if (
+        LocalLibrarySharePresenter.current != null && !landscape &&
+        page == LibraryPage.Songs && !showArtists && hasCoreCollection
+    ) remember(listState) { LibraryShareContent() } else null
+    val sharePageStable = rememberUpdatedState(!collectionLoading && combined.error == null)
+    val shareContentStable = remember(shareContent, listState, isNavigationTab) {
+        derivedStateOf {
+            if (shareContent == null || shareContent.mayHaveNativeContent ||
+                (isNavigationTab && shareContent.mountedProfileImages == 0) ||
+                !sharePageStable.value || pullRefreshing || searchActive || query.text.isNotEmpty() ||
+                listState.isScrollInProgress || tabPosition.isRunning
+            ) return@derivedStateOf false
+            if (shareContent.requests.any { !it.stablePixels }) return@derivedStateOf false
+            val activeArtworks = shareContent.requests.mapTo(HashSet()) { it.key }
+            val visibleItems = listState.layoutInfo.visibleItemsInfo
+            visibleItems.any { val key = it.key; key is String && key in activeArtworks } && visibleItems.all {
+                when (val key = it.key) {
+                    "source-library-large-title", "source-library-search", "source-library-pages",
+                    "source-library-play-all", "source-library-top-divider" -> true
+                    else -> key is String && key in activeArtworks
+                }
+            }
+        }
+    }
     registerMeiloXNavigationViewport(listState)
     MeiloXPinnedPage(title = title, bottomPadding = bottom, collapseProgress = collapse,
         topBarBlurProgress = rememberGlasmioHeaderScrollEdge(listState),
@@ -845,7 +871,7 @@ fun SourceLibraryScreen(
                 { cloudViewModel.upload() }, enabled = cloudState?.isUploading != true) { SfIcon("arrow.up.circle.fill", null) } else null,
             if (page == LibraryPage.History && historyState.canClearLocalHistory && historyViewModel != null)
                 meiloxHeaderAction("source-library-clear-history", stringResource(R.string.clear_history), historyViewModel::clearHistory) { SfIcon("trash", null) } else null,
-            if (isNavigationTab) globalProfileHeaderAction() else null) }) { contentPadding ->
+            if (isNavigationTab) globalProfileHeaderAction(shareContent) else null) }) { contentPadding ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val columns = (maxWidth / 180.dp).toInt().coerceAtLeast(2)
             LibraryCollectionRefresh(
@@ -889,12 +915,16 @@ fun SourceLibraryScreen(
                             }
                         }
                     }
-                    if (page == LibraryPage.Songs && !showArtists && filtered.isNotEmpty()) item("source-library-play-all") { GlasmioGroupedList(Modifier.padding(bottom = 12.dp)) {
-                        GlasmioListRow(title = stringResource(R.string.library_play_all), systemName = "play.fill", showTopSeparator = false,
-                            onClick = { playVisible(filtered.filterIsInstance<SourceItem.TrackItem>().map { it.track }, 0, randomStart = true) })
-                        if (hasRadio) GlasmioListRow(title = stringResource(R.string.library_heart_mode), systemName = "heart.circle.fill",
-                            onClick = { player?.fmStart(filtered.filterIsInstance<SourceItem.TrackItem>().randomOrNull()?.track?.ref?.trackId, selectedId) })
-                    } }
+                    if (page == LibraryPage.Songs && !showArtists && filtered.isNotEmpty()) item("source-library-play-all") {
+                        LibraryShareIndication(shareContent) {
+                            GlasmioGroupedList(Modifier.padding(bottom = 12.dp)) {
+                                GlasmioListRow(title = stringResource(R.string.library_play_all), systemName = "play.fill", showTopSeparator = false,
+                                    onClick = { playVisible(filtered.filterIsInstance<SourceItem.TrackItem>().map { it.track }, 0, randomStart = true) })
+                                if (hasRadio) GlasmioListRow(title = stringResource(R.string.library_heart_mode), systemName = "heart.circle.fill",
+                                    onClick = { player?.fmStart(filtered.filterIsInstance<SourceItem.TrackItem>().randomOrNull()?.track?.ref?.trackId, selectedId) })
+                            }
+                        }
+                    }
                     if (page == LibraryPage.Cloud && !showArtists) {
                         cloudState?.let { libraryCloudItems(it, player, query.text.trim()) { cloudViewModel?.loadMore() } }
                     } else if (page == LibraryPage.History && !showArtists) {
@@ -920,13 +950,17 @@ fun SourceLibraryScreen(
                         }
                     } else items(filtered, key = { "source-library-row:${it.ref}" }) { item ->
                         when (item) {
-                            is SourceItem.TrackItem -> LandscapeMediaRow(modifier = Modifier.padding(horizontal = if (landscape) 0.dp else 4.dp), landscape = landscape,
-                                image = item.artworkUrl, title = item.title, artist = item.track.artists.joinToString(" / ") { it.name },
-                                detail = if (landscape) formatDuration(item.track.durationMs) else "", album = item.track.album.title,
-                                isCurrentTrack = item.ref == playingLikedTrack, fullWidthTrackPress = true,
-                                favorite = true, showDivider = item.ref != filtered.lastOrNull()?.ref,
-                                onClick = { val tracks = filtered.filterIsInstance<SourceItem.TrackItem>().map { it.track }; playVisible(tracks, tracks.indexOf(item.track)) },
-                                onMore = { selection = item.track to it }, menuAnchorState = trackMenuAnchor)
+                            is SourceItem.TrackItem -> CompositionLocalProvider(
+                                LocalLibraryShareArtwork provides shareContent?.let { LibraryShareArtwork(it, "source-library-row:${item.ref}") },
+                            ) {
+                                LandscapeMediaRow(modifier = Modifier.padding(horizontal = if (landscape) 0.dp else 4.dp), landscape = landscape,
+                                    image = item.artworkUrl, title = item.title, artist = item.track.artists.joinToString(" / ") { it.name },
+                                    detail = if (landscape) formatDuration(item.track.durationMs) else "", album = item.track.album.title,
+                                    isCurrentTrack = item.ref == playingLikedTrack, fullWidthTrackPress = true,
+                                    favorite = true, showDivider = item.ref != filtered.lastOrNull()?.ref,
+                                    onClick = { val tracks = filtered.filterIsInstance<SourceItem.TrackItem>().map { it.track }; playVisible(tracks, tracks.indexOf(item.track)) },
+                                    onMore = { selection.value = item.track to it }, menuAnchorState = trackMenuAnchor)
+                            }
                             is SourceItem.PlaylistItem -> LandscapeMediaRow(modifier = Modifier.padding(horizontal = if (landscape) 0.dp else 4.dp), image = item.artworkUrl,
                                 title = item.title, artist = item.playlist.creatorName, detail = stringResource(R.string.playlist_song_count, item.playlist.trackCount),
                                 onClick = { navigateSourceContent(nav, item.ref) }, navigationArrow = true,
@@ -956,7 +990,10 @@ fun SourceLibraryScreen(
             }
         }
     }
-    SourceTrackActions(selection, { selection = null }, viewModel, menuAnchorState = trackMenuAnchor)
+    SourceTrackActions(
+        selection, viewModel, menuAnchorState = trackMenuAnchor,
+        canDetachShareBackdrop = shareContent?.let { { shareContentStable.value } },
+    )
 }
 
 

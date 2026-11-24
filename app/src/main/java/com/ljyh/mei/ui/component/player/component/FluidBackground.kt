@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import coil3.imageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
@@ -117,8 +118,16 @@ private fun MeshBackground(
     val renderer = remember { MeshGradientRenderer() }
     val meshLayer = rememberGraphicsLayer()
     val frameVersion = remember { mutableIntStateOf(0) }
+    val hardwareAccelerated = LocalView.current.isHardwareAccelerated
+    val reuseMeshCapture = sheet != null && hardwareAccelerated
     val shouldAnimate = !meshPlaying || isPlaying
     val audioReactive = backgroundActive && expanded && isPlaying && !staticMode && sensitivity > 0f
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && hardwareAccelerated) {
+        LifecycleStartedEffect(renderer) {
+            renderer.prepareRetainedMeshes { frameVersion.intValue++ }
+        }
+    }
 
     // Each renderer owns its gray album's mutable shader. Prepare it once, off main,
     // so loading and failed artwork use the same mesh pipeline as real covers.
@@ -218,7 +227,9 @@ private fun MeshBackground(
         Box(
             Modifier
                 .fillMaxSize()
-                .layerBackdrop(backdrop)
+                // Replay the same mesh layer that was captured, through the existing
+                // backdrop owner so both same-window and dialog consumers stay live.
+                .layerBackdrop(backdrop, reuseContent = reuseMeshCapture)
                 .trackBackdropPosition(backdrop, frameVersion)
                 .drawBehind {
                     frameVersion.intValue

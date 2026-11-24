@@ -22,6 +22,11 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.IntSize
 import com.ljyh.mei.playback.PlaybackSpectrum
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.roundToInt
@@ -50,19 +55,16 @@ internal class MeshGradientRenderer {
         val compositePaint = Paint()
         val scaledPositions = FloatArray(album.positions.size)
         var viewportSize = IntSize.Zero
+        var retainedSize = IntSize.Zero
+        var retainedMesh: RetainedPlayerMesh? = null
 
         fun resize(size: IntSize) {
             if (viewportSize == size) return
             viewportSize = size
-            val width = size.width.toFloat()
-            val height = size.height.toFloat()
-            val aspect = width / height
-            val scaleX = if (aspect > 1f) 1f else 1f / aspect
-            val scaleY = if (aspect > 1f) aspect else 1f
+            val viewport = MeshViewportTransform(size)
             for (i in album.positions.indices step 2) {
-                scaledPositions[i] = (album.positions[i] * scaleX + 1f) * width * .5f
-                // OpenGL clip coordinates grow up; Canvas coordinates grow down.
-                scaledPositions[i + 1] = (1f - album.positions[i + 1] * scaleY) * height * .5f
+                scaledPositions[i] = viewport.x(album.positions[i])
+                scaledPositions[i + 1] = viewport.y(album.positions[i + 1])
             }
         }
     }
@@ -78,6 +80,9 @@ internal class MeshGradientRenderer {
     private var recordedRevision = -1L
     private var recordedLayer: GraphicsLayer? = null
     private var recordedSize = IntSize.Zero
+    private var recordedRetainedAllowed = false
+    private val meshPreparation = Channel<Unit>(Channel.CONFLATED)
+    private var retainedTarget = IntSize.Zero
 
     var flowSpeed: Float = .25f
         set(value) {
@@ -154,6 +159,7 @@ internal class MeshGradientRenderer {
         }
         currentAlbum = album
         revision++
+        requestRetainedMeshes()
     }
 
     fun setAutoMixAlbum(album: MeshAlbum?) {
@@ -164,6 +170,7 @@ internal class MeshGradientRenderer {
         }
         autoMixProgress = 0f
         revision++
+        requestRetainedMeshes()
     }
 
     fun setAutoMixProgress(progress: Float): Boolean {
@@ -205,6 +212,46 @@ internal class MeshGradientRenderer {
         lastFrameNanos = null
     }
 
+    private fun requestRetainedMeshes() {
+        if (retainedTarget != IntSize.Zero) meshPreparation.trySend(Unit)
+    }
+
+    /** The caller keeps one collector for the lifetime of this renderer's visible window. */
+    suspend fun prepareRetainedMeshes(onReady: () -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        requestRetainedMeshes()
+        while (true) {
+            meshPreparation.receive()
+            val size = retainedTarget
+            val states = buildList {
+                for (state in meshStates) if (state.retainedSize != size) add(state)
+                autoMixState?.let { if (it.retainedSize != size) add(it) }
+            }
+            if (states.isEmpty()) continue
+            val prepared = withContext(Dispatchers.Default) {
+                states.map { state ->
+                    currentCoroutineContext().ensureActive()
+                    RetainedPlayerMesh.prepare(state.album, size)
+                }
+            }
+            if (retainedTarget != size) continue
+            var ready = false
+            states.forEachIndexed { index, state ->
+                // Album changes can retire or promote a state while the worker is building it.
+                if (state === autoMixState || state in meshStates) {
+                    val mesh = prepared[index]
+                    state.retainedSize = size
+                    state.retainedMesh = mesh
+                    if (mesh != null) ready = true
+                }
+            }
+            if (ready) {
+                revision++
+                onReady()
+            }
+        }
+    }
+
     fun draw(scope: DrawScope, layer: GraphicsLayer, renderScale: Float) = with(scope) {
         if (size.width <= 0f || size.height <= 0f) return@with
         // Keep the same bounded working resolution as the former Surface buffer.
@@ -217,23 +264,33 @@ internal class MeshGradientRenderer {
             (size.width * scale).toInt().coerceAtLeast(1),
             (size.height * scale).toInt().coerceAtLeast(1),
         )
-        if (recordedLayer !== layer || recordedSize != bufferSize || recordedRevision != revision) {
+        val allowRetained = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            drawContext.canvas.nativeCanvas.isHardwareAccelerated
+        if (allowRetained && retainedTarget != bufferSize) {
+            retainedTarget = bufferSize
+            requestRetainedMeshes()
+        }
+        if (recordedLayer !== layer || recordedSize != bufferSize || recordedRevision != revision ||
+            recordedRetainedAllowed != allowRetained
+        ) {
             layer.clip = true
             layer.compositingStrategy = CompositingStrategy.Offscreen
             layer.record(bufferSize) {
                 drawRect(Color.Black)
-                drawIntoCanvas { composeCanvas -> drawMeshes(composeCanvas.nativeCanvas, bufferSize) }
+                drawIntoCanvas { composeCanvas -> drawMeshes(composeCanvas.nativeCanvas, bufferSize, allowRetained) }
             }
             recordedLayer = layer
             recordedSize = bufferSize
             recordedRevision = revision
+            recordedRetainedAllowed = allowRetained
         }
         withTransform({
             scale(size.width / bufferSize.width, size.height / bufferSize.height, Offset.Zero)
         }) { drawLayer(layer) }
     }
 
-    private fun drawMeshes(canvas: Canvas, size: IntSize) {
+    private fun drawMeshes(canvas: Canvas, size: IntSize, allowRetained: Boolean) {
+        val retained = allowRetained && canvas.isHardwareAccelerated
         val time = accumulatedPlayingNanos / 1e9f * flowSpeed
         val outgoingAlpha = 1f - autoMixProgress
         if (outgoingAlpha > 0f) {
@@ -244,49 +301,56 @@ internal class MeshGradientRenderer {
                 val saveCount = canvas.saveLayer(
                     0f, 0f, size.width.toFloat(), size.height.toFloat(), autoMixOutgoingPaint,
                 )
-                drawAlbumStates(canvas, size, time, 1f)
+                drawAlbumStates(canvas, size, time, 1f, retained)
                 canvas.restoreToCount(saveCount)
             } else {
-                drawAlbumStates(canvas, size, time, outgoingAlpha)
+                drawAlbumStates(canvas, size, time, outgoingAlpha, retained)
             }
         }
         // Add two premultiplied weights over the existing black base. This also
         // blends transparent cover pixels without revealing the previous album.
-        autoMixState?.let { drawMesh(canvas, size, it, autoMixProgress, time) }
+        autoMixState?.let { drawMesh(canvas, size, it, autoMixProgress, time, retained) }
     }
 
-    private fun drawAlbumStates(canvas: Canvas, size: IntSize, time: Float, opacity: Float) {
+    private fun drawAlbumStates(canvas: Canvas, size: IntSize, time: Float, opacity: Float, retained: Boolean) {
         // Keep insertion order, oldest to newest, even when an existing state returns.
         for (index in meshStates.lastIndex downTo 0) {
             val state = meshStates[index]
             val eased = (1f - cos(state.alpha.coerceIn(0f, 1f) * Math.PI.toFloat())) * .5f
-            drawMesh(canvas, size, state, eased * opacity, time)
+            drawMesh(canvas, size, state, eased * opacity, time, retained)
         }
     }
 
-    private fun drawMesh(canvas: Canvas, size: IntSize, state: MeshState, alpha: Float, time: Float) {
+    private fun drawMesh(canvas: Canvas, size: IntSize, state: MeshState, alpha: Float, time: Float, retained: Boolean) {
         if (alpha <= 0f) return
-        state.resize(size)
+        val mesh = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            retained && state.retainedSize == size
+        ) state.retainedMesh else null
         state.shader.setFloatUniform("time", time)
         state.shader.setFloatUniform("audioResponse", audioScale, audioContrast, audioSaturation)
         state.compositePaint.alpha = (alpha * 255f).roundToInt()
         val saveCount = canvas.saveLayer(
             0f, 0f, size.width.toFloat(), size.height.toFloat(), state.compositePaint,
         )
-        canvas.drawVertices(
-            Canvas.VertexMode.TRIANGLES,
-            state.scaledPositions.size,
-            state.scaledPositions,
-            0,
-            state.album.textureCoordinates,
-            0,
-            null,
-            0,
-            state.album.indices,
-            0,
-            state.album.indices.size,
-            state.meshPaint,
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && mesh != null) {
+            mesh.draw(canvas, state.meshPaint)
+        } else {
+            state.resize(size)
+            canvas.drawVertices(
+                Canvas.VertexMode.TRIANGLES,
+                state.scaledPositions.size,
+                state.scaledPositions,
+                0,
+                state.album.textureCoordinates,
+                0,
+                null,
+                0,
+                state.album.indices,
+                0,
+                state.album.indices.size,
+                state.meshPaint,
+            )
+        }
         canvas.restoreToCount(saveCount)
     }
 
@@ -330,25 +394,7 @@ internal class MeshGradientRenderer {
             } else {
                 generateControlPoints(random = kotlin.random.Random(random.nextLong()))
             }
-            val mesh = BHPMesh(selectedPreset.width, selectedPreset.height).apply {
-                resetSubdivision(subdivision)
-                configureFromPreset(selectedPreset, processed)
-            }
-            val vertices = checkNotNull(mesh.buffer)
-            val vertexCount = vertices.capacity() / 7
-            require(vertexCount <= 65536) { "Mesh exceeds Canvas index range" }
-            val positions = FloatArray(vertexCount * 2)
-            val textureCoordinates = FloatArray(vertexCount * 2)
-            for (i in 0 until vertexCount) {
-                positions[i * 2] = vertices[i * 7]
-                positions[i * 2 + 1] = vertices[i * 7 + 1]
-                // All current presets use white vertex colors, so the shader is unchanged
-                // by omitting Canvas vertex-color modulation.
-                textureCoordinates[i * 2] = vertices[i * 7 + 5]
-                textureCoordinates[i * 2 + 1] = vertices[i * 7 + 6]
-            }
-            val indexBuffer = mesh.generateIndexBuffer()
-            val indices = ShortArray(mesh.indices) { indexBuffer[it].toShort() }
+            val mesh = BHPMesh(selectedPreset, subdivision)
             // RuntimeShader compiles synchronously. Complete compilation and texture
             // binding here, before the prepared album is handed to the main thread.
             val shader = RuntimeShader(ShaderSource.MESH_SHADER).apply {
@@ -360,7 +406,7 @@ internal class MeshGradientRenderer {
                 )
                 setFloatUniform("textureSize", processed.width.toFloat(), processed.height.toFloat())
             }
-            return MeshAlbum(processed, positions, textureCoordinates, indices, shader)
+            return MeshAlbum(processed, mesh.positions, mesh.textureCoordinates, mesh.indices, shader)
         }
     }
 }

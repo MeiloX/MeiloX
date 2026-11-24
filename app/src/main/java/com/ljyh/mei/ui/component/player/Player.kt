@@ -14,11 +14,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
@@ -96,6 +98,23 @@ internal val LocalPlayerRoamingModeLabel = staticCompositionLocalOf<String?> { n
 
 internal val LocalPlayerBackgroundReadyChanged = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
 
+@Stable
+internal class PlayerSheetPresentation(val sheet: GlasmioBottomSheetState?) {
+    // Presentation scopes need the endpoints, while placement and drawing read the live motion.
+    val isCollapsed by derivedStateOf(structuralEqualityPolicy()) { sheet?.isCollapsed != false }
+    val isExpanded by derivedStateOf(structuralEqualityPolicy()) { sheet?.isExpanded != false }
+    val isContentVisible by derivedStateOf(structuralEqualityPolicy()) { sheet?.isContentVisible == true }
+}
+
+private val LocalPlayerSheetPresentation = staticCompositionLocalOf<PlayerSheetPresentation?> { null }
+
+@Composable
+internal fun rememberPlayerSheetPresentation(sheet: GlasmioBottomSheetState?): PlayerSheetPresentation {
+    val provided = LocalPlayerSheetPresentation.current
+    return if (provided != null && provided.sheet === sheet) provided
+    else remember(sheet) { PlayerSheetPresentation(sheet) }
+}
+
 @OptIn(UnstableApi::class)
 @RequiresApi(Build.VERSION_CODES.S)
 @Composable
@@ -119,7 +138,8 @@ fun BottomSheetPlayer(
     // The expanded cover is intentionally rendered above the player content. Record it in a
     // separate source so sheets can sample it without changing that visual z-order.
     val playerCoverBackdrop = rememberLayerBackdrop()
-    val progressUpdatesEnabled by remember(state) { derivedStateOf { state.isContentVisible } }
+    val presentation = rememberPlayerSheetPresentation(state)
+    val progressUpdatesEnabled = presentation.isContentVisible
     val playerBackdrop = rememberCombinedBackdrop(
         rememberRasterizedBackdrop(playerBackgroundBackdrop, enabled = progressUpdatesEnabled),
         rememberRasterizedBackdrop(playerContentBackdrop, enabled = progressUpdatesEnabled),
@@ -228,6 +248,7 @@ fun BottomSheetPlayer(
     // 单入口、双实现 - 根据样式渲染不同的播放器
     CompositionLocalProvider(
         LocalPlayerSheet provides sheetLayers,
+        LocalPlayerSheetPresentation provides presentation,
         LocalPlayerArtwork provides artwork,
         LocalAutoMixVisuals provides mixVisuals,
         LocalAutoMixArtworkFrame provides mixArtwork,
@@ -288,9 +309,10 @@ fun BottomSheetPlayer(
     }
 
     // 公共的弹窗处理层
+    val overlayBackdrop = if (presentation.isCollapsed) collapsedBackdrop else playerBackdrop
     CompositionLocalProvider(
-        LocalGlassBackdrop provides if (state.isCollapsed) collapsedBackdrop else playerBackdrop,
-        LocalBlurBackdrop provides if (state.isCollapsed) collapsedBackdrop else playerBackdrop,
+        LocalGlassBackdrop provides overlayBackdrop,
+        LocalBlurBackdrop provides overlayBackdrop,
         LocalGlasmioSheetGroupedListStyle provides GlasmioSheetGroupedListStyle.ToolbarTint,
     ) {
         CommonOverlayHandler(

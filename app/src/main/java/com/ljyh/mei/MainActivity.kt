@@ -282,6 +282,9 @@ import com.ljyh.mei.ui.screen.search.SearchScreen
 import com.ljyh.mei.ui.screen.playlist.component.LocalPlaylistLocateHost
 import com.ljyh.mei.ui.screen.playlist.component.PlaylistLocateChromeLayer
 import com.ljyh.mei.ui.screen.playlist.component.PlaylistLocateHostState
+import com.ljyh.mei.ui.screen.source.LibrarySharePresenter
+import com.ljyh.mei.ui.screen.source.LocalLibrarySharePresenter
+import com.ljyh.mei.ui.screen.source.SupportsDetachedLibraryShareBackdrop
 import com.ljyh.mei.ui.screen.source.navigateSourceContent
 import com.ljyh.mei.ui.navigation.MeiNavEntryViewModelStoreOwner
 import com.ljyh.mei.ui.navigation.MeiNavigator
@@ -1296,6 +1299,21 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                     val headerFrame = headerMotion.frame.value
+                                    val librarySharePresenter = if (SupportsDetachedLibraryShareBackdrop) {
+                                        remember(bottomControlsBackdrop, headerMotion, isLandscape, playerBottomSheetState) {
+                                            LibrarySharePresenter(bottomControlsBackdrop) {
+                                                val frame = headerMotion.frame.value
+                                                val route = navController.currentRoute
+                                                !isLandscape && !pictureInPictureMode &&
+                                                    !playerBottomSheetState.isContentVisible &&
+                                                    !playerBottomSheetState.isDragging &&
+                                                    selectionToolbar.content.value == null &&
+                                                    frame.phase == GlasmioNavigationPhase.Idle && frame.toEntryKey == route &&
+                                                    (route == Screen.Library.route ||
+                                                        route == "${Screen.LibraryCategory.route}/${LibraryPage.Songs.name}")
+                                            }
+                                        }
+                                    } else null
                                     SideEffect {
                                         // Start the locator's exit with the shared header
                                         // transition, before the outgoing page is disposed.
@@ -1485,6 +1503,7 @@ class MainActivity : ComponentActivity() {
                                                     searchMiniPlayerOffset()
                                             },
                                             LocalPlaylistLocateHost provides playlistLocateHost,
+                                            LocalLibrarySharePresenter provides librarySharePresenter,
                                         ) {
                                         GlasmioNavDisplay(
                                             sceneState = sceneState,

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +26,7 @@ import com.ljyh.mei.constants.PlayerStyle
 import com.ljyh.mei.constants.PlayerStyleKey
 import com.ljyh.mei.utils.rememberEnumPreference
 import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
+import com.ljyh.mei.ui.component.player.rememberPlayerSheetPresentation
 import com.ljyh.mei.ui.component.sheet.isUsable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
@@ -66,7 +66,8 @@ fun ClassicPlayer(
 ) {
 
     val device = rememberDeviceInfo()
-    val playerVisible by remember(state) { derivedStateOf { state.isContentVisible } }
+    val sheetPresentation = rememberPlayerSheetPresentation(state)
+    val playerVisible = sheetPresentation.isContentVisible
     val queueBackdrop = rememberRasterizedBackdrop(playerBackgroundBackdrop, enabled = playerVisible)
 
     val playerStyle by rememberEnumPreference(PlayerStyleKey, PlayerStyle.AppleMusic)
@@ -134,7 +135,7 @@ fun ClassicPlayer(
             stateContainer.playerConnection.player.stop()
             stateContainer.playerConnection.player.clearMediaItems()
         },
-        onHorizontalSwipe = if (state.isCollapsed) null else { direction ->
+        onHorizontalSwipe = if (sheetPresentation.isCollapsed) null else { direction ->
             when (direction) {
                 HorizontalSwipeDirection.Left -> stateContainer.playerConnection.seekToNext()
                 HorizontalSwipeDirection.Right -> stateContainer.playerConnection.seekToPrevious()
@@ -189,7 +190,7 @@ fun ClassicPlayer(
                         io.github.neoruaa.glasmio.glass.LocalBlurBackdrop provides queueBackdrop,
                     ) {
                         NarrowLandscapePlayer(stateContainer, overlayHandler, narrowPage,
-                            active = state.isContentVisible,
+                            active = playerVisible,
                             onPageSelected = { narrowPage = it },
                             artwork = { artworkModifier ->
                                 mediaMetadata?.let { track ->
