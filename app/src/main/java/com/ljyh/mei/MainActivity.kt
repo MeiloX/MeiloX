@@ -1219,6 +1219,7 @@ class MainActivity : ComponentActivity() {
                                     topBarMode = isLandscape,
                                     state = playerBottomSheetState,
                                     backdrop = bottomControlsBackdrop,
+                                    pageVisible = pageVisible,
                                     pageDarkAppearance = pageDarkAppearance,
                                     onBackgroundReadyChanged = onPlayerBackgroundReadyChanged,
                                 )
@@ -1650,7 +1651,17 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 // Keep expanded navigation and both compact controls below the mini-player.
-                                .zIndex(0.5f),
+                                .zIndex(0.5f)
+                                // Detach the off-screen bottom bar (and its page backdrop pyramid) from
+                                // HWUI prepareTree once the expanded player covers the viewport opaquely.
+                                .layout { measurable, constraints ->
+                                    val placeable = measurable.measure(constraints)
+                                    layout(placeable.width, placeable.height) {
+                                        if (pageVisible.value) {
+                                            placeable.place(0, 0)
+                                        }
+                                    }
+                                },
                         ) {
                             AnimatedBottomNavigationRow(
                                 compactProgress = compactNavigationProgress,
@@ -1890,6 +1901,7 @@ private fun BoxScope.AnimatedMiniPlayerLayer(
     topBarMode: Boolean,
     state: GlasmioBottomSheetState,
     backdrop: Backdrop,
+    pageVisible: State<Boolean>,
     pageDarkAppearance: Boolean?,
     onBackgroundReadyChanged: (Boolean) -> Unit,
 ) {
@@ -1902,7 +1914,15 @@ private fun BoxScope.AnimatedMiniPlayerLayer(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .zIndex(0.9f),
+            .zIndex(0.9f)
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                layout(placeable.width, placeable.height) {
+                    if (pageVisible.value) {
+                        placeable.place(0, 0)
+                    }
+                }
+            },
     ) {
         CompositionLocalProvider(
             LocalGlassBackdrop provides backdrop,
