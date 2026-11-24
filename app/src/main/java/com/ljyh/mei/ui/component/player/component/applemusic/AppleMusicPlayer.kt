@@ -71,6 +71,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.LayerOutsets
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -882,13 +884,23 @@ fun AppleMusicPlayer(
 internal fun Modifier.playerArtworkAppearance(
     frame: () -> AppleMusicArtworkFrame,
     opacity: () -> Float,
-): Modifier = graphicsLayer {
-    val current = frame()
-    val scale = (current.bounds.width / size.width.coerceAtLeast(1f)).coerceAtLeast(0.001f)
-    alpha = opacity()
-    shadowElevation = current.shadowElevation / scale
-    shape = ContinuousRoundedRectangle(current.cornerRadius / scale)
-    clip = true
+): Modifier {
+    var cachedHalfPx = Int.MIN_VALUE
+    var cachedShape: Shape = RectangleShape
+    return graphicsLayer {
+        val current = frame()
+        val scale = (current.bounds.width / size.width.coerceAtLeast(1f)).coerceAtLeast(0.001f)
+        alpha = opacity()
+        shadowElevation = current.shadowElevation / scale
+        val cornerPx = (current.cornerRadius / scale).coerceAtLeast(0f)
+        val halfPx = (cornerPx * 2f).roundToInt()
+        if (halfPx != cachedHalfPx) {
+            cachedHalfPx = halfPx
+            cachedShape = ContinuousRoundedRectangle(halfPx * 0.5f)
+        }
+        shape = cachedShape
+        clip = true
+    }
 }
 
 /** Keep expensive page state alive; only the selected page owns input and clocks. */

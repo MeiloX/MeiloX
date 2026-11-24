@@ -165,7 +165,7 @@ internal class PlayerSheetGlassMorphRenderer(
     private var nativeRecipeMultiplier = Float.NaN
     private val untintedRecipes = arrayOfNulls<NavigationMaterialRecipe>(10)
     private val dropShadow = NavigationDropShadowRenderer(
-        renderScale = minOf(renderScale, 0.25f),
+        renderScale = minOf(renderScale, 0.5f),
         cacheBlurResult = true,
         shadowRadius = materialPreset?.shadowRadius ?: 15.dp,
         shadowOffsetY = materialPreset?.shadowOffsetY ?: 8.dp,
@@ -175,7 +175,7 @@ internal class PlayerSheetGlassMorphRenderer(
     )
     private val sourceDropShadowDelegate = lazy(LazyThreadSafetyMode.NONE) {
         NavigationDropShadowRenderer(
-            renderScale = 0.25f,
+            renderScale = 0.5f,
             cacheBlurResult = true,
             useNativeProfile = true,
         )
