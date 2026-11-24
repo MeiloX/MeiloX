@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -40,12 +41,16 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -61,6 +66,7 @@ import com.ljyh.mei.constants.RecommendCardHeight
 import com.ljyh.mei.constants.RecommendCardWidth
 import io.github.neoruaa.glasmio.glass.progressiveBackdropBlur
 import com.ljyh.mei.utils.largeImage
+import kotlin.math.ceil
 import kotlin.math.max
 
 @Composable
@@ -182,6 +188,15 @@ fun RecommendCard(
     }
 }
 
+private class ArtworkExtensionCache {
+    var bitmap: Bitmap? = null
+    var size: IntSize = IntSize.Zero
+    var density: Float = Float.NaN
+    var clearHeight: Dp = Dp.Unspecified
+    var reflectionHeight: Dp = Dp.Unspecified
+    var direction: LayoutDirection? = null
+}
+
 @Composable
 private fun RecommendationArtworkExtension(
     bitmap: Bitmap,
@@ -229,36 +244,71 @@ private fun RecommendationArtworkExtension(
             nativeCanvas.restoreToCount(save)
         }
     }
+    val cachedLayer = rememberGraphicsLayer()
+    val cache = remember { ArtworkExtensionCache() }
+    // Cache the static local blur + mask strip so vertical scrolling draws one texture quad
+    // instead of re-executing 150-tap progressive blurs on every visible home card.
     Box(
-        modifier
-            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-            .drawWithCache {
-                val layerTop = cardHeight.roundToPx() - size.height
-                val mask = Brush.verticalGradient(
-                    colors = listOf(Color.Transparent, Color.Black),
-                    startY = cardHeight.toPx() * 2f / 3f - layerTop,
-                    endY = clearArtworkHeight.toPx() - layerTop,
-                )
-                onDrawWithContent {
-                    drawContent()
-                    drawRect(mask, blendMode = BlendMode.DstIn)
+        modifier.drawWithContent {
+            val layerSize = IntSize(
+                ceil(size.width).toInt().coerceAtLeast(1),
+                ceil(size.height).toInt().coerceAtLeast(1),
+            )
+            val needsRecord = cache.bitmap !== bitmap ||
+                cache.size != layerSize ||
+                cache.density != density ||
+                cache.clearHeight != clearArtworkHeight ||
+                cache.reflectionHeight != reflectionHeight ||
+                cache.direction != layoutDirection
+            if (needsRecord) {
+                cachedLayer.clip = true
+                cachedLayer.compositingStrategy =
+                    androidx.compose.ui.graphics.layer.CompositingStrategy.Offscreen
+                cachedLayer.record(this, layoutDirection, layerSize) {
+                    this@drawWithContent.drawContent()
                 }
+                cache.bitmap = bitmap
+                cache.size = layerSize
+                cache.density = density
+                cache.clearHeight = clearArtworkHeight
+                cache.reflectionHeight = reflectionHeight
+                cache.direction = layoutDirection
             }
-            .drawPlainBackdrop(
-                backdrop = backdrop,
-                shape = { RectangleShape },
-                effects = {
+            drawLayer(cachedLayer)
+        },
+    ) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithCache {
                     val layerTop = cardHeight.roundToPx() - size.height
-                    progressiveBackdropBlur(
-                        maxRadius = 100.dp.toPx(),
-                        startYFraction = (cardHeight.toPx() * 2f / 3f - layerTop) / size.height,
-                        endYFraction = 1f,
-                        startIntensity = 0f,
-                        endIntensity = 1f,
+                    val mask = Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black),
+                        startY = cardHeight.toPx() * 2f / 3f - layerTop,
+                        endY = clearArtworkHeight.toPx() - layerTop,
                     )
-                },
-            ),
-    )
+                    onDrawWithContent {
+                        drawContent()
+                        drawRect(mask, blendMode = BlendMode.DstIn)
+                    }
+                }
+                .drawPlainBackdrop(
+                    backdrop = backdrop,
+                    shape = { RectangleShape },
+                    effects = {
+                        val layerTop = cardHeight.roundToPx() - size.height
+                        progressiveBackdropBlur(
+                            maxRadius = 100.dp.toPx(),
+                            startYFraction = (cardHeight.toPx() * 2f / 3f - layerTop) / size.height,
+                            endYFraction = 1f,
+                            startIntensity = 0f,
+                            endIntensity = 1f,
+                        )
+                    },
+                ),
+        )
+    }
 }
 
 @Composable
