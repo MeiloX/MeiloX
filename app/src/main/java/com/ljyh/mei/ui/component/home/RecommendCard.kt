@@ -64,6 +64,8 @@ import com.ljyh.mei.utils.largeImage
 import kotlin.math.ceil
 import kotlin.math.max
 
+private val RecommendCardShape = ContinuousRoundedRectangle(RecommendCardCornerRadius)
+
 @Composable
 fun RecommendCard(
     cover: String,
@@ -96,8 +98,8 @@ fun RecommendCard(
     Box(
         modifier = Modifier
             .size(cardWidth, cardHeight)
-            .clip(ContinuousRoundedRectangle(RecommendCardCornerRadius))
-            .homeArtworkBorder(ContinuousRoundedRectangle(RecommendCardCornerRadius))
+            .clip(RecommendCardShape)
+            .homeArtworkBorder(RecommendCardShape)
             .background(Color.DarkGray)
             .clickable(enabled = !isLoading, onClick = onClick),
     ) {

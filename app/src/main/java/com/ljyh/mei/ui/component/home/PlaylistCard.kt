@@ -46,6 +46,8 @@ import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 import com.ljyh.mei.utils.largeImage
 
+private val PlaylistCardShape = ContinuousRoundedRectangle(8.dp)
+
 @Composable
 fun PlaylistCard(
     id: String,
@@ -69,7 +71,7 @@ fun PlaylistCard(
     Column(
         modifier = Modifier
             .width(cardSize)
-            .clip(ContinuousRoundedRectangle(8.dp)) // 整个组件裁切，防止水波纹溢出
+            .clip(PlaylistCardShape) // 整个组件裁切，防止水波纹溢出
             .clickable(
                 interactionSource = null,
                 indication = null,
@@ -78,13 +80,13 @@ fun PlaylistCard(
     ) {
         Box(
             modifier = Modifier.size(cardSize)
-                .homeArtworkBorder(ContinuousRoundedRectangle(8.dp))
+                .homeArtworkBorder(PlaylistCardShape)
         ) {
             HomeCoverImage(
                 model = coverImg.takeIf(String::isNotBlank)?.let { if (imageSize) it.largeImage() else it },
                 modifier = Modifier
                     .matchParentSize()
-                    .clip(ContinuousRoundedRectangle(8.dp)),
+                    .clip(PlaylistCardShape),
             )
 
             // 底部左侧副标题 (如果有)

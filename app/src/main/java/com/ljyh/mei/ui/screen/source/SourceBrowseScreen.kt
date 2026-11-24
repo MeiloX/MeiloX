@@ -2,7 +2,10 @@ package com.ljyh.mei.ui.screen.source
 
 import com.ljyh.mei.ui.component.item.trackPressViewport
 import com.ljyh.mei.ui.component.home.homeArtworkBorder
+import android.graphics.RenderEffect as AndroidRenderEffect
+import android.graphics.Shader
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
@@ -87,7 +90,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -192,7 +195,8 @@ import io.github.neoruaa.glasmio.ui.GlasmioAlertDialog
 import io.github.neoruaa.glasmio.ui.GlasmioGroupedList
 import io.github.neoruaa.glasmio.ui.GlasmioListRow
 import io.github.neoruaa.glasmio.ui.GlasmioCard
-import io.github.neoruaa.glasmio.scaffold.rememberGlasmioHeaderCollapse
+import io.github.neoruaa.glasmio.scaffold.rememberGlasmioHeaderCollapseState
+import io.github.neoruaa.glasmio.scaffold.rememberGlasmioHeaderScrollEdgeState
 import com.ljyh.mei.ui.screen.main.home.HomeShimmer
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -269,14 +273,19 @@ fun SourceFeedScreen(
         val device = rememberDeviceInfo()
         val discoverColumns = if (device.isTablet) ((maxWidth - 20.dp) / 176.dp).toInt().coerceAtLeast(1) else 2
         val refreshing = state.providerId == selectedId && state.refreshing
-        val collapseProgress = if (device.isLandscape) 1f else rememberGlasmioHeaderCollapse(listState)
+        val collapseState = rememberGlasmioHeaderCollapseState(listState)
+        val scrollEdgeState = rememberGlasmioHeaderScrollEdgeState(listState)
+        val collapseProvider = remember(device.isLandscape, collapseState) {
+            if (device.isLandscape) ({ 1f }) else ({ collapseState.value })
+        }
+        val scrollEdgeProvider = remember(scrollEdgeState) { { scrollEdgeState.value } }
         registerMeiloXNavigationViewport(listState)
         MeiloXPinnedPage(
             title = title,
             onNavigateBack = if (isNavigationTab) null else ({ nav.navigateUp() }),
             bottomPadding = bottom,
-            collapseProgress = collapseProgress,
-            topBarBlurProgress = rememberGlasmioHeaderScrollEdge(listState),
+            collapseProgressProvider = collapseProvider,
+            topBarBlurProgressProvider = scrollEdgeProvider,
             backgroundColor = if (glassColors.isDark) glassColors.groupedBackground else Color.White,
             actions = {
                 listOfNotNull(
@@ -311,11 +320,20 @@ fun SourceFeedScreen(
                     if (!device.isLandscape) item("source-feed-title") {
                         Text(title, style = IosTypography.largeTitle, color = glassColors.content,
                             modifier = if (kind == FeedKind.HOME) Modifier.graphicsLayer {
-                                alpha = 1f - collapseProgress
-                                scaleX = 1f - .04f * collapseProgress
+                                val collapse = collapseState.value.coerceIn(0f, 1f)
+                                alpha = 1f - collapse
+                                scaleX = 1f - .04f * collapse
                                 scaleY = scaleX
                                 transformOrigin = TransformOrigin(0f, .5f)
-                            }.blur(6.dp * collapseProgress).padding(horizontal = 16.dp)
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    val blurPx = 6.dp.toPx() * collapse
+                                    clip = blurPx >= 0.5f
+                                    renderEffect = if (blurPx >= 0.5f) {
+                                        AndroidRenderEffect.createBlurEffect(blurPx, blurPx, Shader.TileMode.CLAMP)
+                                            .asComposeRenderEffect()
+                                    } else null
+                                }
+                            }.padding(horizontal = 16.dp)
                                 else Modifier.offset(y = (-10).dp).padding(horizontal = 16.dp, vertical = 6.dp))
                     }
                     if (kind == FeedKind.DISCOVER && categories.isNotEmpty()) item("source-feed-categories") {
@@ -825,7 +843,10 @@ fun SourceLibraryScreen(
         if (query.text.isNotBlank() && !combined.loading && combined.error == null && combined.hasMore) { delay(250); more() }
     }
     val collapseDistance = with(androidx.compose.ui.platform.LocalDensity.current) { 56.dp.toPx() }
-    val collapse by remember(listState, collapseDistance) { derivedStateOf { if (listState.firstVisibleItemIndex > 0) 1f else (listState.firstVisibleItemScrollOffset / collapseDistance).coerceIn(0f, 1f) } }
+    val collapseState = remember(listState, collapseDistance) { derivedStateOf { if (listState.firstVisibleItemIndex > 0) 1f else (listState.firstVisibleItemScrollOffset / collapseDistance).coerceIn(0f, 1f) } }
+    val scrollEdgeState = rememberGlasmioHeaderScrollEdgeState(listState)
+    val collapseProvider = remember(collapseState) { { collapseState.value } }
+    val scrollEdgeProvider = remember(scrollEdgeState) { { scrollEdgeState.value } }
     val collectionLoading = combined.loading || ownState.refreshing || extra?.refreshing == true || podcastState?.isSubscriptionsLoading == true ||
         podcastState?.isLoadingMoreSubscriptions == true || cloudState?.isLoading == true ||
         cloudState?.isLoadingMore == true || historyState.isRefreshing
@@ -860,8 +881,8 @@ fun SourceLibraryScreen(
         }
     }
     registerMeiloXNavigationViewport(listState)
-    MeiloXPinnedPage(title = title, bottomPadding = bottom, collapseProgress = collapse,
-        topBarBlurProgress = rememberGlasmioHeaderScrollEdge(listState),
+    MeiloXPinnedPage(title = title, bottomPadding = bottom, collapseProgressProvider = collapseProvider,
+        topBarBlurProgressProvider = scrollEdgeProvider,
         onNavigateBack = if (showArtists) ({ showArtists = false }) else if (isNavigationTab) null else ({ nav.navigateUp() }),
         actions = { listOfNotNull(
             sourceOptionsHeaderAction("source-library-provider", "music.note.list", "切换音源", selectedId, choices.map { it.id to it.displayName }, viewModel::selectProvider),

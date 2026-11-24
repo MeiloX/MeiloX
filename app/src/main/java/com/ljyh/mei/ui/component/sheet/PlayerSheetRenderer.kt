@@ -864,23 +864,18 @@ fun BottomSheet(
             }
         }
         if (active) {
-            // Only the empty input surface is remeasured. Its bounds and continuous corners
-            // follow the drawn shell; the full-sized snapshot/background hosts keep their dimensions.
+            // Keep the active hit surface full-sized and clip hit testing in the graphics layer,
+            // avoiding per-frame re-measurement and path allocation while preserving exact shell bounds.
             Box(Modifier
-                .layout { measurable, constraints ->
-                    val bounds = layers.containerBounds
-                        .translate(-layers.hostBounds.topLeft)
-                    val placeable = measurable.measure(Constraints.fixed(
-                        bounds.width.roundToInt().coerceAtLeast(0),
-                        bounds.height.roundToInt().coerceAtLeast(0),
-                    ))
-                    layout(constraints.maxWidth, constraints.maxHeight) {
-                        placeable.place(bounds.left.roundToInt(), bounds.top.roundToInt())
-                    }
-                }
+                .fillMaxSize()
                 .graphicsLayer {
+                    val bounds = layers.containerBounds.translate(-layers.hostBounds.topLeft)
+                    val radius = layers.containerCornerRadius(expandedCornerRadius)
                     clip = true
-                    shape = ContinuousRoundedRectangle(layers.containerCornerRadius(expandedCornerRadius).toDp())
+                    shape = object : Shape {
+                        override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density) =
+                            Outline.Rounded(RoundRect(bounds, CornerRadius(radius)))
+                    }
                 }
                 .sheetGestures(state, layers, null)
                 .clearAndSetSemantics { })
