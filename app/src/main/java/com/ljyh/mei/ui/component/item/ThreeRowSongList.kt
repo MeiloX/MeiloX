@@ -141,8 +141,8 @@ internal fun HomeSongListRow(
         Modifier.fillMaxWidth()
             .clip(shape)
             .copyNameActions(
-                R.string.track_action_copy_name to title,
-                R.string.artist_action_copy_name to subtitle,
+                trackName = title,
+                artistName = subtitle,
                 enabled = true,
             )
             .clickable(interactionSource = null, indication = null, onClick = onClick),

@@ -499,30 +499,48 @@ internal fun Modifier.playerArtwork(
 }
 
 @Composable
-internal fun Modifier.preservePlayerArtworkHdr(): Modifier {
+internal fun Modifier.preservePlayerArtworkHdr(
+    clipBounds: (() -> Rect?)? = null,
+): Modifier {
     if (!usesLegacyPlayerBlendClamp()) return this
     val layers = LocalPlayerSheet.current ?: return this
-    return this then PreservePlayerArtworkHdrElement(layers)
+    return this then PreservePlayerArtworkHdrElement(layers, clipBounds)
 }
 
 private data class PreservePlayerArtworkHdrElement(
     val layers: PlayerSheetLayers,
+    val clipBounds: (() -> Rect?)?,
 ) : ModifierNodeElement<PreservePlayerArtworkHdrNode>() {
-    override fun create() = PreservePlayerArtworkHdrNode(layers)
+    override fun create() = PreservePlayerArtworkHdrNode(layers, clipBounds)
 
     override fun update(node: PreservePlayerArtworkHdrNode) {
-        node.updateSheet(layers)
+        node.updateSheet(layers, clipBounds)
     }
 }
 
 private class PreservePlayerArtworkHdrNode(
     private var layers: PlayerSheetLayers,
+    private var clipBounds: (() -> Rect?)?,
 ) : Modifier.Node(), UnplacedAwareModifierNode {
     private var registration: RegistrationHandle? = null
 
     override fun onAttach() {
-        registration = registerOnLayoutRectChanged(throttleMillis = 0, debounceMillis = 0) {
-            layers.hdrArtworkBounds[this] = requireLayoutCoordinates().boundsInRoot()
+        registration = registerOnLayoutRectChanged(throttleMillis = 0, debounceMillis = 0) { rect ->
+            val bounds = rect.boundsInRoot
+            val raw = Rect(
+                bounds.left.toFloat(),
+                bounds.top.toFloat(),
+                bounds.right.toFloat(),
+                bounds.bottom.toFloat(),
+            )
+            val clipped = clipBounds?.invoke()?.let(raw::intersect) ?: raw
+            if (clipped.isUsable()) {
+                if (layers.hdrArtworkBounds[this] != clipped) {
+                    layers.hdrArtworkBounds[this] = clipped
+                }
+            } else {
+                layers.hdrArtworkBounds.remove(this)
+            }
         }
     }
 
@@ -536,7 +554,8 @@ private class PreservePlayerArtworkHdrNode(
         onUnplaced()
     }
 
-    fun updateSheet(sheet: PlayerSheetLayers) {
+    fun updateSheet(sheet: PlayerSheetLayers, nextClipBounds: (() -> Rect?)?) {
+        clipBounds = nextClipBounds
         if (layers === sheet) return
         layers.hdrArtworkBounds.remove(this)?.let { sheet.hdrArtworkBounds[this] = it }
         layers = sheet

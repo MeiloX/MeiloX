@@ -71,8 +71,8 @@ fun Track(
             .fillMaxWidth()
             .background(if (isPlaying) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else Color.Transparent)
             .copyNameActions(
-                R.string.track_action_copy_name to track.title,
-                R.string.artist_action_copy_name to artist,
+                trackName = track.title,
+                artistName = artist,
                 enabled = copyNamesOnLongPress,
             )
             .then(

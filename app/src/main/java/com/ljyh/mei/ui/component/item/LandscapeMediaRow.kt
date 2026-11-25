@@ -41,7 +41,9 @@ import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.R
 import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.ui.component.CopyNamePopover
+import com.ljyh.mei.ui.component.LocalCopyNamePopoverHost
 import com.ljyh.mei.ui.component.copyNameActions
+import com.ljyh.mei.ui.component.copyNameGesture
 import com.ljyh.mei.ui.component.playlist.FavoriteTrackStar
 import com.ljyh.mei.ui.component.playlist.PlayingImageView
 import com.ljyh.mei.ui.component.utils.rememberDeviceInfo
@@ -104,8 +106,8 @@ internal fun LandscapeMediaRow(
         val showAlbum = album != null && maxWidth >= 1000.dp
         Column {
             Box(Modifier.copyNameActions(
-                R.string.track_action_copy_name to title,
-                R.string.artist_action_copy_name to artist,
+                trackName = title,
+                artistName = artist,
                 enabled = copyNamesOnLongPress,
             ).then(if (onClick != null) Modifier.clickable(
                 interactionSource = null,
@@ -191,8 +193,8 @@ internal fun PortraitMediaRow(
     Box(modifier.fillMaxWidth()) {
         Column {
             Box(Modifier.copyNameActions(
-                R.string.track_action_copy_name to title,
-                R.string.artist_action_copy_name to artist,
+                trackName = title,
+                artistName = artist,
                 enabled = copyNamesOnLongPress,
             ).then(if (onClick != null) Modifier.clickable(
                 interactionSource = null,
@@ -259,22 +261,47 @@ internal fun MediaRowName(
     @StringRes copyAction: Int?,
     copyName: String = text,
     maxLines: Int = 1,
+    sharedMenuAnchor: GlasmioMenuAnchorState? = null,
 ) {
-    val label: @Composable (Modifier) -> Unit = { modifier ->
+    if (copyAction == null || copyName.isBlank()) {
         Text(
             text = text,
-            modifier = modifier,
             style = style,
             color = color,
             maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
         )
+        return
     }
-    if (copyAction == null || copyName.isBlank()) {
-        label(Modifier)
+    if (LocalCopyNamePopoverHost.current != null) {
+        Text(
+            text = text,
+            modifier = Modifier.copyNameGesture(
+                name = copyName,
+                actionLabel = copyAction,
+                accessibilityOnParent = true,
+                sharedMenuAnchor = sharedMenuAnchor,
+            ),
+            style = style,
+            color = color,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+        )
     } else {
-        CopyNamePopover(name = copyName, actionLabel = copyAction, accessibilityOnParent = true) { gesture, _ ->
-            label(gesture)
+        CopyNamePopover(
+            name = copyName,
+            actionLabel = copyAction,
+            accessibilityOnParent = true,
+            sharedMenuAnchor = sharedMenuAnchor,
+        ) { gesture, _ ->
+            Text(
+                text = text,
+                modifier = gesture,
+                style = style,
+                color = color,
+                maxLines = maxLines,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

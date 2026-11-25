@@ -103,8 +103,8 @@ fun Title(
                 .then(textModifier)
                 .onGloballyPositioned(onTextPositioned)
                 .copyNameActions(
-                    R.string.track_action_copy_name to title,
-                    R.string.artist_action_copy_name to subTitle,
+                    trackName = title,
+                    artistName = subTitle,
                     enabled = actionsEnabled,
                 )
                 .clickable(
@@ -122,6 +122,7 @@ fun Title(
                     enabled = actionsEnabled,
                     accessibilityOnParent = true,
                     textAnchor = titleAnchor,
+                    observeVisibility = true,
                 ) { copyGesture, popoverVisible ->
                     PlayerMetadataTrackSwipe(modifier = copyGesture, edgeInset = marqueeEdgeWidth, enabled = enabled, pageWidth = metadataWidth) { track, allowMarquee ->
                         AppleMusicMarqueeText(
@@ -144,6 +145,7 @@ fun Title(
                 enabled = actionsEnabled,
                 accessibilityOnParent = true,
                 textAnchor = artistAnchor,
+                observeVisibility = true,
             ) { copyGesture, popoverVisible ->
                 PlayerMetadataTrackSwipe(modifier = copyGesture, edgeInset = marqueeEdgeWidth, enabled = enabled, pageWidth = metadataWidth) { track, allowMarquee ->
                     AppleMusicMarqueeText(

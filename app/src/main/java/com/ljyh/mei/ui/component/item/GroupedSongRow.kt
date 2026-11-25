@@ -3,10 +3,12 @@ package com.ljyh.mei.ui.component.item
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.ljyh.mei.R
+import com.ljyh.mei.ui.component.CopyNamePopover
+import com.ljyh.mei.ui.component.LocalCopyNamePopoverHost
 import com.ljyh.mei.ui.component.copyNameActions
-import io.github.neoruaa.glasmio.core.IosTypography
-import io.github.neoruaa.glasmio.core.LocalGlassColors
+import com.ljyh.mei.ui.component.copyNameGesture
 import io.github.neoruaa.glasmio.ui.GlasmioListRow
+import io.github.neoruaa.glasmio.ui.GlasmioListRowText
 
 @Composable
 internal fun GroupedSongRow(
@@ -19,25 +21,54 @@ internal fun GroupedSongRow(
     detail: String? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    val colors = LocalGlassColors.current
+    val hasHost = LocalCopyNamePopoverHost.current != null
     val subtitleContent: (@Composable () -> Unit)? = subtitle?.let { text ->
         @Composable {
-            MediaRowName(
-                text,
-                IosTypography.subheadline,
-                colors.secondaryContent,
-                R.string.artist_action_copy_name,
-                copyName = artist,
-            )
+            if (hasHost) {
+                GlasmioListRowText(
+                    text = text,
+                    secondary = true,
+                    modifier = Modifier.copyNameGesture(
+                        name = artist,
+                        actionLabel = R.string.artist_action_copy_name,
+                        accessibilityOnParent = true,
+                    ),
+                )
+            } else {
+                CopyNamePopover(
+                    name = artist,
+                    actionLabel = R.string.artist_action_copy_name,
+                    accessibilityOnParent = true,
+                ) { gesture, _ ->
+                    GlasmioListRowText(text = text, secondary = true, modifier = gesture)
+                }
+            }
         }
     }
     GlasmioListRow(
         titleContent = {
-            MediaRowName(title, IosTypography.body, colors.content, R.string.track_action_copy_name)
+            if (hasHost) {
+                GlasmioListRowText(
+                    text = title,
+                    modifier = Modifier.copyNameGesture(
+                        name = title,
+                        actionLabel = R.string.track_action_copy_name,
+                        accessibilityOnParent = true,
+                    ),
+                )
+            } else {
+                CopyNamePopover(
+                    name = title,
+                    actionLabel = R.string.track_action_copy_name,
+                    accessibilityOnParent = true,
+                ) { gesture, _ ->
+                    GlasmioListRowText(text = title, modifier = gesture)
+                }
+            }
         },
         modifier = Modifier.copyNameActions(
-            R.string.track_action_copy_name to title,
-            R.string.artist_action_copy_name to artist,
+            trackName = title,
+            artistName = artist,
             enabled = true,
         ),
         subtitleContent = subtitleContent,

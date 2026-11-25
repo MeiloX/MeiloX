@@ -112,8 +112,8 @@ internal fun DetailTrackRow(
     val moreButtonOffset = if (compactRows) -8.dp else 8.dp
     Box(
         Modifier.fillMaxWidth().copyNameActions(
-            R.string.track_action_copy_name to track.title,
-            R.string.artist_action_copy_name to artist,
+            trackName = track.title,
+            artistName = artist,
             enabled = copyNamesOnLongPress,
         ).then(
             if (selected == null) Modifier.clickable(interactionSource = null, indication = rowIndication, onClick = onClick)

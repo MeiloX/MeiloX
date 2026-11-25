@@ -141,6 +141,7 @@ internal fun PlayerLyricsView(
     controlsFadeRange: (Float) -> ClosedFloatingPointRange<Float>? = { null },
     isInteractive: Boolean = true,
     precomputeLineLayouts: Boolean = true,
+    isolateFadeLayer: Boolean = true,
 ) {
     val stableNormalTextStyle = remember(normalLineTextStyle) { normalLineTextStyle }
     val stableAccompanimentTextStyle =
@@ -257,9 +258,11 @@ internal fun PlayerLyricsView(
                     modifier = listModifier
                         .fillMaxSize()
                         .then(contentModifier)
-                        .graphicsLayer {
-                            compositingStrategy = CompositingStrategy.Offscreen
-                        }
+                        .then(
+                            if (isolateFadeLayer) Modifier.graphicsLayer {
+                                compositingStrategy = CompositingStrategy.Offscreen
+                            } else Modifier,
+                        )
                         .drawWithCache {
                             onDrawWithContent {
                                 drawContent()

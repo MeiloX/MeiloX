@@ -30,11 +30,21 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import android.content.pm.ActivityInfo
+import android.os.Build
+import androidx.activity.compose.LocalActivity
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.currentValueOf
+import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ExperimentalTextApi
@@ -358,10 +368,49 @@ private fun ISyncedLine.phonetic(): String? = when (this) {
     else -> null
 }
 
-private fun Modifier.lyricGlow(): Modifier = drawWithContent {
-    drawContent()
-    drawRect(
-        brush = Brush.radialGradient(listOf(Color.White.copy(.10f), Color.Transparent), radius = size.maxDimension * .62f),
-        blendMode = androidx.compose.ui.graphics.BlendMode.Plus,
-    )
+private fun Modifier.lyricGlow(): Modifier = this then LyricGlowElement
+
+private data object LyricGlowElement : ModifierNodeElement<LyricGlowNode>() {
+    override fun create() = LyricGlowNode()
+    override fun update(node: LyricGlowNode) = Unit
+    override fun InspectorInfo.inspectableProperties() { name = "lyricGlow" }
+}
+
+private class LyricGlowNode : Modifier.Node(), DrawModifierNode, CompositionLocalConsumerModifierNode {
+    private var cachedPaint: android.graphics.Paint? = null
+    private var cachedSize: androidx.compose.ui.geometry.Size = androidx.compose.ui.geometry.Size.Unspecified
+
+    override fun androidx.compose.ui.graphics.drawscope.ContentDrawScope.draw() {
+        drawContent()
+        val hdr = currentValueOf(LocalActivity)?.window?.colorMode == ActivityInfo.COLOR_MODE_HDR
+        if (hdr && Build.VERSION.SDK_INT >= 36) {
+            val paint = if (cachedPaint != null && cachedSize == size) {
+                cachedPaint!!
+            } else {
+                android.graphics.Paint().apply {
+                    xfermode = PlayerBlendApi36.additiveXfermode
+                    shader = android.graphics.RadialGradient(
+                        size.width / 2f,
+                        size.height / 2f,
+                        (size.maxDimension * 0.62f).coerceAtLeast(1f),
+                        intArrayOf(0x1AFFFFFF, 0x00FFFFFF),
+                        null,
+                        android.graphics.Shader.TileMode.CLAMP,
+                    )
+                }.also {
+                    cachedPaint = it
+                    cachedSize = size
+                }
+            }
+            drawContext.canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, paint)
+        } else {
+            drawRect(
+                brush = Brush.radialGradient(
+                    listOf(Color.White.copy(.10f), Color.Transparent),
+                    radius = size.maxDimension * .62f,
+                ),
+                blendMode = if (hdr) BlendMode.Screen else BlendMode.Plus,
+            )
+        }
+    }
 }

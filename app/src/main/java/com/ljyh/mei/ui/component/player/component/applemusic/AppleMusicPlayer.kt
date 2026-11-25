@@ -1067,7 +1067,6 @@ internal fun Modifier.playerContentFade(alpha: State<Float>): Modifier = graphic
     compositingStrategy = CompositingStrategy.ModulateAlpha
 }
 
-@Composable
 internal fun Modifier.playerAdditiveBlend(): Modifier = playerAdditiveLayer()
 
 /** Unplace hidden endpoints without changing their measured geometry. */
@@ -1079,7 +1078,6 @@ private fun Modifier.playerInfoVisibility(visible: Boolean): Modifier =
         }
     }.then(if (visible) Modifier else Modifier.clearAndSetSemantics { })
 
-@Composable
 internal fun Modifier.playerInfoMotion(
     opacity: State<Float>,
     progress: State<Float>,
@@ -1099,5 +1097,5 @@ internal fun Modifier.playerInfoMotion(
         )
     },
     // Include the leading marquee fade in the offscreen buffer.
-    layerOutsets = { layerOutsets },
+    layerOutsets = if (layerOutsets == LayerOutsets.Zero) null else { _ -> layerOutsets },
 )

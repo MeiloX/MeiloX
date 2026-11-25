@@ -16,6 +16,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.LayerOutsets
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
@@ -105,6 +107,15 @@ fun PlayerControlsSection(
     }
 }
 
+private val ProgressAdditiveOutsets: Density.(Size) -> LayerOutsets = { size ->
+    // Keep the portrait blend while allowing the pressed rail and labels to grow.
+    val horizontalOutset = (size.width * 0.05f).toDp()
+    LayerOutsets(
+        left = horizontalOutset, right = horizontalOutset,
+        top = 8.dp, bottom = 8.dp,
+    )
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 internal fun PlayerProgressSection(
@@ -131,14 +142,7 @@ internal fun PlayerProgressSection(
     } else PlayerHorizontalPadding + 8.dp
     val modifier = Modifier
         .fillMaxWidth()
-        .playerAdditiveLayer { size ->
-            // Keep the portrait blend while allowing the pressed rail and labels to grow.
-            val horizontalOutset = (size.width * 0.05f).toDp()
-            LayerOutsets(
-                left = horizontalOutset, right = horizontalOutset,
-                top = 8.dp, bottom = 8.dp,
-            )
-        }
+        .playerAdditiveLayer(layerOutsets = ProgressAdditiveOutsets)
         .padding(horizontal = progressPadding)
     val seek: (Long) -> Unit = { playerConnection.player.seekTo(it) }
     if (progressBarStyle == ProgressBarStyle.LINEAR) {

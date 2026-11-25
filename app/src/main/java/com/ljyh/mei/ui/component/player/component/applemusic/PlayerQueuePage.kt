@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.component.player.component.applemusic
 
+import com.ljyh.mei.ui.component.LocalCopyNamePopoverHost
 import com.ljyh.mei.ui.component.copyNameActions
 import com.ljyh.mei.ui.component.item.MediaRowName
 import com.ljyh.mei.ui.component.item.trackPressViewport
@@ -65,10 +66,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
@@ -81,18 +80,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.LayerOutsets
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.Remeasurement
 import androidx.compose.ui.layout.RemeasurementModifier
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.GlobalPositionAwareModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -1353,8 +1360,13 @@ fun PlayerQueuePage(
         }
     }
 
+    val copyNameHost = LocalCopyNamePopoverHost.current
+    val viewportClipBounds: () -> Rect? = {
+        viewportCoordinates?.takeIf { it.isAttached }?.boundsInRoot()
+    }
     val openEntryMenu: (String, Rect) -> Unit = { key, bounds ->
         if (menuEntryKey == null && !bounds.isEmpty) {
+            copyNameHost?.dismiss()
             entryMenuAnchor.bind(null, bounds)
             menuEntryKey = key
             menuRemovalRequested = false
@@ -1445,6 +1457,7 @@ fun PlayerQueuePage(
                             onClick = { selectEntry(entry.key) },
                             onLongClick = { openEntryMenu(entry.key, it) },
                             menuAnchor = entryMenuAnchor,
+                            viewportClipBounds = viewportClipBounds,
                         )
                     }
                 }
@@ -1525,6 +1538,7 @@ fun PlayerQueuePage(
                                 onClick = { selectEntry(entry.key) },
                                 onLongClick = { openEntryMenu(entry.key, it) },
                                 menuAnchor = entryMenuAnchor,
+                                viewportClipBounds = viewportClipBounds,
                                 selected = !inlineCurrent && entry.rawIndex == currentIndex,
                                 dragHandleModifier = Modifier.longPressDraggableHandle(
                                     enabled = rowsTransition == null,
@@ -1786,13 +1800,15 @@ internal fun QueueSongRow(
     landscapeSongListStyle: Boolean = false,
     showDivider: Boolean = true,
     menuAnchor: GlasmioMenuAnchorState? = null,
+    viewportClipBounds: (() -> Rect?)? = null,
 ) {
-    var entryCoordinates by remember(entry.key) { mutableStateOf<LayoutCoordinates?>(null) }
+    val entryCoordinates = remember(entry.key) { arrayOfNulls<LayoutCoordinates>(1) }
     val openMenu = {
-        entryCoordinates?.takeIf { it.isAttached }?.boundsInWindow()?.let(onLongClick)
+        entryCoordinates[0]?.takeIf { it.isAttached }?.boundsInWindow()?.let(onLongClick)
         Unit
     }
     val allowLongPress = interactive && enabled
+    val rowMenuAnchor = if (allowLongPress) menuAnchor ?: rememberGlasmioMenuAnchorState() else null
     val metadata = entry.mediaItem.metadata
     val display = entry.mediaItem.mediaMetadata
     val title = metadata?.title ?: display.title?.toString().orEmpty()
@@ -1812,6 +1828,14 @@ internal fun QueueSongRow(
     val press = if (rowInteraction != null) {
         Modifier.indication(rowInteraction, trackRowPressIndication(tint = Color.White))
     } else Modifier
+    val rowClick = if (interactive) {
+        Modifier.clickable(
+            enabled = enabled,
+            interactionSource = rowInteraction,
+            indication = null,
+            onClick = onClick,
+        )
+    } else Modifier
     Box(modifier.then(press)) {
         if (selected) {
             Box(
@@ -1822,49 +1846,54 @@ internal fun QueueSongRow(
         }
         Row(
             modifier = Modifier.fillMaxWidth().height(56.dp)
-                .padding(horizontal = 5.dp, vertical = if (landscapeSongListStyle) 4.dp else 5.dp),
+                .padding(horizontal = 5.dp, vertical = if (landscapeSongListStyle) 4.dp else 5.dp)
+                .onGloballyPositioned { entryCoordinates[0] = it },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.weight(1f).fillMaxHeight()
-                    .onGloballyPositioned { entryCoordinates = it }
-                    .copyNameActions(
-                        R.string.track_action_copy_name to title,
-                        R.string.artist_action_copy_name to artist,
-                        enabled = allowLongPress,
-                    )
-                    .then(if (allowLongPress) Modifier.semantics {
-                        onLongClick {
-                            openMenu()
-                            true
-                        }
-                    } else Modifier)
-                    .then(if (interactive) Modifier.clickable(
-                        enabled = enabled,
-                        interactionSource = rowInteraction,
-                        indication = null,
-                        onClick = onClick,
-                    ) else Modifier),
+                modifier = Modifier.size(coverSize)
+                    .then(rowClick)
+                    .then(if (rowMenuAnchor != null) Modifier.glasmioMenuGesture(rowMenuAnchor, openMenu) else Modifier)
+                    .clearAndSetSemantics { },
             ) {
-                if (allowLongPress) {
-                    val rowMenuAnchor = menuAnchor ?: rememberGlasmioMenuAnchorState()
-                    // Hit-test label gestures before the removal gesture on the rest of the row.
-                    Box(Modifier.matchParentSize().glasmioMenuGesture(rowMenuAnchor, openMenu))
-                }
-                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                    AsyncImage(
-                        model = coverRequest,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(coverSize)
-                            .clip(ContinuousRoundedRectangle(coverCorner))
-                            .then(normalFade)
-                            .preservePlayerArtworkHdr(),
-                    )
+                AsyncImage(
+                    model = coverRequest,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                        .clip(ContinuousRoundedRectangle(coverCorner))
+                        .then(normalFade)
+                        .preservePlayerArtworkHdr(viewportClipBounds),
+                )
+            }
+            // Share one additive/fade offscreen layer between the text labels and drag handle.
+            Row(
+                modifier = Modifier.weight(1f).fillMaxHeight().then(additiveFade),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                        .copyNameActions(
+                            trackName = title,
+                            artistName = artist,
+                            enabled = allowLongPress,
+                        )
+                        .then(if (allowLongPress) Modifier.semantics {
+                            onLongClick {
+                                openMenu()
+                                true
+                            }
+                        } else Modifier)
+                        .then(rowClick),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (rowMenuAnchor != null) {
+                        // Hit-test label gestures before the removal gesture on the rest of the row.
+                        Box(Modifier.matchParentSize().glasmioMenuGesture(rowMenuAnchor, openMenu))
+                    }
                     Column(
-                        Modifier.weight(1f)
-                            .padding(start = 12.dp, end = if (landscapeSongListStyle) 0.dp else 12.dp)
-                            .then(additiveFade),
+                        Modifier.fillMaxWidth()
+                            .padding(start = 12.dp, end = if (landscapeSongListStyle) 0.dp else 12.dp),
                     ) {
                         val titleStyle = if (landscapeSongListStyle) MaterialTheme.typography.bodyLarge else LocalTextStyle.current
                         val artistStyle = if (landscapeSongListStyle) MaterialTheme.typography.bodyMedium else LocalTextStyle.current
@@ -1877,6 +1906,7 @@ internal fun QueueSongRow(
                                 lineHeight = if (landscapeSongListStyle) 22.sp else 20.sp,
                             ),
                             copyAction = R.string.track_action_copy_name.takeIf { allowLongPress },
+                            sharedMenuAnchor = rowMenuAnchor,
                         )
                         MediaRowName(
                             text = artist,
@@ -1886,21 +1916,22 @@ internal fun QueueSongRow(
                                 lineHeight = if (landscapeSongListStyle) 18.sp else 17.sp,
                             ),
                             copyAction = R.string.artist_action_copy_name.takeIf { allowLongPress },
+                            sharedMenuAnchor = rowMenuAnchor,
                         )
                     }
                 }
-            }
-            if (dragHandleModifier != null) {
-                Box(
-                    modifier = Modifier.size(32.dp, 46.dp).then(dragHandleModifier).then(additiveFade),
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
-                    SfIcon(
-                        "line.3.horizontal",
-                        stringResource(R.string.queue_reorder),
-                        tint = Color.White.copy(alpha = 0.3f),
-                        size = 24.dp,
-                    )
+                if (dragHandleModifier != null) {
+                    Box(
+                        modifier = Modifier.size(32.dp, 46.dp).then(dragHandleModifier),
+                        contentAlignment = Alignment.CenterEnd,
+                    ) {
+                        SfIcon(
+                            "line.3.horizontal",
+                            stringResource(R.string.queue_reorder),
+                            tint = Color.White.copy(alpha = 0.3f),
+                            size = 24.dp,
+                        )
+                    }
                 }
             }
         }
@@ -1952,111 +1983,225 @@ internal fun Modifier.queueViewportFade(
     topEdgeFade: Boolean = true,
     contentTop: () -> Float = { 0f },
     layerOutsets: LayerOutsets = LayerOutsets.Zero,
-): Modifier = composed {
-    var contentCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var contentPositionInRoot by remember { mutableStateOf<Offset?>(null) }
-    val viewportLayer = if (additive) {
-        Modifier.playerAdditiveLayer { layerOutsets }
-    } else {
-        Modifier.graphicsLayer {
-            compositingStrategy = CompositingStrategy.Offscreen
-            outsets = layerOutsets
+): Modifier {
+    val base = if (additive) {
+        this.playerAdditiveLayer(
+            layerOutsets = if (layerOutsets == LayerOutsets.Zero) null else { _ -> layerOutsets },
+        )
+    } else this
+    return base then QueueViewportFadeElement(
+        viewportCoordinates = viewportCoordinates,
+        listState = listState,
+        dragFrame = dragFrame,
+        isolatedByOuterLayer = additive,
+        controlsFadeRange = controlsFadeRange,
+        topEdgeFade = topEdgeFade,
+        contentTop = contentTop,
+        layerOutsets = layerOutsets,
+    )
+}
+
+private data class QueueViewportFadeElement(
+    val viewportCoordinates: LayoutCoordinates?,
+    val listState: LazyListState,
+    val dragFrame: () -> Int,
+    val isolatedByOuterLayer: Boolean,
+    val controlsFadeRange: (Float) -> ClosedFloatingPointRange<Float>?,
+    val topEdgeFade: Boolean,
+    val contentTop: () -> Float,
+    val layerOutsets: LayerOutsets,
+) : ModifierNodeElement<QueueViewportFadeNode>() {
+    override fun create() = QueueViewportFadeNode(
+        viewportCoordinates = viewportCoordinates,
+        listState = listState,
+        dragFrame = dragFrame,
+        isolatedByOuterLayer = isolatedByOuterLayer,
+        controlsFadeRange = controlsFadeRange,
+        topEdgeFade = topEdgeFade,
+        contentTop = contentTop,
+        layerOutsets = layerOutsets,
+    )
+
+    override fun update(node: QueueViewportFadeNode) {
+        node.update(
+            viewportCoordinates = viewportCoordinates,
+            listState = listState,
+            dragFrame = dragFrame,
+            isolatedByOuterLayer = isolatedByOuterLayer,
+            controlsFadeRange = controlsFadeRange,
+            topEdgeFade = topEdgeFade,
+            contentTop = contentTop,
+            layerOutsets = layerOutsets,
+        )
+    }
+
+    override fun InspectorInfo.inspectableProperties() {
+        name = "queueViewportFade"
+    }
+}
+
+private class QueueViewportFadeNode(
+    private var viewportCoordinates: LayoutCoordinates?,
+    private var listState: LazyListState,
+    private var dragFrame: () -> Int,
+    private var isolatedByOuterLayer: Boolean,
+    private var controlsFadeRange: (Float) -> ClosedFloatingPointRange<Float>?,
+    private var topEdgeFade: Boolean,
+    private var contentTop: () -> Float,
+    private var layerOutsets: LayerOutsets,
+) : Modifier.Node(), GlobalPositionAwareModifierNode, DrawModifierNode {
+    private var contentCoordinates: LayoutCoordinates? = null
+    private var lastPositionInRoot: Offset = Offset.Unspecified
+    private var viewportBrush: Brush? = null
+    private var cachedFadeTop = Float.NaN
+    private var cachedHeight = Float.NaN
+    private var cachedTopFade = Float.NaN
+    private var cachedBottomFade = Float.NaN
+    private var controlsBrush: Brush? = null
+    private var cachedControlsStart = Float.NaN
+    private var cachedControlsEnd = Float.NaN
+
+    fun update(
+        viewportCoordinates: LayoutCoordinates?,
+        listState: LazyListState,
+        dragFrame: () -> Int,
+        isolatedByOuterLayer: Boolean,
+        controlsFadeRange: (Float) -> ClosedFloatingPointRange<Float>?,
+        topEdgeFade: Boolean,
+        contentTop: () -> Float,
+        layerOutsets: LayerOutsets,
+    ) {
+        val changed = this.viewportCoordinates !== viewportCoordinates ||
+            this.listState !== listState ||
+            this.dragFrame !== dragFrame ||
+            this.isolatedByOuterLayer != isolatedByOuterLayer ||
+            this.controlsFadeRange !== controlsFadeRange ||
+            this.topEdgeFade != topEdgeFade ||
+            this.contentTop !== contentTop ||
+            this.layerOutsets != layerOutsets
+        this.viewportCoordinates = viewportCoordinates
+        this.listState = listState
+        this.dragFrame = dragFrame
+        this.isolatedByOuterLayer = isolatedByOuterLayer
+        this.controlsFadeRange = controlsFadeRange
+        this.topEdgeFade = topEdgeFade
+        this.contentTop = contentTop
+        this.layerOutsets = layerOutsets
+        if (changed) invalidateDraw()
+    }
+
+    override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
+        contentCoordinates = coordinates
+        // LayoutCoordinates is reused while animateItem moves the row. Track its root position
+        // directly on the node so moving rows redraw without per-row SnapshotState churn.
+        val pos = coordinates.positionInRoot()
+        if (pos != lastPositionInRoot) {
+            lastPositionInRoot = pos
+            invalidateDraw()
         }
     }
-    viewportLayer
-        .onGloballyPositioned {
-            contentCoordinates = it
-            // LayoutCoordinates is reused while animateItem moves the row. Snapshot its
-            // position too so cached masks redraw as content enters the viewport.
-            contentPositionInRoot = it.positionInRoot()
-        }
-        .drawWithCache {
-            val maskLeft = -layerOutsets.left.toPx()
-            val maskSize = Size(size.width + layerOutsets.left.toPx() + layerOutsets.right.toPx(), size.height)
-            val topFadeHeight = if (topEdgeFade) 8.dp.toPx() else 0f
-            val bottomFadeHeight = 60.dp.toPx()
-            var viewportBrush: Brush? = null
-            var cachedFadeTop = Float.NaN
-            var cachedHeight = Float.NaN
-            var cachedTopFade = Float.NaN
-            var cachedBottomFade = Float.NaN
-            var controlsBrush: Brush? = null
-            var cachedControlsStart = Float.NaN
-            var cachedControlsEnd = Float.NaN
-            onDrawWithContent {
-                val layout = listState.layoutInfo
-                dragFrame()
-                val viewport = viewportCoordinates
-                val content = contentCoordinates
-                val top = if (contentPositionInRoot != null && viewport?.isAttached == true && content?.isAttached == true) {
-                    viewport.localPositionOf(content, Offset.Zero).y
-                } else null
-                val visibleTop = contentTop().coerceAtLeast(0f)
-                val clipTop = if (top != null) visibleTop - top else 0f
-                clipRect(left = maskLeft, top = clipTop.coerceIn(0f, size.height), right = maskLeft + maskSize.width) { this@onDrawWithContent.drawContent() }
-                if (top == null) return@onDrawWithContent
-                val height = (layout.viewportEndOffset - layout.viewportStartOffset).toFloat()
-                if (height <= 0f) return@onDrawWithContent
-                val controlsRange = controlsFadeRange(height)
-                val fadeTop = visibleTop.coerceAtMost(height)
-                val fadeSpan = height - fadeTop
-                val fadeHeight = fadeSpan.coerceAtLeast(1f)
-                val topFade = if (listState.canScrollBackward) (topFadeHeight / fadeHeight).coerceIn(0f, 0.5f) else 0f
-                val bottomFade = if (controlsRange == null && listState.canScrollForward) {
-                    (bottomFadeHeight / fadeHeight).coerceIn(0f, 0.5f)
-                } else 0f
-                val needsViewportMask = (topFade > 0f && top < fadeTop + fadeSpan * topFade) ||
-                    (bottomFade > 0f && top + size.height > height - fadeSpan * bottomFade)
-                val controlsStart = controlsRange?.start ?: 0f
-                val controlsEnd = controlsRange?.endInclusive ?: 0f
-                val needsControlsMask = controlsEnd > controlsStart && top + size.height > controlsStart
-                if (!needsViewportMask && !needsControlsMask) return@onDrawWithContent
 
-                // Keep shaders in viewport coordinates; scrolling only translates their draw.
-                if (needsViewportMask && (viewportBrush == null || cachedFadeTop != fadeTop ||
-                        cachedHeight != height || cachedTopFade != topFade || cachedBottomFade != bottomFade)) {
-                    viewportBrush = Brush.verticalGradient(
-                        0f to if (topFade > 0f) Color.Transparent else Color.Black,
-                        topFade to Color.Black,
-                        1f - bottomFade to Color.Black,
-                        1f to if (bottomFade > 0f) Color.Transparent else Color.Black,
-                        startY = fadeTop,
-                        endY = height,
+    override fun ContentDrawScope.draw() {
+        val maskLeft = -layerOutsets.left.toPx()
+        val maskWidth = size.width + layerOutsets.left.toPx() + layerOutsets.right.toPx()
+        val maskSize = Size(maskWidth, size.height)
+        val layout = listState.layoutInfo
+        dragFrame()
+        val viewport = viewportCoordinates
+        val content = contentCoordinates
+        val top = if (viewport?.isAttached == true && content?.isAttached == true) {
+            viewport.localPositionOf(content, Offset.Zero).y
+        } else null
+        val visibleTop = contentTop().coerceAtLeast(0f)
+        val clipTop = if (top != null) (visibleTop - top).coerceIn(0f, size.height) else 0f
+
+        if (top == null) {
+            clipRect(left = maskLeft, top = clipTop, right = maskLeft + maskWidth) { this@draw.drawContent() }
+            return
+        }
+        val height = (layout.viewportEndOffset - layout.viewportStartOffset).toFloat()
+        if (height <= 0f) {
+            clipRect(left = maskLeft, top = clipTop, right = maskLeft + maskWidth) { this@draw.drawContent() }
+            return
+        }
+
+        val topFadeHeight = if (topEdgeFade) 8.dp.toPx() else 0f
+        val bottomFadeHeight = 60.dp.toPx()
+        val controlsRange = controlsFadeRange(height)
+        val fadeTop = visibleTop.coerceAtMost(height)
+        val fadeSpan = height - fadeTop
+        val fadeHeight = fadeSpan.coerceAtLeast(1f)
+        val topFade = if (listState.canScrollBackward) (topFadeHeight / fadeHeight).coerceIn(0f, 0.5f) else 0f
+        val bottomFade = if (controlsRange == null && listState.canScrollForward) {
+            (bottomFadeHeight / fadeHeight).coerceIn(0f, 0.5f)
+        } else 0f
+        val needsViewportMask = (topFade > 0f && top < fadeTop + fadeSpan * topFade) ||
+            (bottomFade > 0f && top + size.height > height - fadeSpan * bottomFade)
+        val controlsStart = controlsRange?.start ?: 0f
+        val controlsEnd = controlsRange?.endInclusive ?: 0f
+        val needsControlsMask = controlsEnd > controlsStart && top + size.height > controlsStart
+
+        if (!needsViewportMask && !needsControlsMask) {
+            // Skip offscreen FBO isolation completely for rows outside the edge fade zones.
+            clipRect(left = maskLeft, top = clipTop, right = maskLeft + maskWidth) { this@draw.drawContent() }
+            return
+        }
+
+        // Keep shaders in viewport coordinates; scrolling only translates their draw.
+        if (needsViewportMask && (viewportBrush == null || cachedFadeTop != fadeTop ||
+                cachedHeight != height || cachedTopFade != topFade || cachedBottomFade != bottomFade)
+        ) {
+            viewportBrush = Brush.verticalGradient(
+                0f to if (topFade > 0f) Color.Transparent else Color.Black,
+                topFade to Color.Black,
+                1f - bottomFade to Color.Black,
+                1f to if (bottomFade > 0f) Color.Transparent else Color.Black,
+                startY = fadeTop,
+                endY = height,
+            )
+            cachedFadeTop = fadeTop
+            cachedHeight = height
+            cachedTopFade = topFade
+            cachedBottomFade = bottomFade
+        }
+        if (needsControlsMask && (controlsBrush == null || cachedControlsStart != controlsStart || cachedControlsEnd != controlsEnd)) {
+            controlsBrush = Brush.verticalGradient(
+                colors = listOf(Color.Black, Color.Transparent),
+                startY = controlsStart,
+                endY = controlsEnd,
+            )
+            cachedControlsStart = controlsStart
+            cachedControlsEnd = controlsEnd
+        }
+
+        val native = if (!isolatedByOuterLayer) drawContext.canvas.nativeCanvas else null
+        val checkpoint = native?.saveLayer(maskLeft, 0f, maskLeft + maskWidth, size.height, null)
+        try {
+            clipRect(left = maskLeft, top = clipTop, right = maskLeft + maskWidth) { this@draw.drawContent() }
+            translate(top = -top) {
+                if (needsViewportMask) {
+                    drawRect(
+                        brush = checkNotNull(viewportBrush),
+                        topLeft = Offset(maskLeft, top),
+                        size = maskSize,
+                        blendMode = BlendMode.DstIn,
                     )
-                    cachedFadeTop = fadeTop
-                    cachedHeight = height
-                    cachedTopFade = topFade
-                    cachedBottomFade = bottomFade
                 }
-                if (needsControlsMask && (controlsBrush == null || cachedControlsStart != controlsStart || cachedControlsEnd != controlsEnd)) {
-                    controlsBrush = Brush.verticalGradient(
-                        colors = listOf(Color.Black, Color.Transparent),
-                        startY = controlsStart,
-                        endY = controlsEnd,
+                if (needsControlsMask) {
+                    drawRect(
+                        brush = checkNotNull(controlsBrush),
+                        topLeft = Offset(maskLeft, top),
+                        size = maskSize,
+                        blendMode = BlendMode.DstIn,
                     )
-                    cachedControlsStart = controlsStart
-                    cachedControlsEnd = controlsEnd
-                }
-                translate(top = -top) {
-                    if (needsViewportMask) {
-                        drawRect(
-                            brush = checkNotNull(viewportBrush),
-                            topLeft = Offset(maskLeft, top),
-                            size = maskSize,
-                            blendMode = BlendMode.DstIn,
-                        )
-                    }
-                    if (needsControlsMask) {
-                        drawRect(
-                            brush = checkNotNull(controlsBrush),
-                            topLeft = Offset(maskLeft, top),
-                            size = maskSize,
-                            blendMode = BlendMode.DstIn,
-                        )
-                    }
                 }
             }
+        } finally {
+            if (native != null && checkpoint != null) {
+                native.restoreToCount(checkpoint)
+            }
         }
+    }
 }
 
 @Composable

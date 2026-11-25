@@ -95,8 +95,9 @@ fun PlayerHeader(
             .then(if (applyStatusBarPadding) Modifier.statusBarsPadding() else Modifier)
             .fillMaxWidth()
             .copyNameActions(
-                R.string.track_action_copy_name to mediaMetadata.title,
-                subtitleCopyAction,
+                trackName = mediaMetadata.title,
+                artistName = if (copyArtist) artistNames else null,
+                albumName = if (copyArtist) null else albumName,
                 enabled = actionsEnabled,
             )
             .then(metadataClick)
@@ -124,6 +125,7 @@ fun PlayerHeader(
                     enabled = actionsEnabled,
                     accessibilityOnParent = true,
                     textAnchor = titleAnchor,
+                    observeVisibility = true,
                 ) { copyGesture, popoverVisible ->
                     PlayerMetadataTrackSwipe(
                         modifier = copyGesture,
@@ -150,6 +152,7 @@ fun PlayerHeader(
                                 maxLines = 1,
                                 color = Color.White,
                                 overflow = TextOverflow.Ellipsis,
+                                onTextLayout = { copyAnchor?.updateLayout(it) },
                             )
                         }
                     }
@@ -163,6 +166,7 @@ fun PlayerHeader(
                     enabled = actionsEnabled,
                     accessibilityOnParent = true,
                     textAnchor = subtitleAnchor,
+                    observeVisibility = true,
                 ) { copyGesture, popoverVisible ->
                     PlayerMetadataTrackSwipe(
                         modifier = copyGesture,
@@ -195,6 +199,7 @@ fun PlayerHeader(
                                         style = subTitleStyle,
                                         maxLines = 1,
                                         softWrap = false,
+                                        onTextLayout = if (copyArtist) { layout -> copyAnchor?.updateLayout(layout) } else null,
                                         modifier = Modifier.clip(ContinuousRoundedRectangle(4.dp))
                                             .then(if (copyArtist) copyAnchor?.modifier ?: Modifier else Modifier),
                                     )
@@ -212,6 +217,7 @@ fun PlayerHeader(
                                         style = subTitleStyle,
                                         maxLines = 1,
                                         softWrap = false,
+                                        onTextLayout = if (copyArtist) null else { layout -> copyAnchor?.updateLayout(layout) },
                                         modifier = Modifier.clip(ContinuousRoundedRectangle(4.dp))
                                             .then(if (copyArtist) Modifier else copyAnchor?.modifier ?: Modifier),
                                     )

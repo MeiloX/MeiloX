@@ -33,6 +33,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import com.ljyh.mei.constants.PlayerStyle
 import com.ljyh.mei.constants.PlayerStyleKey
+import com.ljyh.mei.ui.component.CopyNamePopoverHost
 import com.ljyh.mei.ui.component.player.component.applemusic.AppleMusicPlayer
 import com.ljyh.mei.ui.component.player.component.classic.ClassicPlayer
 import com.ljyh.mei.ui.component.player.overlay.CommonOverlayHandler
@@ -264,7 +265,7 @@ fun BottomSheetPlayer(
         LocalGlassBackdrop provides playerBackdrop,
         LocalBlurBackdrop provides playerBackdrop,
     ) {
-        Box(Modifier.fillMaxSize()) {
+        CopyNamePopoverHost(Modifier.fillMaxSize()) {
             when (playerStyle) {
                 PlayerStyle.AppleMusic -> {
                     // 横屏模式下直接进入经典模式

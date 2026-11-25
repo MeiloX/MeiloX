@@ -518,6 +518,7 @@ fun LyricScreen(
                                 contentModifier = lyricContentModifier,
                                 controlsFadeRange = controlsFadeRange,
                                 isInteractive = foregroundInteractive,
+                                isolateFadeLayer = false,
                             )
                         }
                     }
@@ -672,6 +673,7 @@ private fun IncomingLyricLayer(
         controlsFadeRange = controlsFadeRange,
         isInteractive = false,
         precomputeLineLayouts = false,
+        isolateFadeLayer = false,
     )
 }
 

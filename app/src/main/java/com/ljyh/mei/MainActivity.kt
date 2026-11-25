@@ -218,6 +218,7 @@ import com.ljyh.mei.data.model.metadata
 import com.ljyh.mei.recognition.RecognitionSource
 import com.ljyh.mei.recognition.SongRecognitionSession
 import com.ljyh.mei.ui.component.ClipboardLinkPrompt
+import com.ljyh.mei.ui.component.CopyNamePopoverHost
 import com.ljyh.mei.ui.component.IconButton
 import com.ljyh.mei.ui.component.VersionUpdateAlert
 import com.ljyh.mei.ui.component.player.BottomSheetPlayer
@@ -688,6 +689,7 @@ class MainActivity : ComponentActivity() {
                             collapsed = stringResource(R.string.menu_collapsed),
                         ),
                     ) {
+                    CopyNamePopoverHost(Modifier.fillMaxSize()) {
                     BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1797,6 +1799,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         }
+                    }
                     }
                     }
                     }
