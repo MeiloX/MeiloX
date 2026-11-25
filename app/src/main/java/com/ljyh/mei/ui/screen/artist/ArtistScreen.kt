@@ -124,6 +124,7 @@ import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 import io.github.neoruaa.glasmio.ui.GlasmioButton
+import io.github.neoruaa.glasmio.ui.GlasmioTooltip
 import kotlinx.coroutines.CancellationException
 
 private val ArtistSongCoverSize = com.ljyh.mei.constants.LandscapeSongCoverSize
@@ -453,13 +454,16 @@ internal fun ArtistDetailHeader(
                         name = name,
                         actionLabel = R.string.artist_action_copy_name,
                         modifier = titlePadding,
+                        openOnClick = subtitle.isNotBlank(),
                     ) { copyModifier, _ ->
-                        Image(
-                            painter = logoPainter,
-                            contentDescription = if (subtitle.isBlank()) name else "$name, $subtitle",
-                            modifier = Modifier.size(logoWidth, logoHeight).then(copyModifier),
-                            contentScale = ContentScale.Fit,
-                        )
+                        GlasmioTooltip(text = subtitle, modifier = copyModifier) {
+                            Image(
+                                painter = logoPainter,
+                                contentDescription = name,
+                                modifier = Modifier.size(logoWidth, logoHeight),
+                                contentScale = ContentScale.Fit,
+                            )
+                        }
                     }
                 } else if (logoState != null && logoState !is AsyncImagePainter.State.Error) {
                     ShimmerHost(modifier = titlePadding.semantics { contentDescription = name }) {

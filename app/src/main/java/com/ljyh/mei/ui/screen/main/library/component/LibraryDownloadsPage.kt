@@ -408,6 +408,7 @@ internal fun DownloadLibraryRow(
             suffixColor = if (task?.status == DownloadStatus.FAILED) colors.destructive else colors.secondaryContent,
             onClick = if (entry.canPlay) onPlay else null,
             fullWidthTrackPress = true,
+            copyNamesOnLongPress = true,
             onMore = onMore,
             menuAnchorState = menuAnchorState,
             showDivider = showDivider,

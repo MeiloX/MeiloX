@@ -17,8 +17,8 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -40,7 +40,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -52,6 +51,7 @@ import com.ljyh.mei.constants.HomeSongActionSize
 import com.ljyh.mei.constants.songListCoverCornerRadius
 import com.ljyh.mei.constants.HomeSongCoverSize
 import com.ljyh.mei.constants.HomeSongRowSpacing
+import com.ljyh.mei.ui.component.copyNameActions
 import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.component.playlist.PlayingImageView
 import com.ljyh.mei.ui.component.playlist.TrackPlaybackWave
@@ -140,6 +140,11 @@ internal fun HomeSongListRow(
     Row(
         Modifier.fillMaxWidth()
             .clip(shape)
+            .copyNameActions(
+                R.string.track_action_copy_name to title,
+                R.string.artist_action_copy_name to subtitle,
+                enabled = true,
+            )
             .clickable(interactionSource = null, indication = null, onClick = onClick),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -156,22 +161,24 @@ internal fun HomeSongListRow(
             }
         }
         Column(Modifier.weight(1f)) {
-            Text(
-                title,
+            MediaRowName(
+                text = title,
                 color = MaterialTheme.colorScheme.onSurface,
-                fontSize = if (landscape) 16.sp else 14.sp,
-                lineHeight = if (landscape) androidx.compose.ui.unit.TextUnit.Unspecified else 19.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = FontWeight.Normal,
+                style = LocalTextStyle.current.copy(
+                    fontSize = if (landscape) 16.sp else 14.sp,
+                    lineHeight = if (landscape) LocalTextStyle.current.lineHeight else 19.sp,
+                    fontWeight = FontWeight.Normal,
+                ),
+                copyAction = R.string.track_action_copy_name,
             )
-            Text(
-                subtitle,
+            MediaRowName(
+                text = subtitle,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = if (landscape) 13.sp else 12.sp,
-                lineHeight = if (landscape) androidx.compose.ui.unit.TextUnit.Unspecified else 17.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                style = LocalTextStyle.current.copy(
+                    fontSize = if (landscape) 13.sp else 12.sp,
+                    lineHeight = if (landscape) LocalTextStyle.current.lineHeight else 17.sp,
+                ),
+                copyAction = R.string.artist_action_copy_name,
             )
         }
         CompositionLocalProvider(LocalViewConfiguration provides actionConfiguration) {

@@ -74,6 +74,7 @@ import io.github.neoruaa.glasmio.ui.GlasmioIconButton
 import io.github.neoruaa.glasmio.ui.GlasmioSegmentedControl
 import io.github.neoruaa.glasmio.core.IosTypography
 import io.github.neoruaa.glasmio.ui.GlasmioListRow
+import com.ljyh.mei.ui.component.item.GroupedSongRow
 import com.ljyh.mei.ui.navigation.meiloxHeaderAction
 import com.ljyh.mei.ui.navigation.MeiloXPinnedListPage
 import com.ljyh.mei.ui.navigation.MeiloXPinnedPage
@@ -600,9 +601,9 @@ fun ListeningRankScreen(userId: String, viewModel: ListeningRankViewModel = hilt
                             contentType = "account-rank-record",
                             firstItemTopPadding = 10.dp,
                         ) { record, index ->
-                            GlasmioListRow(
+                            GroupedSongRow(
                                 title = record.song.name,
-                                subtitle = record.song.artists.joinToString(" / "),
+                                artist = record.song.artists.joinToString(" / "),
                                 detail = record.playCount?.let {
                                     stringResource(R.string.listening_rank_play_count, NumberFormat.getIntegerInstance().format(it))
                                 } ?: stringResource(R.string.listening_count_unavailable),

@@ -42,9 +42,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.capsule.ContinuousRoundedRectangle
+import com.ljyh.mei.R
 import com.ljyh.mei.constants.CommonImageRadius
 import com.ljyh.mei.constants.TrackThumbnailSize
 import com.ljyh.mei.data.model.MediaMetadata
+import com.ljyh.mei.ui.component.copyNameActions
 import com.ljyh.mei.ui.component.playlist.PlayingImageView
 import com.ljyh.mei.utils.TimeUtils.formatDuration
 import com.ljyh.mei.utils.smallImage
@@ -62,10 +64,17 @@ fun Track(
     menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     val indication = if (showPressIndication) LocalIndication.current else trackRowPressIndication()
+    val artist = track.artists.joinToString(" / ") { it.name }
+    val copyNamesOnLongPress = selected == null
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(if (isPlaying) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else Color.Transparent)
+            .copyNameActions(
+                R.string.track_action_copy_name to track.title,
+                R.string.artist_action_copy_name to artist,
+                enabled = copyNamesOnLongPress,
+            )
             .then(
                 if (selected == null) Modifier.clickable(interactionSource = null, indication = indication, onClick = onClick)
                 else Modifier.selectable(
@@ -114,23 +123,21 @@ fun Track(
                 modifier = Modifier.padding(start = 16.dp).fillMaxWidth().trackDetailInkBlend(detailInkBlend),
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(
+                MediaRowName(
                     text = track.title,
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.Medium,
                         fontSize = if (isTablet) 15.sp else 16.sp
                     ),
                     color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    copyAction = R.string.track_action_copy_name.takeIf { copyNamesOnLongPress },
                 )
 
-                Text(
-                    text = track.artists.joinToString(" / ") { it.name },
+                MediaRowName(
+                    text = artist,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
                 )
             }
         }

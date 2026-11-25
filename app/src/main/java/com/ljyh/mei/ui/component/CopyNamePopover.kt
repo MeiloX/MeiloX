@@ -46,6 +46,7 @@ internal fun CopyNamePopover(
     enabled: Boolean = true,
     accessibilityOnParent: Boolean = false,
     textAnchor: CopyNameAnchor? = null,
+    openOnClick: Boolean = false,
     content: @Composable (gesture: Modifier, popoverVisible: Boolean) -> Unit,
 ) {
     val context = LocalContext.current
@@ -63,15 +64,21 @@ internal fun CopyNamePopover(
         visible = true
         true
     }
-    val gesture = if (enabled && name.isNotBlank()) {
-        Modifier.glasmioMenuGesture(anchor) { openPopover() }.then(
+    val gesture = when {
+        !enabled || name.isBlank() -> Modifier
+        openOnClick -> Modifier.clickable(
+            interactionSource = null,
+            indication = null,
+            onClickLabel = label,
+        ) { openPopover() }
+        else -> Modifier.glasmioMenuGesture(anchor) { openPopover() }.then(
             if (accessibilityOnParent) Modifier else {
                 Modifier.semantics(mergeDescendants = true) {
                     onLongClick(label, openPopover)
                 }
             },
         )
-    } else Modifier
+    }
 
     GlasmioPopover(
         visible = visible,

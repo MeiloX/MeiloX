@@ -5,6 +5,8 @@ import com.ljyh.mei.ui.component.playlist.songListDividerColor
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.height
+import com.ljyh.mei.ui.component.copyNameActions
+import com.ljyh.mei.ui.component.item.MediaRowName
 import com.ljyh.mei.ui.component.item.PortraitMediaRow
 import com.ljyh.mei.ui.component.item.TrackMenuTrigger
 import androidx.compose.foundation.background
@@ -39,7 +41,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,10 +85,12 @@ internal fun DetailTrackRow(
     val compactRows = rememberDeviceInfo().isLandscape
     val artworkSize = songListCoverSize(compactRows)
     val highlightTitle = showArtwork && isCurrentTrack && track.supportsNeteaseSongActions
+    val artist = if (showArtwork) track.artists.joinToString(" / ") { it.name } else ""
+    val copyNamesOnLongPress = selected == null
     if (!compactRows && showArtwork && selected == null) {
         PortraitMediaRow(
             image = track.coverUrl.smallImage(), title = track.title,
-            artist = track.artists.joinToString(" / ") { it.name },
+            artist = artist,
             detail = if (showDuration) formatDuration(track.duration) else "",
             onClick = onClick, modifier = Modifier, album = null, suffix = null,
             suffixColor = null, favorite = isFavorite, showDivider = false,
@@ -96,6 +99,7 @@ internal fun DetailTrackRow(
             fullWidthTrackPress = true,
             menuAnchorState = menuAnchorState,
             trackRef = track.trackRef,
+            copyNamesOnLongPress = true,
         )
         return
     }
@@ -107,7 +111,11 @@ internal fun DetailTrackRow(
         if (compactRows) 0.dp else 2.dp
     val moreButtonOffset = if (compactRows) -8.dp else 8.dp
     Box(
-        Modifier.fillMaxWidth().then(
+        Modifier.fillMaxWidth().copyNameActions(
+            R.string.track_action_copy_name to track.title,
+            R.string.artist_action_copy_name to artist,
+            enabled = copyNamesOnLongPress,
+        ).then(
             if (selected == null) Modifier.clickable(interactionSource = null, indication = rowIndication, onClick = onClick)
             else Modifier.selectable(
                 selected = selected, interactionSource = null, indication = rowIndication,
@@ -185,7 +193,7 @@ internal fun DetailTrackRow(
                 modifier = Modifier.weight(1f).detailInkBlend(),
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text(
+                MediaRowName(
                     text = track.title,
                     color = if (highlightTitle) colors.accent else colors.content,
                     style = MaterialTheme.typography.bodyLarge.copy(
@@ -193,16 +201,15 @@ internal fun DetailTrackRow(
                         lineHeight = if (compactRows) 22.sp else 20.sp,
                         fontWeight = FontWeight.Normal,
                     ),
+                    copyAction = R.string.track_action_copy_name.takeIf { copyNamesOnLongPress },
                     maxLines = if (showArtwork) 1 else 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 if (showArtwork) {
-                    Text(
-                        text = track.artists.joinToString(" / ") { it.name },
+                    MediaRowName(
+                        text = artist,
                         color = colors.secondaryContent,
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (compactRows) 13.sp else 12.sp, lineHeight = if (compactRows) 18.sp else 17.sp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
                     )
                 }
             }

@@ -91,6 +91,7 @@ import io.github.neoruaa.glasmio.ui.GlasmioSearchBar
 import io.github.neoruaa.glasmio.ui.GlasmioSegmentedControl
 import io.github.neoruaa.glasmio.ui.GlasmioGroupedList
 import io.github.neoruaa.glasmio.ui.GlasmioListRow
+import com.ljyh.mei.ui.component.item.GroupedSongRow
 import com.ljyh.mei.ui.navigation.MeiloXPinnedPage
 import com.ljyh.mei.ui.navigation.registerMeiloXNavigationViewport
 import io.github.neoruaa.glasmio.core.IosTypography
@@ -847,8 +848,9 @@ internal fun LazyListScope.libraryCloudItems(
             key = { "cloud-${it.id}" },
             contentType = "cloud-song",
         ) { song, index ->
-            GlasmioListRow(
+            GroupedSongRow(
                 title = song.name,
+                artist = song.artist,
                 subtitle = listOf(song.artist, song.album).filter(String::isNotBlank).joinToString(" · "),
                 showTopSeparator = index > 0,
                 leading = {
@@ -914,9 +916,9 @@ internal fun LazyListScope.libraryHistoryItems(
             key = { it.key },
             contentType = "history-item",
         ) { item, index ->
-            GlasmioListRow(
+            GroupedSongRow(
                 title = item.song.title,
-                subtitle = item.song.artists.joinToString(" / ") { it.name },
+                artist = item.song.artists.joinToString(" / ") { it.name },
                 detail = item.playedAt?.let { DateUtils.getRelativeTimeSpanString(it).toString() },
                 showTopSeparator = index > 0,
                 leading = {

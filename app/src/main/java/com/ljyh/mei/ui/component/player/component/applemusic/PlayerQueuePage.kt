@@ -1,5 +1,7 @@
 package com.ljyh.mei.ui.component.player.component.applemusic
 
+import com.ljyh.mei.ui.component.copyNameActions
+import com.ljyh.mei.ui.component.item.MediaRowName
 import com.ljyh.mei.ui.component.item.trackPressViewport
 import com.ljyh.mei.ui.component.item.trackRowPressIndication
 import com.ljyh.mei.ui.component.player.component.playerAdditiveLayer
@@ -16,7 +18,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Indication
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.DragInteraction
@@ -99,6 +100,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -1790,9 +1792,7 @@ internal fun QueueSongRow(
         entryCoordinates?.takeIf { it.isAttached }?.boundsInWindow()?.let(onLongClick)
         Unit
     }
-    val menuGesture = if (menuAnchor != null && interactive && enabled) {
-        Modifier.glasmioMenuGesture(menuAnchor, openMenu)
-    } else Modifier
+    val allowLongPress = interactive && enabled
     val metadata = entry.mediaItem.metadata
     val display = entry.mediaItem.mediaMetadata
     val title = metadata?.title ?: display.title?.toString().orEmpty()
@@ -1825,51 +1825,69 @@ internal fun QueueSongRow(
                 .padding(horizontal = 5.dp, vertical = if (landscapeSongListStyle) 4.dp else 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
+            Box(
                 modifier = Modifier.weight(1f).fillMaxHeight()
                     .onGloballyPositioned { entryCoordinates = it }
-                    .then(menuGesture)
-                    .then(if (interactive) Modifier.combinedClickable(
+                    .copyNameActions(
+                        R.string.track_action_copy_name to title,
+                        R.string.artist_action_copy_name to artist,
+                        enabled = allowLongPress,
+                    )
+                    .then(if (allowLongPress) Modifier.semantics {
+                        onLongClick {
+                            openMenu()
+                            true
+                        }
+                    } else Modifier)
+                    .then(if (interactive) Modifier.clickable(
                         enabled = enabled,
                         interactionSource = rowInteraction,
                         indication = null,
                         onClick = onClick,
-                        // Keep long click for accessibility, keyboard and non-touch input.
-                        onLongClick = openMenu,
                     ) else Modifier),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                AsyncImage(
-                    model = coverRequest,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(coverSize)
-                        .clip(ContinuousRoundedRectangle(coverCorner))
-                        .then(normalFade)
-                        .preservePlayerArtworkHdr(),
-                )
-                Column(Modifier.weight(1f)
-                    .padding(start = 12.dp, end = if (landscapeSongListStyle) 0.dp else 12.dp)
-                    .then(additiveFade)) {
-                    Text(
-                        title,
-                        color = Color.White.copy(alpha = 0.92f),
-                        style = if (landscapeSongListStyle) MaterialTheme.typography.bodyLarge else LocalTextStyle.current,
-                        fontSize = 16.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        lineHeight = if (landscapeSongListStyle) 22.sp else 20.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                if (allowLongPress) {
+                    val rowMenuAnchor = menuAnchor ?: rememberGlasmioMenuAnchorState()
+                    // Hit-test label gestures before the removal gesture on the rest of the row.
+                    Box(Modifier.matchParentSize().glasmioMenuGesture(rowMenuAnchor, openMenu))
+                }
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    AsyncImage(
+                        model = coverRequest,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(coverSize)
+                            .clip(ContinuousRoundedRectangle(coverCorner))
+                            .then(normalFade)
+                            .preservePlayerArtworkHdr(),
                     )
-                    Text(
-                        artist,
-                        color = Color.White.copy(alpha = 0.5f),
-                        style = if (landscapeSongListStyle) MaterialTheme.typography.bodyMedium else LocalTextStyle.current,
-                        fontSize = 13.sp,
-                        lineHeight = if (landscapeSongListStyle) 18.sp else 17.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column(
+                        Modifier.weight(1f)
+                            .padding(start = 12.dp, end = if (landscapeSongListStyle) 0.dp else 12.dp)
+                            .then(additiveFade),
+                    ) {
+                        val titleStyle = if (landscapeSongListStyle) MaterialTheme.typography.bodyLarge else LocalTextStyle.current
+                        val artistStyle = if (landscapeSongListStyle) MaterialTheme.typography.bodyMedium else LocalTextStyle.current
+                        MediaRowName(
+                            text = title,
+                            color = Color.White.copy(alpha = 0.92f),
+                            style = titleStyle.copy(
+                                fontSize = 16.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                lineHeight = if (landscapeSongListStyle) 22.sp else 20.sp,
+                            ),
+                            copyAction = R.string.track_action_copy_name.takeIf { allowLongPress },
+                        )
+                        MediaRowName(
+                            text = artist,
+                            color = Color.White.copy(alpha = 0.5f),
+                            style = artistStyle.copy(
+                                fontSize = 13.sp,
+                                lineHeight = if (landscapeSongListStyle) 18.sp else 17.sp,
+                            ),
+                            copyAction = R.string.artist_action_copy_name.takeIf { allowLongPress },
+                        )
+                    }
                 }
             }
             if (dragHandleModifier != null) {

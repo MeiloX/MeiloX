@@ -28,7 +28,7 @@ import com.ljyh.mei.data.model.toMediaItem
 import com.ljyh.mei.playback.queue.ListQueue
 import com.ljyh.mei.ui.component.globalProfileHeaderAction
 import io.github.neoruaa.glasmio.ui.GlasmioCard
-import io.github.neoruaa.glasmio.ui.GlasmioListRow
+import com.ljyh.mei.ui.component.item.GroupedSongRow
 import com.ljyh.mei.ui.navigation.MeiloXPinnedListPage
 import io.github.neoruaa.glasmio.core.IosTypography
 import io.github.neoruaa.glasmio.core.LocalGlassColors
@@ -94,9 +94,9 @@ fun HistoryScreen(
                 contentType = "history-item",
                 firstItemTopPadding = 10.dp,
             ) { item, index ->
-                GlasmioListRow(
+                GroupedSongRow(
                     title = item.song.title,
-                    subtitle = item.song.artists.joinToString(" / ") { it.name },
+                    artist = item.song.artists.joinToString(" / ") { it.name },
                     detail = item.playedAt?.let(::relativeTime),
                     showTopSeparator = index > 0,
                     leading = {

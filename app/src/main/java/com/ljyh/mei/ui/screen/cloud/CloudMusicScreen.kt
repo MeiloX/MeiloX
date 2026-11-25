@@ -46,7 +46,7 @@ import com.ljyh.mei.ui.component.globalProfileHeaderAction
 import io.github.neoruaa.glasmio.ui.GlasmioButton
 import io.github.neoruaa.glasmio.ui.GlasmioCard
 import io.github.neoruaa.glasmio.glass.GlassEmphasis
-import io.github.neoruaa.glasmio.ui.GlasmioListRow
+import com.ljyh.mei.ui.component.item.GroupedSongRow
 import com.ljyh.mei.ui.navigation.MeiloXPinnedListPage
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
@@ -341,8 +341,9 @@ fun CloudMusicScreen(
                 contentType = "cloud-song",
                 firstItemTopPadding = if (hasPreviousContent) 0.dp else 10.dp,
             ) { song, index ->
-                GlasmioListRow(
+                GroupedSongRow(
                     title = song.name,
+                    artist = song.artist,
                     subtitle = listOf(song.artist, song.album)
                         .filter(String::isNotBlank)
                         .joinToString(" · "),

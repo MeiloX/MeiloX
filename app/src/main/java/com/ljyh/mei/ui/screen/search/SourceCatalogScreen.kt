@@ -62,6 +62,7 @@ import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.scaffold.GlasmioHeaderAction
 import io.github.neoruaa.glasmio.ui.GlasmioGroupedList
 import io.github.neoruaa.glasmio.ui.GlasmioListRow
+import com.ljyh.mei.ui.component.item.GroupedSongRow
 import io.github.neoruaa.glasmio.ui.GlasmioMenu
 import io.github.neoruaa.glasmio.ui.GlasmioMenuItem
 import io.github.neoruaa.glasmio.ui.GlasmioSearchBar
@@ -170,9 +171,11 @@ fun LazyListScope.SourceTrackResults(
         contentType = "source-track",
         firstItemTopPadding = firstItemTopPadding,
     ) { track, index ->
-        GlasmioListRow(
+        val artist = track.artists.joinToString(" / ") { it.name }
+        GroupedSongRow(
             title = track.title,
-            subtitle = track.artists.joinToString(" / ") { it.name }.takeIf(String::isNotBlank),
+            artist = artist,
+            subtitle = artist.takeIf(String::isNotBlank),
             showTopSeparator = index > 0,
             leading = {
                 val context = LocalContext.current

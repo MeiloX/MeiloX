@@ -252,12 +252,13 @@ internal fun PortraitMediaRow(
 }
 
 @Composable
-private fun MediaRowName(
+internal fun MediaRowName(
     text: String,
     style: TextStyle,
     color: Color,
     @StringRes copyAction: Int?,
     copyName: String = text,
+    maxLines: Int = 1,
 ) {
     val label: @Composable (Modifier) -> Unit = { modifier ->
         Text(
@@ -265,7 +266,7 @@ private fun MediaRowName(
             modifier = modifier,
             style = style,
             color = color,
-            maxLines = 1,
+            maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
         )
     }
