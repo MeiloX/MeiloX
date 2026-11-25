@@ -530,6 +530,7 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
             detailMenuTitle = stringResource(if (ref is PlaylistRef) R.string.detail_playlist_menu else R.string.album_menu_title),
             playlistSearchQuery = query, isPlaylistSearchActive = searchActive,
             onPlaylistSearchQueryChange = { query = it }, onPlaylistSearchActiveChange = { searchActive = it; if (!it) query = "" },
+            copyTitle = ref is AlbumRef && state.title.isNotBlank(),
             useCoverBackground = true, usePlaylistPortraitHeader = ref is PlaylistRef,
             landscapeLayout = if (ref is PlaylistRef) SongListLandscapeLayout.Split else SongListLandscapeLayout.AlbumHeader,
             showTrackArtwork = ref !is AlbumRef, hasLoadedContent = state.detail != null,

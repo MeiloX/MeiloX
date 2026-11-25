@@ -101,6 +101,7 @@ import com.ljyh.mei.R
 import com.ljyh.mei.constants.DetailPageHorizontalPadding
 import com.ljyh.mei.source.core.AppleArtistLogo
 import com.ljyh.mei.source.core.displayUrl
+import com.ljyh.mei.ui.component.CopyNamePopover
 import com.ljyh.mei.ui.component.playlist.CoverBackground
 import com.ljyh.mei.ui.component.playlist.FavoriteTrackStar
 import com.ljyh.mei.ui.component.playlist.rememberCoverBackground
@@ -123,7 +124,6 @@ import io.github.neoruaa.glasmio.glass.LocalGlassBackdrop
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 import io.github.neoruaa.glasmio.ui.GlasmioButton
-import io.github.neoruaa.glasmio.ui.GlasmioTooltip
 import kotlinx.coroutines.CancellationException
 
 private val ArtistSongCoverSize = com.ljyh.mei.constants.LandscapeSongCoverSize
@@ -449,11 +449,15 @@ internal fun ArtistDetailHeader(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (logoPainter != null) {
-                    GlasmioTooltip(text = subtitle, modifier = titlePadding) {
+                    CopyNamePopover(
+                        name = name,
+                        actionLabel = R.string.artist_action_copy_name,
+                        modifier = titlePadding,
+                    ) { copyModifier, _ ->
                         Image(
                             painter = logoPainter,
-                            contentDescription = name,
-                            modifier = Modifier.size(logoWidth, logoHeight),
+                            contentDescription = if (subtitle.isBlank()) name else "$name, $subtitle",
+                            modifier = Modifier.size(logoWidth, logoHeight).then(copyModifier),
                             contentScale = ContentScale.Fit,
                         )
                     }
@@ -466,16 +470,22 @@ internal fun ArtistDetailHeader(
                         )
                     }
                 } else {
-                    Text(
-                        text = name,
-                        style = if (landscape) IosTypography.title2.copy(fontSize = 32.sp, lineHeight = 36.sp)
-                        else IosTypography.title2.copy(fontSize = 24.sp),
-                        color = colors.content,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                    CopyNamePopover(
+                        name = name,
+                        actionLabel = R.string.artist_action_copy_name,
                         modifier = titlePadding,
-                    )
+                    ) { copyModifier, _ ->
+                        Text(
+                            text = name,
+                            style = if (landscape) IosTypography.title2.copy(fontSize = 32.sp, lineHeight = 36.sp)
+                            else IosTypography.title2.copy(fontSize = 24.sp),
+                            color = colors.content,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = copyModifier,
+                        )
+                    }
                     if (subtitle.isNotBlank()) {
                         Text(
                             text = subtitle,

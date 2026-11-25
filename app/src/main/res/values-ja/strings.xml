@@ -24,6 +24,10 @@
   <string name="track_action_delete">この曲を削除</string>
   <string name="track_action_copy_name">曲名をコピー</string>
   <string name="track_action_copy_id">曲の ID をコピー</string>
+  <string name="artist_action_copy_name">アーティスト名をコピー</string>
+  <string name="album_action_copy_name">アルバム名をコピー</string>
+  <string name="name_copy_action">コピー</string>
+  <string name="name_copied">コピーしました</string>
   <string name="message_copy_content">コンテンツをコピー</string>
   <string name="add_to_playlist_title">プレイリストに追加</string>
   <string name="create_playlist_title">新規プレイリスト</string>

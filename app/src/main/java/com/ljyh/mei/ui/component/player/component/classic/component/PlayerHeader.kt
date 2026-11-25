@@ -41,14 +41,15 @@ import androidx.compose.ui.unit.dp
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.R
 import com.ljyh.mei.data.model.MediaMetadata
+import com.ljyh.mei.ui.component.CopyNameAnchor
+import com.ljyh.mei.ui.component.CopyNamePopover
+import com.ljyh.mei.ui.component.copyNameActions
 import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
 import com.ljyh.mei.ui.component.player.LocalPlayerRoamingModeLabel
 import com.ljyh.mei.ui.component.player.autoMixIncomingMetadataDominant
 import com.ljyh.mei.ui.component.player.rememberPlayerSheetPresentation
 import com.ljyh.mei.ui.component.player.component.applemusic.AppleMusicMarqueeText
 import com.ljyh.mei.ui.component.player.component.applemusic.PlayerTitleWithMode
-import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
-import io.github.neoruaa.glasmio.glass.glasmioMenuGesture
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 
@@ -67,15 +68,18 @@ fun PlayerHeader(
     onTextPositioned: (LayoutCoordinates) -> Unit = {},
     onRowPositioned: (LayoutCoordinates) -> Unit = {},
     modeLabel: String? = LocalPlayerRoamingModeLabel.current,
-    navigationMenuAnchor: GlasmioMenuAnchorState? = null,
 ) {
     var metadataWidth by remember { mutableIntStateOf(0) }
     val favoriteMotion = rememberPlayerFavoriteMotion(isLiked, mediaMetadata.id)
     val marqueeEnabled = rememberPlayerSheetPresentation(LocalPlayerSheet.current?.state).isExpanded
     val actionsEnabled = !autoMixIncomingMetadataDominant()
-    val menuGesture = if (actionsEnabled && navigationMenuAnchor != null) {
-        Modifier.glasmioMenuGesture(navigationMenuAnchor, onClick)
-    } else Modifier
+    val artistNames = mediaMetadata.artists.joinToString { it.name }
+    val albumName = mediaMetadata.album.title
+    val copyArtist = artistNames.isNotBlank()
+    val titleAnchor = remember(appleMusicStyle) { CopyNameAnchor() }
+    val subtitleAnchor = remember(appleMusicStyle) { CopyNameAnchor() }
+    val subtitleCopyAction = if (copyArtist) R.string.artist_action_copy_name to artistNames
+        else R.string.album_action_copy_name to albumName
     val metadataClick = if (appleMusicStyle) {
         Modifier.clickable(
             interactionSource = remember { MutableInteractionSource() },
@@ -90,6 +94,11 @@ fun PlayerHeader(
         modifier = modifier
             .then(if (applyStatusBarPadding) Modifier.statusBarsPadding() else Modifier)
             .fillMaxWidth()
+            .copyNameActions(
+                R.string.track_action_copy_name to mediaMetadata.title,
+                subtitleCopyAction,
+                enabled = actionsEnabled,
+            )
             .then(metadataClick)
             .onGloballyPositioned(onRowPositioned),
         verticalAlignment = Alignment.CenterVertically
@@ -102,100 +111,112 @@ fun PlayerHeader(
                     end = (if (appleMusicStyle) 0.dp else 8.dp) +
                         (if (showLikeButton) 0.dp else 2.dp),
                 )
-                .then(menuGesture)
                 .onGloballyPositioned(onTextPositioned)
                 .onSizeChanged { metadataWidth = it.width }
         ) {
-            // --- 标题部分 ---
-            if (appleMusicStyle) {
-                PlayerTitleWithMode(
-                    modeLabel, MaterialTheme.typography.titleMedium, Color.White.copy(alpha = 0.7f),
-                ) { titleModifier ->
-                    PlayerMetadataTrackSwipe(modifier = titleModifier, edgeInset = 22.5.dp, pageWidth = metadataWidth) { track, allowMarquee ->
+            PlayerTitleWithMode(
+                modeLabel, MaterialTheme.typography.titleMedium, Color.White.copy(alpha = 0.7f),
+            ) { titleModifier ->
+                CopyNamePopover(
+                    name = mediaMetadata.title,
+                    actionLabel = R.string.track_action_copy_name,
+                    modifier = titleModifier,
+                    enabled = actionsEnabled,
+                    accessibilityOnParent = true,
+                    textAnchor = titleAnchor,
+                ) { copyGesture, popoverVisible ->
+                    PlayerMetadataTrackSwipe(
+                        modifier = copyGesture,
+                        edgeInset = if (appleMusicStyle) 22.5.dp else 0.dp,
+                        pageWidth = metadataWidth,
+                    ) { track, allowMarquee ->
                         val visibleMetadata = track ?: mediaMetadata
-                        AppleMusicMarqueeText(
-                            text = visibleMetadata.title,
-                            style = MaterialTheme.typography.headlineSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                            ),
-                            color = Color.White,
-                            edgeWidth = 22.5.dp,
-                            enabled = marqueeEnabled && allowMarquee,
-                        )
-                    }
-                }
-                val subTitle = listOf(
-                    mediaMetadata.artists.joinToString(", ") { it.name },
-                    mediaMetadata.album.title,
-                ).filter { it.isNotEmpty() }.joinToString(" - ")
-                if (subTitle.isNotEmpty()) {
-                    PlayerMetadataTrackSwipe(edgeInset = 22.5.dp, pageWidth = metadataWidth) { track, allowMarquee ->
-                        val visibleMetadata = track ?: mediaMetadata
-                        AppleMusicMarqueeText(
-                            text = listOf(visibleMetadata.artists.joinToString(", ") { it.name },
-                                visibleMetadata.album.title).filter { it.isNotEmpty() }.joinToString(" - "),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White.copy(alpha = 0.7f),
-                            edgeWidth = 22.5.dp,
-                            enabled = marqueeEnabled && allowMarquee,
-                        )
-                    }
-                }
-            } else {
-                PlayerTitleWithMode(
-                    modeLabel, MaterialTheme.typography.titleMedium, Color.White.copy(alpha = 0.7f),
-                ) { titleModifier ->
-                    PlayerMetadataTrackSwipe(modifier = titleModifier, pageWidth = metadataWidth) { track, _ ->
-                        val visibleMetadata = track ?: mediaMetadata
-                        Text(
-                            text = visibleMetadata.title,
-                            style = MaterialTheme.typography.headlineSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                            ),
-                            maxLines = 1,
-                            color = Color.White,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-
-                PlayerMetadataTrackSwipe(pageWidth = metadataWidth) { track, allowMarquee ->
-                    val visibleMetadata = track ?: mediaMetadata
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                            .basicMarquee(iterations = if (allowMarquee) Int.MAX_VALUE else 0)
-                    ) {
-                        val subTitleStyle = MaterialTheme.typography.titleMedium.copy(
-                            color = Color.White.copy(alpha = 0.7f)
-                        )
-
-                        if (visibleMetadata.artists.isNotEmpty()) {
+                        val copyAnchor = titleAnchor.takeIf { allowMarquee }
+                        val titleStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
+                        if (appleMusicStyle) {
+                            AppleMusicMarqueeText(
+                                text = visibleMetadata.title,
+                                style = titleStyle,
+                                color = Color.White,
+                                edgeWidth = 22.5.dp,
+                                enabled = marqueeEnabled && allowMarquee && !popoverVisible,
+                                copyAnchor = copyAnchor,
+                            )
+                        } else {
                             Text(
-                                text = visibleMetadata.artists.joinToString(", ") { it.name },
-                                style = subTitleStyle,
+                                text = visibleMetadata.title,
+                                modifier = copyAnchor?.modifier ?: Modifier,
+                                style = titleStyle,
                                 maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.clip(ContinuousRoundedRectangle(4.dp))
+                                color = Color.White,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
+                    }
+                }
+            }
 
-                        if (visibleMetadata.artists.isNotEmpty() && visibleMetadata.album.title.isNotEmpty()) {
-                            Text(
-                                text = " - ",
+            if (!appleMusicStyle || artistNames.isNotEmpty() || albumName.isNotEmpty()) {
+                CopyNamePopover(
+                    name = subtitleCopyAction.second,
+                    actionLabel = subtitleCopyAction.first,
+                    enabled = actionsEnabled,
+                    accessibilityOnParent = true,
+                    textAnchor = subtitleAnchor,
+                ) { copyGesture, popoverVisible ->
+                    PlayerMetadataTrackSwipe(
+                        modifier = copyGesture,
+                        edgeInset = if (appleMusicStyle) 22.5.dp else 0.dp,
+                        pageWidth = metadataWidth,
+                    ) { track, allowMarquee ->
+                        val visibleMetadata = track ?: mediaMetadata
+                        val visibleArtists = visibleMetadata.artists.joinToString { it.name }
+                        val visibleAlbum = visibleMetadata.album.title
+                        val copyAnchor = subtitleAnchor.takeIf { allowMarquee }
+                        val subTitleStyle = MaterialTheme.typography.titleMedium.copy(color = Color.White.copy(alpha = 0.7f))
+                        if (appleMusicStyle) {
+                            AppleMusicMarqueeText(
+                                text = listOf(visibleArtists, visibleAlbum).filter { it.isNotEmpty() }.joinToString(" - "),
                                 style = subTitleStyle,
-                                modifier = Modifier.padding(horizontal = 2.dp)
+                                color = subTitleStyle.color,
+                                edgeWidth = 22.5.dp,
+                                enabled = marqueeEnabled && allowMarquee && !popoverVisible,
+                                copyAnchor = copyAnchor,
                             )
-                        }
-
-                        if (visibleMetadata.album.title.isNotEmpty()) {
-                            Text(
-                                text = visibleMetadata.album.title,
-                                style = subTitleStyle,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.clip(ContinuousRoundedRectangle(4.dp))
-                            )
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                                    .basicMarquee(iterations = if (allowMarquee && !popoverVisible) Int.MAX_VALUE else 0)
+                            ) {
+                                if (visibleMetadata.artists.isNotEmpty()) {
+                                    Text(
+                                        text = visibleArtists,
+                                        style = subTitleStyle,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.clip(ContinuousRoundedRectangle(4.dp))
+                                            .then(if (copyArtist) copyAnchor?.modifier ?: Modifier else Modifier),
+                                    )
+                                }
+                                if (visibleMetadata.artists.isNotEmpty() && visibleAlbum.isNotEmpty()) {
+                                    Text(
+                                        text = " - ",
+                                        style = subTitleStyle,
+                                        modifier = Modifier.padding(horizontal = 2.dp)
+                                    )
+                                }
+                                if (visibleAlbum.isNotEmpty()) {
+                                    Text(
+                                        text = visibleAlbum,
+                                        style = subTitleStyle,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.clip(ContinuousRoundedRectangle(4.dp))
+                                            .then(if (copyArtist) Modifier else copyAnchor?.modifier ?: Modifier),
+                                    )
+                                }
+                            }
                         }
                     }
                 }

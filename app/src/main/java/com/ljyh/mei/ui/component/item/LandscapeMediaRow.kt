@@ -1,6 +1,7 @@
 package com.ljyh.mei.ui.component.item
 
 import com.ljyh.mei.ui.component.playlist.songListDividerColor
+import androidx.annotation.StringRes
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import com.ljyh.mei.constants.songListCoverSize
 import com.ljyh.mei.constants.songListCoverCornerRadius
 import com.ljyh.mei.ui.screen.playlist.component.DetailTrackDivider
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -27,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +40,8 @@ import androidx.compose.foundation.shape.CircleShape
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.R
 import com.ljyh.mei.source.api.TrackRef
+import com.ljyh.mei.ui.component.CopyNamePopover
+import com.ljyh.mei.ui.component.copyNameActions
 import com.ljyh.mei.ui.component.playlist.FavoriteTrackStar
 import com.ljyh.mei.ui.component.playlist.PlayingImageView
 import com.ljyh.mei.ui.component.utils.rememberDeviceInfo
@@ -67,6 +72,7 @@ internal fun LandscapeMediaRow(
     fullWidthTrackPress: Boolean = false,
     menuAnchorState: GlasmioMenuAnchorState? = null,
     trackRef: TrackRef? = null,
+    copyNamesOnLongPress: Boolean = false,
 ) {
     val colors = LocalGlassColors.current
     if (!landscape) {
@@ -90,13 +96,18 @@ internal fun LandscapeMediaRow(
             fullWidthTrackPress = fullWidthTrackPress,
             menuAnchorState = menuAnchorState,
             trackRef = trackRef,
+            copyNamesOnLongPress = copyNamesOnLongPress,
         )
         return
     }
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val showAlbum = album != null && maxWidth >= 1000.dp
         Column {
-            Box(Modifier.then(if (onClick != null) Modifier.clickable(
+            Box(Modifier.copyNameActions(
+                R.string.track_action_copy_name to title,
+                R.string.artist_action_copy_name to artist,
+                enabled = copyNamesOnLongPress,
+            ).then(if (onClick != null) Modifier.clickable(
                 interactionSource = null,
                 indication = when {
                     fullWidthTrackPress -> trackRowPressIndication()
@@ -116,13 +127,22 @@ internal fun LandscapeMediaRow(
                 ) {
                     PlayingImageView(imageUrl = image, isPlaying = false, trackRef = trackRef,
                         modifier = Modifier.size(songListCoverSize(true)).clip(ContinuousRoundedRectangle(songListCoverCornerRadius(true))))
-                    Text(title, Modifier.weight(if (showAlbum) 1f else 1.25f),
-                        fontSize = 16.sp, fontWeight = FontWeight.Normal,
-                        color = if (isCurrentTrack) colors.accent else colors.content,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(artist, Modifier.weight(if (showAlbum) 0.85f else 1f),
-                        fontSize = 16.sp, color = colors.secondaryContent,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Box(Modifier.weight(if (showAlbum) 1f else 1.25f)) {
+                        MediaRowName(
+                            text = title,
+                            style = LocalTextStyle.current.copy(fontSize = 16.sp, fontWeight = FontWeight.Normal),
+                            color = if (isCurrentTrack) colors.accent else colors.content,
+                            copyAction = R.string.track_action_copy_name.takeIf { copyNamesOnLongPress },
+                        )
+                    }
+                    Box(Modifier.weight(if (showAlbum) 0.85f else 1f)) {
+                        MediaRowName(
+                            text = artist,
+                            style = LocalTextStyle.current.copy(fontSize = 16.sp),
+                            color = colors.secondaryContent,
+                            copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
+                        )
+                    }
                     if (showAlbum) Text(album.orEmpty(), Modifier.weight(1.35f),
                         fontSize = 16.sp, color = colors.secondaryContent,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -165,11 +185,16 @@ internal fun PortraitMediaRow(
     fullWidthTrackPress: Boolean = false,
     menuAnchorState: GlasmioMenuAnchorState? = null,
     trackRef: TrackRef? = null,
+    copyNamesOnLongPress: Boolean = false,
 ) {
     val colors = LocalGlassColors.current
     Box(modifier.fillMaxWidth()) {
         Column {
-            Box(Modifier.then(if (onClick != null) Modifier.clickable(
+            Box(Modifier.copyNameActions(
+                R.string.track_action_copy_name to title,
+                R.string.artist_action_copy_name to artist,
+                enabled = copyNamesOnLongPress,
+            ).then(if (onClick != null) Modifier.clickable(
                 interactionSource = null,
                 indication = when {
                     fullWidthTrackPress -> trackRowPressIndication()
@@ -194,21 +219,21 @@ internal fun PortraitMediaRow(
                         modifier = Modifier.size(songListCoverSize(false)).clip(ContinuousRoundedRectangle(songListCoverCornerRadius(false))),
                     )
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 20.sp),
-                            fontWeight = FontWeight.Normal,
+                        MediaRowName(
+                            text = title,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal,
+                            ),
                             color = if (isCurrentTrack) colors.accent else colors.content,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            copyAction = R.string.track_action_copy_name.takeIf { copyNamesOnLongPress },
                         )
                         val subtitle = listOf(artist, detail, suffix.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ")
-                        if (subtitle.isNotBlank()) Text(
-                            subtitle,
+                        if (subtitle.isNotBlank()) MediaRowName(
+                            text = subtitle,
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 17.sp),
                             color = colors.secondaryContent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
+                            copyName = artist,
                         )
                     }
                     if (onMore != null) {
@@ -222,6 +247,33 @@ internal fun PortraitMediaRow(
         }
         footer?.let { progress ->
             Box(Modifier.align(Alignment.BottomStart).fillMaxWidth()) { progress() }
+        }
+    }
+}
+
+@Composable
+private fun MediaRowName(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    @StringRes copyAction: Int?,
+    copyName: String = text,
+) {
+    val label: @Composable (Modifier) -> Unit = { modifier ->
+        Text(
+            text = text,
+            modifier = modifier,
+            style = style,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+    if (copyAction == null || copyName.isBlank()) {
+        label(Modifier)
+    } else {
+        CopyNamePopover(name = copyName, actionLabel = copyAction, accessibilityOnParent = true) { gesture, _ ->
+            label(gesture)
         }
     }
 }

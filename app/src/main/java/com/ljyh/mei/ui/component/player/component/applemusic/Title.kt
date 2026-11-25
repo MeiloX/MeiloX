@@ -44,10 +44,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import com.ljyh.mei.R
+import com.ljyh.mei.ui.component.CopyNameAnchor
+import com.ljyh.mei.ui.component.CopyNamePopover
+import com.ljyh.mei.ui.component.copyNameActions
 import com.ljyh.mei.ui.component.player.LocalPlayerRoamingModeLabel
 import com.ljyh.mei.ui.component.player.autoMixIncomingMetadataDominant
-import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
-import io.github.neoruaa.glasmio.glass.glasmioMenuGesture
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
 
@@ -76,7 +77,6 @@ fun Title(
     marqueeEnabled: Boolean = true,
     showLikeButton: Boolean = true,
     modeLabel: String? = LocalPlayerRoamingModeLabel.current,
-    navigationMenuAnchor: GlasmioMenuAnchorState? = null,
 ) {
     val shadowStyle = if (needShadow) Shadow(
         color = Color.Black.copy(alpha = 0.3f),
@@ -88,9 +88,8 @@ fun Title(
     var metadataWidth by remember { mutableIntStateOf(0) }
     val favoriteMotion = rememberPlayerFavoriteMotion(isLiked, title to subTitle)
     val actionsEnabled = enabled && !autoMixIncomingMetadataDominant()
-    val menuGesture = if (actionsEnabled && navigationMenuAnchor != null) {
-        Modifier.glasmioMenuGesture(navigationMenuAnchor, onTitleClick)
-    } else Modifier
+    val titleAnchor = remember { CopyNameAnchor() }
+    val artistAnchor = remember { CopyNameAnchor() }
 
     Row(
         modifier = modifier.onGloballyPositioned(onRowPositioned),
@@ -103,7 +102,11 @@ fun Title(
                 .onSizeChanged { metadataWidth = it.width; onTextSizeChanged(it) }
                 .then(textModifier)
                 .onGloballyPositioned(onTextPositioned)
-                .then(menuGesture)
+                .copyNameActions(
+                    R.string.track_action_copy_name to title,
+                    R.string.artist_action_copy_name to subTitle,
+                    enabled = actionsEnabled,
+                )
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -112,27 +115,46 @@ fun Title(
                 ),
         ) {
             PlayerTitleWithMode(modeLabel, artistStyle, artistColor) { titleModifier ->
-                PlayerMetadataTrackSwipe(modifier = titleModifier, edgeInset = marqueeEdgeWidth, enabled = enabled, pageWidth = metadataWidth) { track, allowMarquee ->
-                    AppleMusicMarqueeText(
-                        text = track?.title ?: title,
-                        style = titleStyle.copy(
-                            shadow = shadowStyle,
-                            fontWeight = titleStyle.fontWeight ?: FontWeight.Medium,
-                        ),
-                        color = Color.White,
-                        edgeWidth = marqueeEdgeWidth,
-                        enabled = marqueeEnabled && allowMarquee,
-                    )
+                CopyNamePopover(
+                    name = title,
+                    actionLabel = R.string.track_action_copy_name,
+                    modifier = titleModifier,
+                    enabled = actionsEnabled,
+                    accessibilityOnParent = true,
+                    textAnchor = titleAnchor,
+                ) { copyGesture, popoverVisible ->
+                    PlayerMetadataTrackSwipe(modifier = copyGesture, edgeInset = marqueeEdgeWidth, enabled = enabled, pageWidth = metadataWidth) { track, allowMarquee ->
+                        AppleMusicMarqueeText(
+                            text = track?.title ?: title,
+                            style = titleStyle.copy(
+                                shadow = shadowStyle,
+                                fontWeight = titleStyle.fontWeight ?: FontWeight.Medium,
+                            ),
+                            color = Color.White,
+                            edgeWidth = marqueeEdgeWidth,
+                            enabled = marqueeEnabled && allowMarquee && !popoverVisible,
+                            copyAnchor = titleAnchor.takeIf { allowMarquee },
+                        )
+                    }
                 }
             }
-            PlayerMetadataTrackSwipe(edgeInset = marqueeEdgeWidth, enabled = enabled, pageWidth = metadataWidth) { track, allowMarquee ->
-                AppleMusicMarqueeText(
-                    text = track?.artists?.joinToString { it.name } ?: subTitle,
-                    style = artistStyle,
-                    color = artistColor,
-                    edgeWidth = marqueeEdgeWidth,
-                    enabled = marqueeEnabled && allowMarquee,
-                )
+            CopyNamePopover(
+                name = subTitle,
+                actionLabel = R.string.artist_action_copy_name,
+                enabled = actionsEnabled,
+                accessibilityOnParent = true,
+                textAnchor = artistAnchor,
+            ) { copyGesture, popoverVisible ->
+                PlayerMetadataTrackSwipe(modifier = copyGesture, edgeInset = marqueeEdgeWidth, enabled = enabled, pageWidth = metadataWidth) { track, allowMarquee ->
+                    AppleMusicMarqueeText(
+                        text = track?.artists?.joinToString { it.name } ?: subTitle,
+                        style = artistStyle,
+                        color = artistColor,
+                        edgeWidth = marqueeEdgeWidth,
+                        enabled = marqueeEnabled && allowMarquee && !popoverVisible,
+                        copyAnchor = artistAnchor.takeIf { allowMarquee },
+                    )
+                }
             }
         }
 

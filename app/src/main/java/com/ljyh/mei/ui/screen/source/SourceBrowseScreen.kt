@@ -1013,6 +1013,7 @@ fun SourceLibraryScreen(
                                         detail = detailText, album = item.track.album.title,
                                         isCurrentTrack = item.ref == playingLikedTrack, fullWidthTrackPress = true,
                                         favorite = true, showDivider = item.ref != lastFilteredRef,
+                                        copyNamesOnLongPress = true,
                                         onClick = onTrackClick,
                                         onMore = onTrackMore, menuAnchorState = trackMenuAnchor, trackRef = item.ref)
                                 }

@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.kyant.capsule.ContinuousRoundedRectangle
+import com.ljyh.mei.R
 import com.ljyh.mei.data.model.mediaId
 import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.data.model.room.Song
@@ -69,6 +70,7 @@ import com.ljyh.mei.data.model.toMediaItem
 import com.ljyh.mei.data.model.toMediaMetadata
 import com.ljyh.mei.di.AppDatabase
 import com.ljyh.mei.playback.queue.ListQueue
+import com.ljyh.mei.ui.component.CopyNamePopover
 import com.ljyh.mei.ui.component.playlist.FinalPerfectCollage
 import com.ljyh.mei.ui.component.playlist.PlaylistBackground
 import com.ljyh.mei.ui.component.playlist.TrackActionMenu
@@ -314,14 +316,22 @@ private fun LocalSongListHeader(
 
         Spacer(Modifier.height(24.dp))
 
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center
-        )
+        CopyNamePopover(
+            name = title,
+            actionLabel = if (filterType == "artist") R.string.artist_action_copy_name
+                else R.string.album_action_copy_name,
+            enabled = filterType == "artist" || filterType == "album",
+        ) { copyModifier, _ ->
+            Text(
+                text = title,
+                modifier = copyModifier,
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
 
         Spacer(Modifier.height(8.dp))
 

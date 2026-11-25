@@ -124,7 +124,6 @@ fun ClassicPhoneLayout(
         // Header
         mediaMetadata?.let { it ->
             PlayerHeader(
-                navigationMenuAnchor = overlayHandler.navigationMenuAnchor,
                 showLikeButton = canLike,
                 mediaMetadata = it,
                 modifier = Modifier

@@ -59,6 +59,7 @@ import com.kyant.shapes.Capsule
 import com.ljyh.mei.R
 import com.ljyh.mei.constants.PlaylistCoverStyle
 import com.ljyh.mei.constants.PlaylistCoverStyleKey
+import com.ljyh.mei.ui.component.CopyNamePopover
 import com.ljyh.mei.ui.component.playlist.FinalPerfectCollage
 import com.ljyh.mei.ui.navigation.MeiloXPinnedListPage
 import com.ljyh.mei.utils.rememberEnumPreference
@@ -101,6 +102,7 @@ fun PlaylistHeader(
     allowActionScroll: Boolean = false,
     playlistPortrait: Boolean = false,
     topPadding: Dp = 16.dp,
+    copyTitle: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalGlassColors.current
@@ -175,22 +177,28 @@ fun PlaylistHeader(
                     horizontalAlignment =
                         if (horizontal) Alignment.Start else Alignment.CenterHorizontally,
                 ) {
-                    Text(
-                        text = if (isLoading) title.ifBlank { "MMMMMMMMMMMM" } else title,
-                        style = when {
-                            horizontal -> IosTypography.title2.copy(fontSize = 22.sp, lineHeight = 24.sp)
-                            playlistPortrait -> IosTypography.title2.copy(fontSize = 20.sp, lineHeight = 25.sp)
-                            else -> IosTypography.title2
-                        },
-                        color = colors.content,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = if (horizontal) TextAlign.Start else TextAlign.Center,
+                    CopyNamePopover(
+                        name = title,
+                        actionLabel = R.string.album_action_copy_name,
+                        enabled = copyTitle && !isLoading,
                         modifier =
                             Modifier.padding(top = if (horizontal) 0.dp else 22.dp)
-                                .padding(horizontal = if (detailAction) 0.dp else 20.dp)
-                                .headerPlaceholder(isLoading),
-                    )
+                                .padding(horizontal = if (detailAction) 0.dp else 20.dp),
+                    ) { copyModifier, _ ->
+                        Text(
+                            text = if (isLoading) title.ifBlank { "MMMMMMMMMMMM" } else title,
+                            style = when {
+                                horizontal -> IosTypography.title2.copy(fontSize = 22.sp, lineHeight = 24.sp)
+                                playlistPortrait -> IosTypography.title2.copy(fontSize = 20.sp, lineHeight = 25.sp)
+                                else -> IosTypography.title2
+                            },
+                            color = colors.content,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = if (horizontal) TextAlign.Start else TextAlign.Center,
+                            modifier = copyModifier.headerPlaceholder(isLoading),
+                        )
+                    }
                     if (creator.isNotBlank() || isLoading) {
                         Text(
                             text = if (isLoading) creator.ifBlank { "MMMMMMMM" } else creator,

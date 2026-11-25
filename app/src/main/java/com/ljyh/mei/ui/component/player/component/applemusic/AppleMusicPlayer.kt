@@ -552,7 +552,6 @@ fun AppleMusicPlayer(
                                                                 showLikeButton = canLike,
                                                                 onLikeClick = { stateContainer.playerViewModel.like(metadata) },
                                                                 onMoreClick = { overlayHandler.showMoreAction() },
-                                                                navigationMenuAnchor = overlayHandler.navigationMenuAnchor,
                                                                 onTitleClick = {
                                                                     overlayHandler.showAlbumArtist(
                                                                         metadata.album, metadata.artists, metadata.coverUrl,
@@ -667,7 +666,6 @@ fun AppleMusicPlayer(
                                 showLikeButton = canLike,
                                 onLikeClick = { stateContainer.playerViewModel.like(metadata) },
                                 onMoreClick = { overlayHandler.showMoreAction() },
-                                navigationMenuAnchor = overlayHandler.navigationMenuAnchor,
                                 onTitleClick = {
                                     overlayHandler.showAlbumArtist(
                                         metadata.album,
@@ -715,7 +713,6 @@ fun AppleMusicPlayer(
                             showLikeButton = canLike,
                             onLikeClick = { stateContainer.playerViewModel.like(metadata) },
                             onMoreClick = { overlayHandler.showMoreAction() },
-                            navigationMenuAnchor = overlayHandler.navigationMenuAnchor,
                             onTitleClick = {
                                 overlayHandler.showAlbumArtist(
                                     metadata.album,

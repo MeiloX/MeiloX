@@ -270,7 +270,6 @@ fun ClassicTabletLayout(
                                     showLikeButton = canLike,
                                     onLikeClick = { stateContainer.playerViewModel.like(it) },
                                     onMoreClick = { overlayHandler.showMoreAction() },
-                                    navigationMenuAnchor = overlayHandler.navigationMenuAnchor,
                                     onTitleClick = {
                                         overlayHandler.showAlbumArtist(
                                             it.album, it.artists, it.coverUrl,
@@ -291,7 +290,6 @@ fun ClassicTabletLayout(
                             }
                         } else {
                             PlayerHeader(
-                                navigationMenuAnchor = overlayHandler.navigationMenuAnchor,
                                 showLikeButton = canLike,
                                 mediaMetadata = it,
                                 applyStatusBarPadding = false,

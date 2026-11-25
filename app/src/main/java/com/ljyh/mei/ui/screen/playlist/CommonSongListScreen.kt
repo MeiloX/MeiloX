@@ -140,6 +140,7 @@ fun SongListDetailScreen(
     listState: androidx.compose.foundation.lazy.LazyListState =
         androidx.compose.foundation.lazy.rememberLazyListState(),
     headerMetadata: String? = null,
+    copyTitle: Boolean = false,
     footer: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null,
     loadingTrackCount: Int = 0,
     searchResultsLoading: Boolean = false,
@@ -212,6 +213,7 @@ fun SongListDetailScreen(
                     PlaylistHeader(
                         modifier = Modifier.padding(horizontal = if (!device.isLandscape && usePlaylistTrackStyle) 4.dp else 0.dp),
                         title = uiData.title,
+                        copyTitle = copyTitle,
                         metadata = headerMetadata,
                         cover = uiData.cover,
                         coverList = uiData.coverList,

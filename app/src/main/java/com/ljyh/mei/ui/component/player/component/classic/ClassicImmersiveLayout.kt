@@ -182,7 +182,6 @@ fun ClassicImmersiveLayout(
                             showLikeButton = canLike,
                             onLikeClick = { stateContainer.playerViewModel.like(metadata) },
                             onMoreClick = { overlayHandler.showMoreAction() },
-                            navigationMenuAnchor = overlayHandler.navigationMenuAnchor,
                             onTitleClick = onTitleClick,
                             titleStyle = MaterialTheme.typography.titleMedium.copy(
                                 fontSize = 18.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold,
@@ -200,7 +199,6 @@ fun ClassicImmersiveLayout(
                         )
                     } else {
                         PlayerHeader(
-                            navigationMenuAnchor = overlayHandler.navigationMenuAnchor,
                             showLikeButton = canLike,
                             modifier = headerModifier,
                             mediaMetadata = metadata,
