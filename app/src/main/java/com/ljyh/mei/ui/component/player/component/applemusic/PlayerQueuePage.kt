@@ -114,6 +114,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import com.ljyh.mei.source.script.sourceTrackArtwork
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.kyant.shapes.Capsule
 import com.ljyh.mei.R
@@ -1794,6 +1796,13 @@ internal fun QueueSongRow(
     val title = metadata?.title ?: display.title?.toString().orEmpty()
     val artist = metadata?.artists?.joinToString(", ") { it.name } ?: display.artist?.toString().orEmpty()
     val cover = metadata?.coverUrl ?: display.artworkUri?.toString().orEmpty()
+    val context = LocalContext.current
+    val coverRequest = remember(context, cover, metadata?.trackRef) {
+        ImageRequest.Builder(context)
+            .data(cover.smallImage())
+            .sourceTrackArtwork(metadata?.trackRef)
+            .build()
+    }
     val coverSize = if (landscapeSongListStyle) songListCoverSize(true) else 46.dp
     val coverCorner = if (landscapeSongListStyle) songListCoverCornerRadius(true) else 5.dp
     val dividerColor = if (landscapeSongListStyle) songListDividerColor() else Color.Transparent
@@ -1829,7 +1838,7 @@ internal fun QueueSongRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AsyncImage(
-                    model = cover.smallImage(),
+                    model = coverRequest,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.size(coverSize).clip(ContinuousRoundedRectangle(coverCorner)).then(normalFade),

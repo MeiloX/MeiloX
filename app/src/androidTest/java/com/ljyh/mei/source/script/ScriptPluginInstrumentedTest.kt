@@ -873,6 +873,89 @@ class ScriptPluginInstrumentedTest {
     }
 
     @Test
+    fun trackArtworkRecoversAnEvictedDescriptorEvenWhenTheCatalogTrackIsCached() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val runtime = ScriptRuntime(context)
+        assumeTrue(runtime.supported)
+        val suffix = java.util.UUID.randomUUID()
+        val directory = File(context.cacheDir, "artwork-repair-$suffix").apply { mkdirs() }
+        val fixture = object : android.content.ContextWrapper(context) {
+            override fun getCacheDir() = File(directory, "cache").apply { mkdirs() }
+            override fun getNoBackupFilesDir() = File(directory, "private").apply { mkdirs() }
+        }
+        val id = "org.meilox.artwork-repair-$suffix"
+        val manifest = PluginManifest.parse("""{"id":"$id","name":"Artwork repair fixture","author":"Tests",
+            "version":"1","apiVersion":2,"capabilities":["catalog.track"],
+            "permissions":{"network":["api.example.com","cdn.example.com"]}}""")
+        val registry = ProviderRegistry(emptyList())
+        val store = SourceArtworkStore(fixture, registry)
+        File(directory, "index.js").writeText("""globalThis.sourcePlugin={
+            'catalog.track':function(p){return {request:{url:'https://api.example.com/track?id='+encodeURIComponent(p.trackId)}};},
+            onResponse:function(op,r){return JSON.parse(r.body);}
+        };""")
+        val provider = ScriptMusicProvider(manifest, directory, runtime, true, emptyMap(), { true },
+            { emptyMap() }, { emptyMap() }, {}, { fail("Artwork recovery must not fail the source") }, 0,
+            artworkDirectory = File(fixture.cacheDir, "source-artwork/$id"), artworkStore = store).also(registry::register)
+        val policy = ScriptMusicProvider::class.java.getDeclaredField("network").apply { isAccessible = true }
+            .get(provider) as ScriptNetworkPolicy
+        val field = ScriptNetworkPolicy::class.java.getDeclaredField("client").apply { isAccessible = true }
+        val original = field.get(policy) as okhttp3.OkHttpClient
+        val catalogCalls = java.util.concurrent.atomic.AtomicInteger()
+        val image = Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+        )
+        try {
+            field.set(policy, original.newBuilder().addInterceptor { chain ->
+                val request = chain.request()
+                val body = if (request.url.host == "api.example.com") {
+                    val trackId = checkNotNull(request.url.queryParameter("id"))
+                    val call = catalogCalls.incrementAndGet()
+                    val variant = if (trackId == "rotating" && call == 4) "new" else "original"
+                    """{"trackId":"$trackId","title":"Fixture","artworkUrl":"https://cdn.example.com/$trackId/$variant?token=fixture-private-token"}"""
+                        .toResponseBody()
+                } else image.toResponseBody()
+                Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("Fixture")
+                    .body(body).build()
+            }.build())
+            withTimeout(30_000) {
+                for ((index, trackId) in listOf("stable", "rotating").withIndex()) {
+                    val ref = TrackRef(provider.id, trackId)
+                    val stale = checkNotNull(provider.getTrack(ref)).artworkUrl
+                    val file = File(java.net.URI(stale))
+                    assertFalse(stale.contains("fixture-private-token"))
+                    assertFalse(file.exists())
+                    assertTrue(fixture.noBackupFilesDir.resolve("source-secrets/$id-artwork-${file.name}.bin").delete())
+                    assertEquals(SourceErrorCode.MISSING_PROVIDER,
+                        (runCatching { store.resolve(stale) }.exceptionOrNull() as? SourceException)?.code)
+                    assertEquals(SourceErrorCode.MISSING_PROVIDER,
+                        (runCatching { store.resolve(stale, TrackRef("other-source", trackId)) }.exceptionOrNull() as? SourceException)?.code)
+                    assertEquals(stale, provider.getTrack(ref)?.artworkUrl)
+                    assertEquals(index * 2 + 1, catalogCalls.get())
+
+                    val firstRepair = async { store.resolve(stale, ref) }
+                    val secondRepair = async { store.resolve(stale, ref) }
+                    val repaired = firstRepair.await()
+                    assertEquals(repaired, secondRepair.await())
+                    assertEquals(trackId == "stable", repaired == stale)
+                    assertFalse(repaired.contains("fixture-private-token"))
+                    val repairedFile = File(java.net.URI(repaired))
+                    assertArrayEquals(image, repairedFile.readBytes())
+                    checkNotNull(android.graphics.BitmapFactory.decodeFile(repairedFile.path)).recycle()
+                    assertEquals(repaired, provider.getTrack(ref)?.artworkUrl)
+                    assertEquals(repaired, store.resolve(repaired))
+                    assertEquals(repaired, store.resolve(stale, ref))
+                    assertEquals(index * 2 + 2, catalogCalls.get())
+                }
+            }
+        } finally {
+            field.set(policy, original)
+            provider.enabled = false
+            PluginSecretStore(fixture).delete(id)
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
     fun cancelledLoginPublishesTheAccountRevisionAfterDurableStorageCommit() = runBlocking {
         assumeTrue(com.ljyh.mei.source.script.ScriptRuntime(InstrumentationRegistry.getInstrumentation().targetContext).supported)
         val context = InstrumentationRegistry.getInstrumentation().targetContext

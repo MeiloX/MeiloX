@@ -427,6 +427,7 @@ fun AppleMusicPlayer(
             backgroundContent = {
                 FluidBackground(
                     imageUrl = coverUrl,
+                    trackRef = mediaMetadata?.trackRef,
                     beatMeter = stateContainer.playerConnection.service.beatMeter,
                     isPlaying = isPlaying,
                     alpha = 1f,

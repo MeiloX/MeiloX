@@ -584,7 +584,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val context = this@MainActivity
                     Timber.tag("MainActivity").d("获取当前歌曲颜色: $song")
-                    val color = colorRepository.getColorOrExtract(context, song.coverUrl)
+                    val color = colorRepository.getColorOrExtract(context, song.coverUrl, song.trackRef)
                     targetThemeColor = color.takeUnless { it == Color.Black }
                     Timber.tag("MainActivity").d("获取歌曲颜色: $targetThemeColor")
 
