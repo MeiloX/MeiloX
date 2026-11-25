@@ -340,6 +340,8 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var sourceRouter: com.ljyh.mei.source.core.SourceRouter
     @Inject
+    lateinit var sourcePreferences: com.ljyh.mei.source.core.SourcePreferences
+    @Inject
     lateinit var recognitionSession: SongRecognitionSession
 
     private var userData by mutableStateOf(UserData.VISITOR)
@@ -378,6 +380,7 @@ class MainActivity : ComponentActivity() {
         CrashHandler.init(this)
         lifecycleScope.launch {
             val initialPreferences = dataStore.data.first()
+            sourcePreferences.seed(initialPreferences)
             configureGlassDynamicRange(window, hdrEnabled = initialPreferences.glassHdrOutputEnabled())
             initializeContent(initialPreferences)
         }
@@ -651,11 +654,19 @@ class MainActivity : ComponentActivity() {
                 // then sample [bottomBackdrop] without sampling themselves.
                 val bottomBackdrop = rememberLayerBackdrop()
                 val pageContentBackdrop = rememberLayerBackdrop()
+                // Sample [pageContentBackdrop] directly in normal mode so bottom controls do not
+                // pull GlasmioNavigationHeader's own nested backdrop DAG into every prepareTree walk.
+                val bottomControlsSource = if (pictureInPictureMode && playerConnection != null) {
+                    bottomBackdrop
+                } else {
+                    pageContentBackdrop
+                }
                 // Popups are hosted in a separate Android window. Wrap the recorded page layer
                 // before combining it so its sample coordinates use the popup's real screen
                 // position rather than the popup-local overshoot origin.
-                val bottomControlsBackdrop = rememberSharedGlassBackdrop(glassBackdrop, bottomBackdrop)
+                val bottomControlsBackdrop = rememberSharedGlassBackdrop(glassBackdrop, bottomControlsSource)
                 CompositionLocalProvider(
+                    com.ljyh.mei.ui.local.LocalAppPreferences provides navigationPreferences,
                     LocalGlassBackdrop provides glassBackdrop,
                     LocalGlassColors provides glassColors,
                     LocalGlassAppearance provides GlassAppearance(liquidGlassEnabled, reduceTransparency),
@@ -1289,15 +1300,19 @@ class MainActivity : ComponentActivity() {
                                     }
                                     // Match the opaque root behind transparent page content. Keep
                                     // this outside the backdrop recording so glass samples are intact.
-                                    .background(MaterialTheme.colorScheme.background)
-                                    .layerBackdrop(bottomBackdrop)
-                                    .trackBackdropPosition(bottomBackdrop),
+                                    .background(MaterialTheme.colorScheme.background),
                             ) {
                                 CompositionLocalProvider(
                                     LocalGlassBackdrop provides glassBackdrop,
                                 ) {
                                     val entryViewModelOwners = remember {
                                         mutableMapOf<String, MeiNavEntryViewModelStoreOwner>()
+                                    }
+                                    DisposableEffect(entryViewModelOwners) {
+                                        onDispose {
+                                            entryViewModelOwners.values.forEach { it.clear() }
+                                            entryViewModelOwners.clear()
+                                        }
                                     }
                                     val headerMotion = remember {
                                         GlasmioNavHeaderMotion((backStack.last() as MeiRoute).route) { from, to, pop ->
@@ -1343,7 +1358,10 @@ class MainActivity : ComponentActivity() {
                                     val viewModelEntryDecorator = remember(context) {
                                         NavEntryDecorator<NavKey>(
                                             onPop = { contentKey ->
-                                                entryViewModelOwners.remove(contentKey.toString())?.clear()
+                                                val key = contentKey.toString()
+                                                if (key !in homeNavigationRoutes) {
+                                                    entryViewModelOwners.remove(key)?.clear()
+                                                }
                                             },
                                             decorate = { entry ->
                                                 val route = entry.contentKey.toString()
@@ -1531,6 +1549,7 @@ class MainActivity : ComponentActivity() {
                                             // The scene-state overload needs this callback for in-content swipe back.
                                             onBack = { navController.popBackStack() },
                                             swipeBackEnabled = !active && !playerContentVisible,
+                                            retainedTabKeys = homeNavigationRoutes,
                                             modifier = Modifier.fillMaxSize(),
                                             transitionSpec = {
                                                 if (usesHomeAlphaTransition()) {

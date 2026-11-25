@@ -33,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -40,6 +42,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -215,13 +218,17 @@ private fun RecommendationArtworkExtension(
     val sourceLayer = rememberGraphicsLayer()
     val cachedLayer = rememberGraphicsLayer()
     val cache = remember { ArtworkExtensionCache() }
-    // Cache the static local blur + mask strip so vertical scrolling draws one texture quad
-    // instead of re-executing 150-tap progressive blurs on every visible home card.
+    // Cache the static local blur + mask strip at half resolution (preserving the exact
+    // 150px-capped Gaussian sigma) so tab switches and scrolling cut progressive blur work ~8x.
     Box(
         modifier.drawBehind {
             val layerSize = IntSize(
                 ceil(size.width).toInt().coerceAtLeast(1),
                 ceil(size.height).toInt().coerceAtLeast(1),
+            )
+            val blurSize = IntSize(
+                ceil(size.width * 0.5f).toInt().coerceAtLeast(1),
+                ceil(size.height * 0.5f).toInt().coerceAtLeast(1),
             )
             val needsRecord = cache.bitmap !== bitmap ||
                 cache.size != layerSize ||
@@ -231,6 +238,9 @@ private fun RecommendationArtworkExtension(
                 cache.direction != layoutDirection
             if (needsRecord) {
                 val drawSize = size
+                val blurDrawSize = Size(blurSize.width.toFloat(), blurSize.height.toFloat())
+                val scaleX = blurDrawSize.width / drawSize.width
+                val scaleY = blurDrawSize.height / drawSize.height
                 val clearHeight = clearArtworkHeight.roundToPx().toFloat()
                 val cardHeightPx = cardHeight.roundToPx().toFloat()
                 val layerTop = cardHeightPx - drawSize.height
@@ -244,17 +254,18 @@ private fun RecommendationArtworkExtension(
                     .toInt().coerceIn(0, bitmap.height - 1)
                 sourceLayer.clip = true
                 sourceLayer.renderEffect = createProgressiveBackdropBlurRenderEffect(
-                    size = drawSize,
-                    maxRadius = 100.dp.toPx(),
+                    size = blurDrawSize,
+                    maxRadius = 100.dp.toPx().coerceAtMost(150f) * scaleY,
                     startYFraction = (cardHeight.toPx() * 2f / 3f - layerTop) / drawSize.height,
                     endYFraction = 1f,
                     startIntensity = 0f,
                     endIntensity = 1f,
                 )
-                sourceLayer.record(this, layoutDirection, layerSize) {
+                sourceLayer.record(this, layoutDirection, blurSize) {
                     drawIntoCanvas { canvas ->
                         val nativeCanvas = canvas.nativeCanvas
                         val save = nativeCanvas.save()
+                        nativeCanvas.scale(scaleX, scaleY)
                         nativeCanvas.translate(0f, -layerTop)
 
                         // The blur transition samples the same center-cropped cover as the visible artwork.
@@ -276,13 +287,13 @@ private fun RecommendationArtworkExtension(
                 }
                 val mask = Brush.verticalGradient(
                     colors = listOf(Color.Transparent, Color.Black),
-                    startY = cardHeight.toPx() * 2f / 3f - layerTop,
-                    endY = clearArtworkHeight.toPx() - layerTop,
+                    startY = (cardHeight.toPx() * 2f / 3f - layerTop) * scaleY,
+                    endY = (clearArtworkHeight.toPx() - layerTop) * scaleY,
                 )
                 cachedLayer.clip = true
                 cachedLayer.compositingStrategy =
                     androidx.compose.ui.graphics.layer.CompositingStrategy.Offscreen
-                cachedLayer.record(this, layoutDirection, layerSize) {
+                cachedLayer.record(this, layoutDirection, blurSize) {
                     drawLayer(sourceLayer)
                     drawRect(mask, blendMode = BlendMode.DstIn)
                 }
@@ -293,7 +304,13 @@ private fun RecommendationArtworkExtension(
                 cache.reflectionHeight = reflectionHeight
                 cache.direction = layoutDirection
             }
-            drawLayer(cachedLayer)
+            scale(
+                scaleX = size.width / blurSize.width.toFloat(),
+                scaleY = size.height / blurSize.height.toFloat(),
+                pivot = Offset.Zero,
+            ) {
+                drawLayer(cachedLayer)
+            }
         },
     )
 }
