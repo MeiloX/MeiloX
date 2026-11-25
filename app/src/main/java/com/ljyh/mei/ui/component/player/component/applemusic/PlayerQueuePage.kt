@@ -2,6 +2,8 @@ package com.ljyh.mei.ui.component.player.component.applemusic
 
 import com.ljyh.mei.ui.component.item.trackPressViewport
 import com.ljyh.mei.ui.component.item.trackRowPressIndication
+import com.ljyh.mei.ui.component.player.component.playerAdditiveLayer
+import com.ljyh.mei.ui.component.sheet.preservePlayerArtworkHdr
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import android.widget.Toast
@@ -1841,7 +1843,10 @@ internal fun QueueSongRow(
                     model = coverRequest,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(coverSize).clip(ContinuousRoundedRectangle(coverCorner)).then(normalFade),
+                    modifier = Modifier.size(coverSize)
+                        .clip(ContinuousRoundedRectangle(coverCorner))
+                        .then(normalFade)
+                        .preservePlayerArtworkHdr(),
                 )
                 Column(Modifier.weight(1f)
                     .padding(start = 12.dp, end = if (landscapeSongListStyle) 0.dp else 12.dp)
@@ -1932,11 +1937,15 @@ internal fun Modifier.queueViewportFade(
 ): Modifier = composed {
     var contentCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var contentPositionInRoot by remember { mutableStateOf<Offset?>(null) }
-    graphicsLayer {
-        blendMode = if (additive) BlendMode.Plus else BlendMode.SrcOver
-        compositingStrategy = CompositingStrategy.Offscreen
-        outsets = layerOutsets
+    val viewportLayer = if (additive) {
+        Modifier.playerAdditiveLayer { layerOutsets }
+    } else {
+        Modifier.graphicsLayer {
+            compositingStrategy = CompositingStrategy.Offscreen
+            outsets = layerOutsets
+        }
     }
+    viewportLayer
         .onGloballyPositioned {
             contentCoordinates = it
             // LayoutCoordinates is reused while animateItem moves the row. Snapshot its
