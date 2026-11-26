@@ -261,8 +261,10 @@ fun CommonOverlayHandler(
                 onDismiss = overlayHandler::dismiss,
                 viewModel = sourceViewModel,
                 playerViewModel = playerViewModel,
+                onAddToPlaylist = { overlayHandler.showAddToPlaylist(overlay.track) },
                 onShare = { overlayHandler.showShare(overlay.track) },
                 onDownloadTrack = { quality -> playerViewModel.downloadSong(overlay.track, context, quality) },
+                onNavigate = collapsePlayer,
             )
         }
     }

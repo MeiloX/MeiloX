@@ -103,6 +103,8 @@ import io.github.neoruaa.glasmio.ui.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 internal fun navigateSourceContent(nav: MeiNavigator, ref: ContentRef) {
@@ -1091,6 +1093,7 @@ fun SourcePlaylistEditorScreen(providerId: String, playlistId: String? = null, v
 
 @Composable
 fun SourcePlaylistPickerScreen(track: TrackRef, viewModel: SourceContentViewModel = hiltViewModel()) {
+    // Retain the destination for navigation stacks saved before the picker moved to a sheet.
     val nav = LocalNavController.current
     SourcePlaylistPicker(track, viewModel, onDismiss = { nav.navigateUp() }, asSheet = false)
 }
@@ -1099,7 +1102,7 @@ fun SourcePlaylistPickerScreen(track: TrackRef, viewModel: SourceContentViewMode
 internal fun SourcePlaylistPickerSheet(
     track: TrackRef,
     onDismiss: () -> Unit,
-    viewModel: SourceContentViewModel = hiltViewModel(key = "player-playlist-picker"),
+    viewModel: SourceContentViewModel = hiltViewModel(key = "playlist-picker"),
 ) {
     SourcePlaylistPicker(track, viewModel, onDismiss, asSheet = true)
 }
@@ -1119,16 +1122,32 @@ private fun SourcePlaylistPicker(
     var showCreate by remember(track.providerId, provider, state.accountRevision) { mutableStateOf(false) }
     val canCreate = SourceCapability.PLAYLIST_EDIT in provider?.capabilities.orEmpty() &&
         PlaylistEditAction.CREATE in (provider as? PlaylistEditCapability)?.playlistEditActions.orEmpty()
+    val currentAccountRevision by remember(provider) {
+        (provider as? AccountRevisionCapability)?.accountRevision ?: flowOf(null)
+    }.collectAsState(initial = ((provider as? AccountRevisionCapability)?.accountRevision as? StateFlow<String?>)?.value)
     LaunchedEffect(track) {
         if (asSheet) viewModel.dismissMessage()
-        viewModel.open(SourceContentRequest.Library(LibraryCollection.CREATED_PLAYLISTS, track.providerId))
+        viewModel.open(SourceContentRequest.Library(
+            LibraryCollection.CREATED_PLAYLISTS, track.providerId, includeLikedPlaylist = true,
+        ))
     }
-    // A player overlay can reopen for another source while its previous library is still loaded.
-    val pickerState = if (asSheet && state.providerId != track.providerId) {
+    if (asSheet) {
+        DisposableEffect(viewModel) {
+            onDispose { viewModel.close() }
+        }
+    }
+    // A sheet can reopen for another source or account while its previous library is still loaded.
+    val pickerState = if (asSheet && (state.providerId != track.providerId ||
+            provider != null && (state.providerVersion != provider.version || state.accountRevision != currentAccountRevision))) {
         SourceContentState(loading = true)
     } else state
-    val editable = pickerState.items.filterIsInstance<SourceItem.PlaylistItem>()
-        .filter { PlaylistEditAction.ADD_TRACKS in it.playlist.editableActions }
+    val likedPlaylist = pickerState.likedPlaylist
+    val playlists = buildList {
+        likedPlaylist?.let { add(SourceItem.PlaylistItem(it)) }
+        addAll(pickerState.items.filterIsInstance<SourceItem.PlaylistItem>().filter {
+            it.ref != likedPlaylist?.ref && PlaylistEditAction.ADD_TRACKS in it.playlist.editableActions
+        })
+    }
     val dismissal = if (asSheet) rememberMeiloXSheetDismissal(onDismiss) else null
     val onAdded: () -> Unit = if (dismissal != null) {
         { dismissal.requestDismiss() }
@@ -1141,17 +1160,18 @@ private fun SourcePlaylistPicker(
                     onClick = { showCreate = true })
             }
         }
-        groupedLazyItems(editable, key = { it.ref.playlistId }, firstItemTopPadding = if (asSheet || canCreate) 0.dp else 10.dp) { item, index ->
+        groupedLazyItems(playlists, key = { it.ref.playlistId }, firstItemTopPadding = if (asSheet || canCreate) 0.dp else 10.dp) { item, index ->
             GlasmioListRow(item.title, showTopSeparator = index > 0, enabled = !busy && dismissal?.isDismissing != true,
-                onClick = { viewModel.addTracks(item.ref, listOf(track), onAdded) })
+                onClick = { viewModel.addTrackToPlaylist(item.ref, track, onAdded) })
         }
-        sourceContentStatus(pickerState.copy(items = editable), viewModel::refresh, viewModel::loadMore)
+        sourceContentStatus(pickerState.copy(items = playlists), viewModel::refresh, viewModel::loadMore)
     }
+    val title = stringResource(R.string.add_to_playlist_title)
     if (dismissal != null) {
-        AddToPlaylistSheet(stringResource(R.string.add_to_playlist_title), dismissal, content = rows)
+        AddToPlaylistSheet(title, dismissal, content = rows)
     } else {
         MeiloXPinnedListPage(
-            "添加到歌单",
+            title,
             onNavigateBack = onDismiss,
             bottomPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues().calculateBottomPadding(),
             verticalArrangement = Arrangement.spacedBy(0.dp),

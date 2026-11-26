@@ -22,6 +22,8 @@
     <string name="track_action_add_playlist">添加到歌单</string>
     <string name="track_action_download">下载</string>
     <string name="track_action_delete">删除此歌曲</string>
+    <string name="track_action_favorite">收藏歌曲</string>
+    <string name="track_action_unfavorite">取消收藏歌曲</string>
     <string name="track_action_copy_name">复制歌名</string>
     <string name="track_action_copy_id">复制歌曲 ID</string>
     <string name="artist_action_copy_name">复制歌手名</string>

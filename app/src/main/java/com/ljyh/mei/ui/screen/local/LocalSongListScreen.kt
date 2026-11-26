@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.local
 
+import android.net.Uri
 import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.navigation.MeiloXLoadingPage
 import androidx.compose.ui.geometry.Rect
@@ -86,8 +87,8 @@ import io.github.neoruaa.glasmio.icons.SfIcon
 import com.ljyh.mei.ui.local.LocalNavController
 import com.ljyh.mei.ui.local.LocalPlayerAwareWindowInsets
 import com.ljyh.mei.ui.local.LocalPlayerConnection
+import com.ljyh.mei.ui.screen.Screen
 import com.ljyh.mei.ui.screen.playlist.component.PlaylistTrackList
-import com.ljyh.mei.utils.setClipboard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -240,14 +241,23 @@ fun LocalSongListScreen(
             )
         }
         actionTrack?.let { track ->
+            fun openCollection(type: String, name: String) {
+                Screen.LocalSongList.navigate(navController) {
+                    addPath(type)
+                    addPath(Uri.encode(name))
+                }
+            }
             TrackActionMenu(
                 targetTrack = track,
                 anchorBounds = actionAnchor,
                 menuAnchorState = trackMenuAnchor,
                 onShare = if (track.isLocal || track.isPodcast) null else ({ shareTrack = track }),
                 onDismiss = { actionTrack = null },
-                onCopyId = { setClipboard(context, track.trackRef.trackId, "id") },
-                onCopyName = { setClipboard(context, track.title, "name") },
+                artistActions = track.artists.map { it.name }.filter(String::isNotBlank).distinct()
+                    .map { name -> name to { openCollection("artist", name) } },
+                onOpenAlbum = track.album.title.takeIf(String::isNotBlank)?.let { name ->
+                    { openCollection("album", name) }
+                },
             )
         }
     }

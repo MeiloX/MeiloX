@@ -592,8 +592,9 @@ fun navigationEntry(
                         }
                     }
                     "artist", "album" -> {
-                        filterValue = name
-                        title = name
+                        val decoded = android.net.Uri.decode(name)
+                        filterValue = decoded
+                        title = decoded
                     }
                     else -> {
                         filterValue = name

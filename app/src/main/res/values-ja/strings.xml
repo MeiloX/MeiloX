@@ -22,6 +22,8 @@
   <string name="track_action_add_playlist">プレイリストに追加</string>
   <string name="track_action_download">ダウンロード</string>
   <string name="track_action_delete">この曲を削除</string>
+  <string name="track_action_favorite">曲をお気に入りに追加</string>
+  <string name="track_action_unfavorite">曲をお気に入りから削除</string>
   <string name="track_action_copy_name">曲名をコピー</string>
   <string name="track_action_copy_id">曲の ID をコピー</string>
   <string name="artist_action_copy_name">アーティスト名をコピー</string>

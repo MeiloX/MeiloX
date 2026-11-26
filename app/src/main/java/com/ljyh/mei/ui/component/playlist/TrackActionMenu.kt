@@ -1,20 +1,30 @@
 package com.ljyh.mei.ui.component.playlist
 
 import android.widget.Toast
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.ljyh.mei.R
 import com.ljyh.mei.constants.MusicQuality
 import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.data.model.toMediaItem
+import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
+import io.github.neoruaa.glasmio.icons.SfIcon
+import io.github.neoruaa.glasmio.icons.SfSymbol
 import io.github.neoruaa.glasmio.ui.GlasmioCascadingMenu
 import io.github.neoruaa.glasmio.ui.GlasmioCascadingMenuItem
 import com.ljyh.mei.ui.local.LocalPlayerConnection
@@ -32,8 +42,9 @@ fun TrackActionMenu(
     onAddToPlaylist: (() -> Unit)? = null,
     onDownloadTrack: ((MusicQuality) -> Unit)? = null,
     onDelete: () -> Unit = {},
-    onCopyId: () -> Unit,
-    onCopyName: () -> Unit,
+    favoriteAction: GlasmioCascadingMenuItem? = null,
+    artistActions: List<Pair<String, () -> Unit>> = emptyList(),
+    onOpenAlbum: (() -> Unit)? = null,
     anchorBounds: Rect? = null,
     onShare: (() -> Unit)? = null,
     deleteEnabled: Boolean = true,
@@ -125,16 +136,33 @@ fun TrackActionMenu(
             onClick = { onDelete() },
         )
     }
-    items += GlasmioCascadingMenuItem(
-        title = stringResource(R.string.track_action_copy_name),
-        systemName = "square.on.square",
-        onClick = onCopyName,
-    )
-    items += GlasmioCascadingMenuItem(
-        title = stringResource(R.string.track_action_copy_id),
-        systemName = "info.circle",
-        onClick = onCopyId,
-    )
+    onOpenAlbum?.let { open ->
+        items += GlasmioCascadingMenuItem(
+            title = stringResource(R.string.player_navigation_album),
+            subtitle = targetTrack.album.title,
+            icon = {
+                val tint = LocalGlassColors.current.content
+                Box(
+                    Modifier.size(16.dp).border(1.5.dp, tint, RoundedCornerShape(2.5.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    SfIcon(SfSymbol.MusicNote, null, tint = tint, size = 10.dp)
+                }
+            },
+            onClick = open,
+        )
+    }
+    if (artistActions.isNotEmpty()) {
+        items += GlasmioCascadingMenuItem(
+            title = stringResource(R.string.player_navigation_artist),
+            systemName = "microphone.dynamic.on.stand",
+            children = if (artistActions.size > 1) artistActions.map { (name, open) ->
+                GlasmioCascadingMenuItem(title = name, onClick = open)
+            } else emptyList(),
+            onClick = artistActions.first().second,
+        )
+    }
+    favoriteAction?.let(items::add)
     GlasmioCascadingMenu(
         anchorBounds = anchorBounds,
         menuAnchorState = menuAnchorState,

@@ -1,22 +1,18 @@
 package com.ljyh.mei.ui.screen.playlist.component
 
-import android.net.Uri
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.ljyh.mei.constants.MusicQuality
 import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.data.model.room.Playlist
-import com.ljyh.mei.source.api.TrackRefCodec
 import com.ljyh.mei.ui.component.player.OverlayState
 import com.ljyh.mei.ui.component.player.PlayerViewModel
 import com.ljyh.mei.ui.component.player.component.sheet.SongInfoSheet
 import com.ljyh.mei.ui.component.playlist.CreatePlaylistSheet
-import com.ljyh.mei.ui.local.LocalNavController
-import com.ljyh.mei.ui.screen.Screen
 import com.ljyh.mei.ui.screen.source.SourceContentViewModel
+import com.ljyh.mei.ui.screen.source.SourcePlaylistPickerSheet
 import com.ljyh.mei.ui.screen.source.SourceTrackActions
 import com.ljyh.mei.ui.screen.source.SourceTrackActionMessage
 
@@ -32,7 +28,6 @@ fun PlaylistActionOverlay(
     playerViewModel: PlayerViewModel = hiltViewModel(),
     sourceViewModel: SourceContentViewModel = hiltViewModel(),
 ) {
-    val nav = LocalNavController.current
     when (overlay) {
         is OverlayState.Share -> com.ljyh.mei.ui.screen.social.NeteaseShareSheet(
             metadata = overlay.metadata, onDismiss = onDismiss,
@@ -43,12 +38,7 @@ fun PlaylistActionOverlay(
             }
             SongInfoSheet(metadata = overlay.metadata, qqSongId = qqSongId, onDismissRequest = onDismiss)
         }
-        is OverlayState.AddToPlaylist -> LaunchedEffect(overlay.track) {
-            onDismiss()
-            Screen.SourcePlaylistPicker.navigate(nav) {
-                addPath(Uri.encode(TrackRefCodec.encode(overlay.track)))
-            }
-        }
+        is OverlayState.AddToPlaylist -> SourcePlaylistPickerSheet(overlay.track, onDismiss)
         is OverlayState.TrackActionMenu -> SourceTrackActions(
             metadata = overlay.track,
             anchorBounds = overlay.anchorBounds,
@@ -56,6 +46,7 @@ fun PlaylistActionOverlay(
             onDismiss = onDismiss,
             viewModel = sourceViewModel,
             playerViewModel = playerViewModel,
+            onAddToPlaylist = { onUpdateOverlay(OverlayState.AddToPlaylist(overlay.track.trackRef)) },
             onShare = { onUpdateOverlay(OverlayState.Share(overlay.track)) },
             onDownloadTrack = onDownloadTrack?.let { download -> { quality -> download(overlay.track, quality) } },
         )

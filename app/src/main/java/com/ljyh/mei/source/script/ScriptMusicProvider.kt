@@ -391,6 +391,10 @@ internal class ScriptMusicProvider(
             }
         }
     }
+    override suspend fun likedPlaylist(): SourcePlaylist? = validated {
+        if (LibraryCollection.LIKED_TRACKS !in collections) return@validated null
+        catalogRead { read -> likedSnapshot(read, metadataLimit = 1)?.playlist }
+    }
     override suspend fun liked(ref: TrackRef): Boolean = validated {
         requireRef(ref)
         boolean(invoke("track.liked", refParams("trackId", ref)))

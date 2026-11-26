@@ -100,7 +100,7 @@ fun LocalMusicScreen(
                                 songs = localSongs,
                                 onArtistClick = { name ->
                                     Screen.LocalSongList.navigate(navController) {
-                                        addPath("artist"); addPath(name)
+                                        addPath("artist"); addPath(android.net.Uri.encode(name))
                                     }
                                 }
                             )
@@ -115,7 +115,7 @@ fun LocalMusicScreen(
                                 songs = localSongs,
                                 onAlbumClick = { name ->
                                     Screen.LocalSongList.navigate(navController) {
-                                        addPath("album"); addPath(name)
+                                        addPath("album"); addPath(android.net.Uri.encode(name))
                                     }
                                 }
                             )

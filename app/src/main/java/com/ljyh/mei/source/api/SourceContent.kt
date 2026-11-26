@@ -166,6 +166,9 @@ interface AccountCapability { suspend fun account(): SourceAccount? }
 interface LibraryCapability {
     val collections: Set<LibraryCollection>
     suspend fun library(collection: LibraryCollection, page: PageRequest = PageRequest()): SourcePage<SourceItem>
+
+    /** The account's built-in playlist, when its liked tracks have a playlist identity. */
+    suspend fun likedPlaylist(): SourcePlaylist? = null
 }
 interface LikeCapability {
     val canReadLikes: Boolean get() = true

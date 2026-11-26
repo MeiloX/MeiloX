@@ -181,8 +181,24 @@ class SourceRouter @Inject constructor(
         return provider.library(collection, page).also { validateItems(providerId, it.items, collection.type) }
     }
 
-    suspend fun liked(ref: TrackRef): Boolean {
-        val owner = mutations.capture(ref.providerId)
+    internal suspend fun likedPlaylist(provider: MusicProvider, expectedAccountRevision: String?): SourcePlaylist? {
+        if (SourceCapability.LIKE !in provider.capabilities || (provider as? LikeCapability)?.canWriteLikes != true ||
+            SourceCapability.LIBRARY !in provider.capabilities) return null
+        val library = provider as? LibraryCapability ?: return null
+        if (LibraryCollection.LIKED_TRACKS !in library.collections) return null
+        val owner = mutations.capture(provider.id, provider, expectedAccountRevision)
+        return library.likedPlaylist().also {
+            mutations.ensureCurrent(owner)
+            if (it != null && it.ref.providerId != provider.id) invalid()
+        }
+    }
+
+    suspend fun liked(
+        ref: TrackRef,
+        expectedAccountRevision: String? = null,
+        expectedProvider: MusicProvider? = null,
+    ): Boolean {
+        val owner = mutations.capture(ref.providerId, expectedProvider, expectedAccountRevision)
         val provider = ownedCapability<LikeCapability>(owner, SourceCapability.LIKE)
         if (!provider.canReadLikes) unsupported()
         return mutations.read(owner, listOf(likeKey(ref))) { mutations.confirmed(owner, likeKey(ref)) ?: provider.liked(ref) }

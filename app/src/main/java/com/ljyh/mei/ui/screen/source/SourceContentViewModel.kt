@@ -49,7 +49,8 @@ import com.ljyh.mei.ui.screen.artist.ArtistCatalogSearchDebounceMillis
 
 sealed interface SourceContentRequest {
     data class Feed(val kind: FeedKind, val categoryId: String? = null, val providerId: String? = null) : SourceContentRequest
-    data class Library(val collection: LibraryCollection, val providerId: String? = null) : SourceContentRequest
+    data class Library(val collection: LibraryCollection, val providerId: String? = null,
+        val includeLikedPlaylist: Boolean = false) : SourceContentRequest
     data class Detail(val ref: ContentRef) : SourceContentRequest
     data class ArtistInformation(val ref: ArtistRef) : SourceContentRequest
     data class Account(val providerId: String) : SourceContentRequest
@@ -97,6 +98,7 @@ data class SourceContentState(
     val albumsLoading: Boolean = false,
     val albumsError: SourceErrorCode? = null,
     val artistLogo: AppleArtistLogo? = null,
+    val likedPlaylist: SourcePlaylist? = null,
 )
 
 /** Every page is pinned to its provider and account; stale work cannot refill a replacement page. */
@@ -267,6 +269,10 @@ class SourceContentViewModel internal constructor(
         artistLogoRequested = artistLogo
         request.value = value
     }
+    internal fun close() {
+        request.value = null
+        invalidatePage()
+    }
     fun prepareEditor(providerId: String) { request.value = SourceContentRequest.Editor(providerId) }
     fun refresh() { refreshVersion.value++ }
 
@@ -393,8 +399,19 @@ class SourceContentViewModel internal constructor(
                     val collection = router.library(id, requested.collection, page)
                     received = collection.items.size
                     incomingRefs = collection.items.map { it.ref }
+                    val likedPlaylist = if (requested.includeLikedPlaylist && !append) {
+                        try {
+                            router.likedPlaylist(boundProvider, previous.accountRevision)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: SourceException) {
+                            if (error.code == SourceErrorCode.AUTH_REQUIRED || error.code == SourceErrorCode.AUTH_EXPIRED) throw error
+                            timber.log.Timber.tag("SourceContent").w(error, "Liked playlist unavailable")
+                            previous.likedPlaylist
+                        }
+                    } else previous.likedPlaylist
                     previous.copy(account = account, items = mergeItems(previous.items, collection.items, append),
-                        hasMore = collection.hasMore, nextCursor = collection.nextCursor)
+                        hasMore = collection.hasMore, nextCursor = collection.nextCursor, likedPlaylist = likedPlaylist)
                 }
                 is SourceContentRequest.Detail -> when (val ref = requested.ref) {
                     is PlaylistRef -> {
@@ -1162,7 +1179,11 @@ class SourceContentViewModel internal constructor(
             router.setLiked(track, liked, revision, owner)
         }
     fun setSaved(ref: ContentRef, saved: Boolean) = mutate(ref.providerId, refreshPage = false) { owner, revision -> router.setSaved(ref, saved, revision, owner) }
-    suspend fun liked(ref: TrackRef): Boolean = router.liked(ref)
+    suspend fun liked(
+        ref: TrackRef,
+        expectedProvider: MusicProvider? = null,
+        expectedAccountRevision: String? = null,
+    ): Boolean = router.liked(ref, expectedAccountRevision, expectedProvider)
     suspend fun saved(ref: ContentRef): Boolean = router.saved(ref)
     fun createPlaylist(title: String, description: String? = null, privacy: Boolean = false, type: String = "NORMAL",
         expectedProvider: MusicProvider? = null, expectedAccountRevision: String? = null,
@@ -1176,8 +1197,21 @@ class SourceContentViewModel internal constructor(
         mutate(ref.providerId, { _: Unit -> onUpdated() }) { owner, revision -> router.updatePlaylist(ref, title, description, revision, owner) }
     fun deletePlaylist(ref: PlaylistRef, onDeleted: () -> Unit) =
         mutate(ref.providerId, { _: Unit -> onDeleted() }) { owner, revision -> router.deletePlaylist(ref, revision, owner) }
-    fun addTracks(ref: PlaylistRef, tracks: List<TrackRef>, onAdded: () -> Unit = {}) =
-        mutate(ref.providerId, { _: Unit -> onAdded() }) { owner, revision -> router.addTracks(ref, tracks, revision, owner) }
+    internal fun addTrackToPlaylist(ref: PlaylistRef, track: TrackRef, onAdded: () -> Unit) {
+        val requested = request.value as? SourceContentRequest.Library ?: return
+        val provider = displayedProvider ?: return
+        val current = state.value
+        if (!requested.includeLikedPlaylist || requested != displayedRequest ||
+            track.providerId != ref.providerId || provider.id != ref.providerId) return
+        val likedPlaylist = current.likedPlaylist?.ref == ref
+        if (!likedPlaylist && current.items.none { item ->
+                item is SourceItem.PlaylistItem && item.ref == ref && PlaylistEditAction.ADD_TRACKS in item.playlist.editableActions
+            }) return
+        mutate(ref.providerId, { _: Unit -> onAdded() }, provider, current.accountRevision) { owner, revision ->
+            if (likedPlaylist) router.setLiked(track, true, revision, owner)
+            else router.addTracks(ref, listOf(track), revision, owner)
+        }
+    }
     fun removeTrack(ref: PlaylistRef, track: TrackRef) {
         val playlist = (state.value.detail as? SourceItem.PlaylistItem)?.playlist
         if (playlist == null || playlist.ref != ref || PlaylistEditAction.REMOVE_TRACKS !in playlist.editableActions) {
@@ -1251,8 +1285,8 @@ class SourceContentViewModel internal constructor(
         val registryRevision = registry.revision.value
         mutableBusy.value = true
         viewModelScope.launch {
+            val revisionCapability = provider as? AccountRevisionCapability
             try {
-                val revisionCapability = provider as? AccountRevisionCapability
                 val revision = revisionCapability?.accountRevision?.first()
                 if (revision != loadedRevision || request.value != requested ||
                     registry.provider(id) !== provider || provider.version != version) throw CancellationException("Source changed before editing")
@@ -1265,8 +1299,10 @@ class SourceContentViewModel internal constructor(
                 }
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (error: Exception) {
+                val sameAccount = revisionCapability == null || revisionCapability.accountRevision.first() == loadedRevision
                 if (request.value == requested && state.value.providerId == pageProvider && registry.provider(id) === provider &&
-                    provider.version == version && (loadedRevision == null || state.value.accountRevision == loadedRevision)) {
+                    provider.version == version && sameAccount &&
+                    (expectedProvider != null || loadedRevision == null || state.value.accountRevision == loadedRevision)) {
                     mutableMessage.value = error.sourceCode()
                 }
             } finally { mutableBusy.value = false }

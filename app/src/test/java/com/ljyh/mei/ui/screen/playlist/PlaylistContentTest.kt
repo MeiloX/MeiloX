@@ -208,6 +208,159 @@ class PlaylistContentTest {
     }
 
     @Test
+    fun playlistPickerAddsToFavoritesThroughLikesAndRejectsStaleAccountChoices() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val favorite = SourcePlaylist(PlaylistRef("picker-fixture", "favorite"), "Alex喜欢的音乐")
+        val created = SourcePlaylist(PlaylistRef("picker-fixture", "created"), "Road trip",
+            editableActions = setOf(PlaylistEditAction.ADD_TRACKS))
+        val track = TrackRef("picker-fixture", "track")
+        val likedTracks = mutableListOf<TrackRef>()
+        val addedTracks = mutableListOf<Pair<PlaylistRef, List<TrackRef>>>()
+        val provider = object : MusicProvider, LibraryCapability, LikeCapability, PlaylistEditCapability, AccountRevisionCapability {
+            override val id = track.providerId
+            override val displayName = "Playlist picker fixture"
+            override val capabilities = setOf(SourceCapability.LIBRARY, SourceCapability.LIKE, SourceCapability.PLAYLIST_EDIT)
+            override val collections = setOf(LibraryCollection.CREATED_PLAYLISTS, LibraryCollection.LIKED_TRACKS)
+            override val playlistEditActions = created.editableActions
+            override val accountRevision = MutableStateFlow<String?>("account-A")
+
+            override suspend fun library(collection: LibraryCollection, page: PageRequest): SourcePage<SourceItem> =
+                SourcePage(listOf(SourceItem.PlaylistItem(favorite), SourceItem.PlaylistItem(created)))
+            override suspend fun likedPlaylist() = favorite.takeIf { accountRevision.value == "account-A" }
+            override suspend fun liked(ref: TrackRef) = ref in likedTracks
+            override suspend fun setLiked(ref: TrackRef, liked: Boolean) {
+                if (liked) likedTracks.add(ref) else likedTracks.remove(ref)
+            }
+            override suspend fun addTracks(ref: PlaylistRef, tracks: List<TrackRef>) {
+                addedTracks += ref to tracks
+            }
+        }
+        val registry = ProviderRegistry(listOf(provider))
+        val router = SourceRouter(registry, SourceMutationCoordinator(registry, backgroundScope))
+        val model = SourceContentViewModel(router, SourcePreferences(MemoryPreferences()), registry)
+        try {
+            var successes = 0
+            model.open(SourceContentRequest.Library(LibraryCollection.CREATED_PLAYLISTS, provider.id, includeLikedPlaylist = true))
+            runCurrent()
+            assertEquals(favorite, model.state.value.likedPlaylist)
+            assertEquals(listOf(favorite.ref, created.ref), model.state.value.items.map { it.ref })
+
+            model.addTrackToPlaylist(favorite.ref, track) { successes++ }
+            runCurrent()
+            assertEquals(listOf(track), likedTracks)
+            assertTrue(addedTracks.isEmpty())
+            assertEquals(1L, router.trackLikeRevision.value)
+
+            model.addTrackToPlaylist(created.ref, track) { successes++ }
+            runCurrent()
+            assertEquals(listOf(created.ref to listOf(track)), addedTracks)
+
+            provider.accountRevision.value = "account-B"
+            model.addTrackToPlaylist(favorite.ref, track) { successes++ }
+            runCurrent()
+            assertNull(model.state.value.likedPlaylist)
+            assertEquals(listOf(track), likedTracks)
+            assertEquals(2, successes)
+        } finally {
+            model.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun detachedTrackFavoriteReportsFailureForCurrentAccountOnly() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val track = TrackRef("favorite-error-fixture", "track")
+        var failGate: CompletableDeferred<Unit>? = null
+        val provider = object : MusicProvider, LikeCapability, AccountRevisionCapability {
+            override val id = track.providerId
+            override val displayName = "Favorite error fixture"
+            override val capabilities = setOf(SourceCapability.LIKE)
+            override val accountRevision = MutableStateFlow<String?>("account-A")
+
+            override suspend fun liked(ref: TrackRef) = false
+            override suspend fun setLiked(ref: TrackRef, liked: Boolean) {
+                failGate?.await()
+                throw SourceException(SourceErrorCode.NETWORK)
+            }
+        }
+        val registry = ProviderRegistry(listOf(provider))
+        val router = SourceRouter(registry, SourceMutationCoordinator(registry, backgroundScope))
+        val model = SourceContentViewModel(router, SourcePreferences(MemoryPreferences()), registry)
+        try {
+            model.setLiked(track, true, provider, "account-A")
+            runCurrent()
+            assertEquals(SourceErrorCode.NETWORK, model.message.value)
+
+            model.dismissMessage()
+            val gate = CompletableDeferred<Unit>()
+            failGate = gate
+            model.setLiked(track, true, provider, "account-A")
+            runCurrent()
+            provider.accountRevision.value = "account-B"
+            gate.complete(Unit)
+            runCurrent()
+            assertNull(model.message.value)
+        } finally {
+            model.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun closedPlaylistPickerStopsReloadingOnContentRevision() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val favorite = SourcePlaylist(PlaylistRef("picker-close-fixture", "favorite"), "我喜欢")
+        val track = TrackRef("picker-close-fixture", "track")
+        var libraryCalls = 0
+        var likedPlaylistCalls = 0
+        val provider = object : MusicProvider, LibraryCapability, LikeCapability, PlaylistEditCapability, AccountRevisionCapability {
+            override val id = track.providerId
+            override val displayName = "Picker lifecycle fixture"
+            override val capabilities = setOf(SourceCapability.LIBRARY, SourceCapability.LIKE, SourceCapability.PLAYLIST_EDIT)
+            override val collections = setOf(LibraryCollection.CREATED_PLAYLISTS, LibraryCollection.LIKED_TRACKS)
+            override val playlistEditActions = setOf(PlaylistEditAction.ADD_TRACKS)
+            override val accountRevision = MutableStateFlow<String?>("account-A")
+
+            override suspend fun library(collection: LibraryCollection, page: PageRequest): SourcePage<SourceItem> {
+                libraryCalls++
+                return SourcePage(emptyList())
+            }
+            override suspend fun likedPlaylist(): SourcePlaylist {
+                likedPlaylistCalls++
+                return favorite
+            }
+            override suspend fun liked(ref: TrackRef) = false
+            override suspend fun setLiked(ref: TrackRef, liked: Boolean) {}
+        }
+        val registry = ProviderRegistry(listOf(provider))
+        val router = SourceRouter(registry, SourceMutationCoordinator(registry, backgroundScope))
+        val model = SourceContentViewModel(router, SourcePreferences(MemoryPreferences()), registry)
+        val request = SourceContentRequest.Library(LibraryCollection.CREATED_PLAYLISTS, provider.id, includeLikedPlaylist = true)
+        try {
+            model.open(request)
+            runCurrent()
+            assertEquals(1, libraryCalls)
+            assertEquals(1, likedPlaylistCalls)
+
+            model.close()
+            runCurrent()
+            router.setLiked(track, true, "account-A", provider)
+            runCurrent()
+            assertEquals(1, libraryCalls)
+            assertEquals(1, likedPlaylistCalls)
+
+            model.open(request)
+            runCurrent()
+            assertEquals(2, libraryCalls)
+            assertEquals(2, likedPlaylistCalls)
+        } finally {
+            model.viewModelScope.coroutineContext[Job]?.cancelAndJoin()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
     fun sourceCollectionHeadersAppearBeforeTracksAndRemainAfterTrackFailure() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {

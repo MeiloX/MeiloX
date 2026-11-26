@@ -88,7 +88,8 @@ import com.ljyh.mei.ui.local.LocalPlayerConnection
 import com.ljyh.mei.ui.navigation.LibraryPage
 import com.ljyh.mei.ui.screen.local.LocalLibraryViewModel
 import com.ljyh.mei.ui.screen.social.NeteaseShareSheet
-import com.ljyh.mei.ui.screen.Screen
+import com.ljyh.mei.ui.screen.source.SourcePlaylistPickerSheet
+import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.source.api.TrackRefCodec
 import com.ljyh.mei.source.api.Track
 import com.ljyh.mei.source.api.SourceArtist
@@ -135,6 +136,7 @@ internal fun LibraryDownloadsPage(
     var deleteEntry by remember { mutableStateOf<DownloadLibraryEntry?>(null) }
     var permissionDenied by rememberSaveable { mutableStateOf(false) }
     var share by remember { mutableStateOf<MediaMetadata?>(null) }
+    var playlistTrack by remember { mutableStateOf<TrackRef?>(null) }
     var pendingSystemDelete by remember { mutableStateOf<Song?>(null) }
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -331,8 +333,7 @@ internal fun LibraryDownloadsPage(
             onInfo = song?.let { { info = it } },
             onShare = metadata?.let { { share = it } },
             onAddToPlaylist = metadata?.takeIf { playerViewModel.isActionAvailable(MoreAction.ADD_TO_PLAYLIST, it) }?.let { track -> {
-                selectedKey = null
-                Screen.SourcePlaylistPicker.navigate(navController) { addPath(Uri.encode(TrackRefCodec.encode(track.trackRef))) }
+                playlistTrack = track.trackRef
             } },
             onPause = task?.let { { DownloadManager.pauseSong(context, it.songId) } },
             onResume = task?.let { { scope.launch { DownloadManager.resumeSong(context, it.songId, queueTitle) }; Unit } },
@@ -340,6 +341,7 @@ internal fun LibraryDownloadsPage(
         )
     }
     share?.let { NeteaseShareSheet(it, onDismiss = { share = null }) }
+    playlistTrack?.let { SourcePlaylistPickerSheet(it, onDismiss = { playlistTrack = null }) }
     info?.let { song -> LocalFileInfo(song) { info = null } }
     LocalMatchSheet(viewModel)
     rememberAlertContent(deleteEntry)?.let { entry ->
