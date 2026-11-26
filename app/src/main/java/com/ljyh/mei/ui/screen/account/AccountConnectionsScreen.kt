@@ -32,6 +32,7 @@ import com.ljyh.mei.data.model.melox.AccountConnectionType
 import com.ljyh.mei.source.shared.OnlineAccountProfile as AccountProfile
 import com.ljyh.mei.source.shared.SharedOnlineRepository
 import com.ljyh.mei.source.shared.SharedOnlineSession
+import com.ljyh.mei.ui.component.AutomaticPagination
 import io.github.neoruaa.glasmio.ui.GlasmioButton
 import io.github.neoruaa.glasmio.ui.GlasmioCard
 import io.github.neoruaa.glasmio.ui.GlasmioIconButton
@@ -184,8 +185,9 @@ fun AccountConnectionsScreen(
         state.error?.let { message ->
             item(key = "connections-error") { ConnectionsError(message, viewModel::refresh) }
         }
-        val users = state.page?.users.orEmpty()
-        if (!state.loading && state.error == null && users.isEmpty()) {
+        val page = state.page
+        val users = page?.users.orEmpty()
+        if (!state.loading && state.error == null && page?.hasMore != true && users.isEmpty()) {
             item(key = "connections-empty") {
                 Text(
                     stringResource(
@@ -223,20 +225,19 @@ fun AccountConnectionsScreen(
                 },
             )
         }
-        if (state.loadingMore) {
-            item(key = "connections-loading-more") {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(Modifier.size(24.dp))
-                }
-            }
-        } else if (state.loadMoreError != null) {
-            item(key = "connections-load-more-error") {
-                ConnectionsError(checkNotNull(state.loadMoreError), viewModel::loadMore)
-            }
-        } else if (state.page?.hasMore == true && !state.loading && state.error == null) {
-            item(key = "connections-load-more") {
-                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                    GlasmioButton(viewModel::loadMore) { Text(stringResource(R.string.account_load_more)) }
+        val loadMoreError = state.loadMoreError
+        val nextOffset = page?.takeIf { it.hasMore && !state.loading && state.error == null }?.nextOffset
+        if (loadMoreError != null || nextOffset != null || state.loadingMore) {
+            item(key = "connections-pagination") {
+                if (loadMoreError != null) {
+                    ConnectionsError(loadMoreError, viewModel::loadMore)
+                } else {
+                    if (nextOffset != null && !state.loadingMore) {
+                        AutomaticPagination(listOf(userId, type, nextOffset), viewModel::loadMore)
+                    }
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(24.dp))
+                    }
                 }
             }
         }

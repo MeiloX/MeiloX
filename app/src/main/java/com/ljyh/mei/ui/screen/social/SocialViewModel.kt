@@ -20,9 +20,16 @@ internal class SocialScreenSession(private val repository: SourceSocialRepositor
     suspend fun get(): SourceSocialSession { open(); return binding!!.await().also { it.owner.ensureCurrent() } }
 }
 
-data class ConversationsUiState(val isLoading: Boolean = true, val conversations: List<SourcePrivateConversation> = emptyList(),
-    val error: String? = null, val hasMore: Boolean = false, val isLoadingMore: Boolean = false,
-    val providerId: String? = null, val currentUserId: String = "")
+data class ConversationsUiState(
+    val isLoading: Boolean = true,
+    val conversations: List<SourcePrivateConversation> = emptyList(),
+    val error: String? = null,
+    val nextTime: Long? = null,
+    val isLoadingMore: Boolean = false,
+    val loadMoreError: String? = null,
+    val providerId: String? = null,
+    val currentUserId: String = "",
+)
 data class ConversationUiState(val isLoading: Boolean = true, val userId: String? = null, val messages: List<SourcePrivateMessage> = emptyList(),
     val isSending: Boolean = false, val error: String? = null, val providerId: String? = null, val currentUserId: String = "")
 data class MessageContactsUiState(val isLoading: Boolean = true, val contacts: List<SourceMessageContact> = emptyList(),
@@ -32,7 +39,6 @@ data class MessageContactsUiState(val isLoading: Boolean = true, val contacts: L
 class ConversationsViewModel @Inject constructor(repository: SourceSocialRepository) : ViewModel() {
     private val _state = MutableStateFlow(ConversationsUiState()); val state = _state.asStateFlow()
     private var officialMessages = false
-    private var nextTime = -1L
     private var loadJob: Job? = null
     private val session = SocialScreenSession(repository, viewModelScope) {
         loadJob?.cancel(); _state.value = ConversationsUiState(isLoading = false, error = "音源或账号已变更")
@@ -40,19 +46,51 @@ class ConversationsViewModel @Inject constructor(repository: SourceSocialReposit
     fun load(officialMessages: Boolean, providerId: String? = null) {
         session.open(providerId); this.officialMessages = officialMessages; refresh()
     }
-    fun refresh() { loadJob?.cancel(); fetch(true) }
-    fun loadMore() { if (officialMessages && _state.value.hasMore && loadJob?.isActive != true) fetch(false) }
-    private fun fetch(refresh: Boolean) {
+    fun refresh() {
+        loadJob?.cancel()
+        fetch(refresh = true, before = -1)
+    }
+    fun loadMore() {
+        val current = _state.value
+        val before = current.nextTime ?: return
+        if (!officialMessages || current.isLoading || current.isLoadingMore || current.error != null) return
+        fetch(refresh = false, before = before)
+    }
+    private fun fetch(refresh: Boolean, before: Long) {
+        val current = _state.value
+        _state.value = current.copy(
+            isLoading = refresh,
+            isLoadingMore = !refresh,
+            error = null,
+            loadMoreError = null,
+        )
         loadJob = viewModelScope.launch {
-            _state.value = _state.value.copy(isLoading = refresh, isLoadingMore = !refresh, error = null)
             try {
                 val bound = session.get()
-                val page = bound.conversations(officialMessages, if (refresh) -1 else nextTime)
-                val previous = nextTime; nextTime = page.nextTime
-                _state.value = ConversationsUiState(false, if (refresh) page.conversations else (_state.value.conversations + page.conversations).distinctBy { it.id },
-                    hasMore = page.hasMore && nextTime > 0 && (refresh || nextTime < previous), providerId = bound.providerId, currentUserId = bound.userId)
+                val page = bound.conversations(officialMessages, before)
+                ensureActive()
+                val previous = if (refresh) emptyList() else current.conversations
+                val conversations = (previous + page.conversations).distinctBy { it.id }
+                val nextTime = page.nextTime.takeIf {
+                    page.hasMore && conversations.size > previous.size && it > 0 && (refresh || it < before)
+                }
+                _state.value = ConversationsUiState(
+                    isLoading = false,
+                    conversations = conversations,
+                    nextTime = nextTime,
+                    providerId = bound.providerId,
+                    currentUserId = bound.userId,
+                )
             } catch (cancelled: CancellationException) { throw cancelled
-            } catch (error: Exception) { _state.value = _state.value.copy(isLoading = false, isLoadingMore = false, error = error.message) }
+            } catch (error: Exception) {
+                ensureActive()
+                val message = error.message?.takeIf(String::isNotBlank) ?: error.toString()
+                _state.value = if (refresh) {
+                    current.copy(isLoading = false, isLoadingMore = false, error = message, loadMoreError = null)
+                } else {
+                    current.copy(isLoadingMore = false, loadMoreError = message)
+                }
+            }
         }
     }
 }

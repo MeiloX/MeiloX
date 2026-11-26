@@ -165,16 +165,17 @@ class PodcastViewModel internal constructor(
                     _state.value = _state.value.withSubscriptionPage(page, reset)
                 }
                 .onFailure { error ->
+                    val message = error.message?.takeIf(String::isNotBlank) ?: error.toString()
                     _state.value = if (reset) {
                         _state.value.copy(
                             subscriptionsLoaded = _state.value.subscribedPodcasts.isNotEmpty(),
                             isSubscriptionsLoading = false,
-                            subscriptionsError = error.message,
+                            subscriptionsError = message,
                         )
                     } else {
                         _state.value.copy(
                             isLoadingMoreSubscriptions = false,
-                            subscriptionsLoadMoreError = error.message,
+                            subscriptionsLoadMoreError = message,
                         )
                     }
                 }
@@ -282,9 +283,10 @@ class PodcastDetailViewModel @Inject constructor(
                 )
             }.onFailure { error ->
                 if (loadedId == detail.podcast.id && generation == requestGeneration) {
+                    val message = error.message?.takeIf(String::isNotBlank) ?: error.toString()
                     _state.value = _state.value.copy(
                         isLoadingMore = false,
-                        loadMoreError = error.message,
+                        loadMoreError = message,
                     )
                 }
             }
@@ -329,7 +331,7 @@ internal fun PodcastUiState.withSubscriptionPage(page: PodcastPage, reset: Boole
         subscriptionsLoaded = true,
         isSubscriptionsLoading = false,
         isLoadingMoreSubscriptions = false,
-        hasMoreSubscriptions = page.hasMore,
+        hasMoreSubscriptions = page.hasMore && page.fetchedCount > 0,
         subscriptionTotalCount = maxOf(page.totalCount, merged.size),
         subscriptionOffset = (if (reset) 0 else subscriptionOffset) + page.fetchedCount,
         subscriptionsError = null,
@@ -341,7 +343,7 @@ internal fun PodcastDetail.withProgramPage(page: PodcastProgramPage): PodcastDet
     val merged = appendUniquePrograms(programs, page.programs)
     return copy(
         programs = merged,
-        hasMore = page.hasMore,
+        hasMore = page.hasMore && page.fetchedCount > 0,
         totalCount = maxOf(totalCount, page.totalCount, merged.size),
         nextOffset = nextOffset + page.fetchedCount,
     )

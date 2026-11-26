@@ -337,6 +337,8 @@ fun SongListDetailScreen(
                             playlistSearchQuery.takeIf { it.isNotBlank() && !searchResultsLoading }
                                 ?.let { "未找到匹配的歌曲" },
                     )
+                    // Request the next page at the end of the loaded tracks, before any placeholders.
+                    footer?.invoke(this)
                 }
                 val pendingTrackCount = if (isLoading) maxOf(uiData.count, loadingTrackCount) else loadingTrackCount
                 if (pendingTrackCount > 0) {
@@ -356,7 +358,6 @@ fun SongListDetailScreen(
                         }
                     }
                 }
-                footer?.invoke(this)
             }
 
             if (detailMenuOpen && detailMenu != null) {

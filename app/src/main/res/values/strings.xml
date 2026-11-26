@@ -173,7 +173,6 @@
     <string name="private_messages">Private Messages</string>
     <string name="official_messages">Official Messages</string>
     <string name="official_messages_empty">No official messages</string>
-    <string name="message_load_more">Load more</string>
     <string name="message_start">Start a message</string>
     <string name="message_search_contacts">Search people you follow</string>
     <string name="private_conversation">Conversation</string>
@@ -615,7 +614,6 @@
     <string name="account_followers">Followers</string>
     <string name="account_no_follows">Not following anyone yet</string>
     <string name="account_no_followers">No followers yet</string>
-    <string name="account_load_more">Load More</string>
     <string name="account_playlist_metric">Playlists</string>
     <string name="account_listening_rank">Listening Rankings</string>
     <string name="account_week">Last Week</string>
@@ -932,7 +930,6 @@
     <string name="artist_catalog_search_progress">%1$d matches in %2$d items checked. Searching…</string>
     <string name="artist_catalog_search_partial">%1$d matches in %2$d items checked. More items may match.</string>
     <string name="artist_catalog_search_complete">%1$d matches in %2$d items.</string>
-    <string name="artist_catalog_search_continue">Search more items</string>
     <!-- values/comment_actions.xml -->
     <string name="comment_hide_replies">Hide replies</string>
     <string name="comment_show_replies">Show %1$d replies</string>
@@ -958,7 +955,6 @@
     <string name="library_filter_subscribed">Subscribed</string>
     <string name="library_empty_created_playlists">No created playlists</string>
     <string name="library_empty_subscribed_playlists">No subscribed playlists</string>
-    <string name="library_load_more">Load More</string>
     <string name="library_collection_load_failed">Unable to load your library. Try again.</string>
     <string name="album_subscription_update_failed">Unable to update album subscription. Try again.</string>
     <string name="album_subscription_load_failed">Unable to check album subscription. Tap to retry.</string>

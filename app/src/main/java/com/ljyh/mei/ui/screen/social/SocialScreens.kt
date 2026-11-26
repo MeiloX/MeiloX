@@ -70,6 +70,7 @@ import com.ljyh.mei.source.shared.SourceShareResource as ShareResource
 import com.ljyh.mei.data.model.melox.ShareResourceKind
 import com.ljyh.mei.data.model.toMediaItem
 import com.ljyh.mei.playback.queue.ListQueue
+import com.ljyh.mei.ui.component.AutomaticPagination
 import io.github.neoruaa.glasmio.ui.GlasmioButton
 import io.github.neoruaa.glasmio.glass.GlassEmphasis
 import io.github.neoruaa.glasmio.ui.GlasmioIconButton
@@ -136,7 +137,9 @@ fun ConversationsScreen(
         if (state.isLoading && state.conversations.isEmpty()) {
             item { Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
         }
-        state.error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
+        state.error?.let { error ->
+            item { Text(error.ifBlank { stringResource(R.string.load_failed) }, color = MaterialTheme.colorScheme.error) }
+        }
         privateConversationItems(
             conversations = state.conversations,
             currentUserId = currentUser,
@@ -158,18 +161,26 @@ fun ConversationsScreen(
                 )
             }
         }
-        if (state.hasMore) {
+        if (officialMessages && !state.isLoading && state.error == null && state.nextTime != null) {
             item(key = "load-more-conversations") {
-                if (state.error == null) {
-                    LaunchedEffect(state.conversations.size) { viewModel.loadMore() }
-                }
-                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                    if (state.isLoadingMore) {
-                        CircularProgressIndicator(Modifier.size(24.dp))
-                    } else {
+                val loadMoreError = state.loadMoreError
+                if (loadMoreError != null) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(loadMoreError.ifBlank { stringResource(R.string.load_failed) }, color = MaterialTheme.colorScheme.error)
                         GlasmioButton(onClick = viewModel::loadMore) {
-                            Text(stringResource(R.string.message_load_more))
+                            Text(stringResource(R.string.retry))
                         }
+                    }
+                } else {
+                    if (!state.isLoadingMore) {
+                        AutomaticPagination(state.providerId to state.nextTime, viewModel::loadMore)
+                    }
+                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(24.dp))
                     }
                 }
             }

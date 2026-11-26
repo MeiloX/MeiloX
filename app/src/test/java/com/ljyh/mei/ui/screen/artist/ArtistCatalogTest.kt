@@ -150,17 +150,17 @@ class ArtistCatalogTest {
         assertEquals(listOf(0, 0), provider.albumRequests.map { it.offset })
     }
 
-    @Test fun albumSearchDebouncesAndContinuesInThreePageBudgets() = runTest(dispatcher) {
+    @Test fun albumSearchDebouncesBeforeHandingOffToListPagination() = runTest(dispatcher) {
         val provider = ArtistProvider().apply { albums = { page -> albumPage(page.offset < 4, page.offset.toString()) } }
         val vm = model(provider)
         vm.open(SourceContentRequest.Detail(ref)); advanceUntilIdle()
-        vm.updateArtistCatalogSearch(ref, true, "album 4")
+        val initialSearch = checkNotNull(vm.updateArtistCatalogSearch(ref, true, "album 4"))
         advanceTimeBy(249); runCurrent()
         assertEquals(listOf(0), provider.albumRequests.map { it.offset })
-        advanceUntilIdle()
+        initialSearch.join()
         assertEquals(listOf(0, 1, 2, 3), provider.albumRequests.map { it.offset })
         assertTrue(vm.state.value.albumsHasMore)
-        vm.continueArtistCatalogSearch(); advanceUntilIdle()
+        vm.loadMoreArtistAlbums(); advanceUntilIdle()
         assertEquals(listOf(0, 1, 2, 3, 4), provider.albumRequests.map { it.offset })
         assertEquals(listOf("0", "1", "2", "3", "4"), albumIds(vm))
         assertFalse(vm.state.value.albumsHasMore)

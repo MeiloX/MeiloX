@@ -75,12 +75,15 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.ljyh.mei.R
 import com.ljyh.mei.data.model.room.DownloadStatus
 import com.ljyh.mei.data.model.room.DownloadTask
+import com.ljyh.mei.source.api.SourceErrorCode
 import com.ljyh.mei.ui.navigation.MeiRoute
 import com.ljyh.mei.ui.navigation.MeiloXPageEntry
 import com.ljyh.mei.ui.navigation.MeiloXPageHeaders
 import com.ljyh.mei.ui.screen.main.library.component.DownloadLibraryEntry
 import com.ljyh.mei.ui.screen.main.library.component.DownloadLibraryRow
 import com.ljyh.mei.ui.screen.main.library.component.LibraryLandscapeSongRow
+import com.ljyh.mei.ui.screen.source.SourceContentState
+import com.ljyh.mei.ui.screen.source.sourceDetailPagingStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -93,6 +96,45 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SongListRenderingTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun sourceTrackListLoadsMoreAtTheEndAndWaitsForRetryOnError() {
+        val state = mutableStateOf(SourceContentState(hasMore = true, nextOffset = 24))
+        val requests = mutableListOf<Int>()
+        var retries = 0
+        compose.setContent {
+            GlasmioTheme {
+                LazyColumn(Modifier.height(200.dp).testTag("source-track-list")) {
+                    items(24) { index -> Text("Track $index", Modifier.height(40.dp)) }
+                    sourceDetailPagingStatus(
+                        state = state.value,
+                        onRetry = { retries++ },
+                        onMore = {
+                            val current = state.value
+                            requests += current.nextOffset
+                            state.value = if (current.nextOffset == 24) {
+                                current.copy(nextOffset = 48)
+                            } else current.copy(error = SourceErrorCode.NETWORK)
+                        },
+                        showLoading = false,
+                    )
+                }
+            }
+        }
+        compose.runOnIdle { assertTrue(requests.isEmpty()) }
+        compose.onNodeWithTag("source-track-list").performScrollToIndex(23)
+        compose.runOnIdle {
+            assertEquals(listOf(24, 48), requests)
+            assertEquals(0, retries)
+        }
+        compose.onNodeWithTag("source-track-list").performScrollToIndex(24)
+        val retry = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.retry)
+        compose.onNodeWithText(retry).assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(24, 48), requests)
+            assertEquals(1, retries)
+        }
+    }
 
     @Test
     fun sharedOrderSheetKeepsOpaqueTrackKeysThroughMoveSaveAndCancel() {

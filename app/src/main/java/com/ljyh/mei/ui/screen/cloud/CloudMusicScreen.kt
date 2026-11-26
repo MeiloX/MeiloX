@@ -42,6 +42,7 @@ import com.ljyh.mei.data.model.toMediaItem
 import com.ljyh.mei.source.shared.SharedOnlineRepository
 import com.ljyh.mei.source.shared.SharedOnlineSession
 import com.ljyh.mei.playback.queue.ListQueue
+import com.ljyh.mei.ui.component.AutomaticPagination
 import com.ljyh.mei.ui.component.globalProfileHeaderAction
 import io.github.neoruaa.glasmio.ui.GlasmioButton
 import io.github.neoruaa.glasmio.ui.GlasmioCard
@@ -135,7 +136,7 @@ class CloudMusicViewModel internal constructor(
         val job = synchronized(lock) {
             val current = _state.value
             val page = current.page ?: return
-            if (current.isLoading || current.isLoadingMore || !page.hasMore) return
+            if (current.isLoading || current.isLoadingMore || current.error != null || !page.hasMore) return
             val expected = ++readRevision
             _state.value = current.copy(isLoadingMore = true, loadMoreError = null)
             viewModelScope.launch(start = CoroutineStart.LAZY) {
@@ -153,15 +154,19 @@ class CloudMusicViewModel internal constructor(
                 if (append) current.withCloudPage(incoming)
                 else current.copy(
                     isLoading = false,
-                    page = incoming.copy(songs = incoming.songs.distinctBy(CloudSong::id)),
+                    page = incoming.copy(
+                        songs = incoming.songs.distinctBy(CloudSong::id),
+                        hasMore = incoming.hasMore && incoming.nextOffset > offset,
+                    ),
                 )
             }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             publishRead(expected) { current ->
-                if (append) current.copy(isLoadingMore = false, loadMoreError = error.message)
-                else current.copy(isLoading = false, error = error.message)
+                val message = error.message?.takeIf(String::isNotBlank) ?: error.toString()
+                if (append) current.copy(isLoadingMore = false, loadMoreError = message)
+                else current.copy(isLoading = false, error = message)
             }
         } finally {
             synchronized(lock) {
@@ -375,26 +380,37 @@ fun CloudMusicScreen(
         }
         if (state.page?.hasMore == true || state.isLoadingMore || state.loadMoreError != null) {
             item(key = "cloud-pagination") {
-                CloudMusicPaginationFooter(state, viewModel::loadMore)
+                CloudMusicPaginationFooter(state, viewModel::loadMore, ownerKey = viewModel)
             }
         }
     }
 }
 
 @Composable
-internal fun CloudMusicPaginationFooter(state: CloudMusicUiState, onLoadMore: () -> Unit) {
+internal fun CloudMusicPaginationFooter(
+    state: CloudMusicUiState,
+    onLoadMore: () -> Unit,
+    ownerKey: Any? = null,
+) {
+    val nextOffset = state.page?.takeIf { it.hasMore && !state.isLoading && state.error == null }?.nextOffset
+    val error = state.loadMoreError
+    if (nextOffset == null && !state.isLoadingMore && error == null) return
+
     Column(
         Modifier.fillMaxWidth().padding(vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (state.isLoadingMore) {
-            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-        } else {
-            state.loadMoreError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (error != null) {
+            Text(error, color = MaterialTheme.colorScheme.error)
             GlasmioButton(onClick = onLoadMore, enabled = !state.isLoading) {
-                Text(stringResource(if (state.loadMoreError != null) R.string.retry else R.string.library_load_more))
+                Text(stringResource(R.string.retry))
             }
+        } else {
+            if (nextOffset != null && !state.isLoadingMore) {
+                AutomaticPagination(ownerKey to nextOffset, onLoadMore)
+            }
+            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
         }
     }
 }
@@ -402,7 +418,11 @@ internal fun CloudMusicPaginationFooter(state: CloudMusicUiState, onLoadMore: ()
 internal fun CloudMusicUiState.withCloudPage(incoming: CloudMusicPage): CloudMusicUiState {
     val songs = (page?.songs.orEmpty() + incoming.songs).distinctBy(CloudSong::id)
     return copy(
-        page = incoming.copy(songs = songs, count = maxOf(page?.count ?: 0, incoming.count, songs.size)),
+        page = incoming.copy(
+            songs = songs,
+            count = maxOf(page?.count ?: 0, incoming.count, songs.size),
+            hasMore = incoming.hasMore && incoming.nextOffset > (page?.nextOffset ?: 0),
+        ),
         isLoadingMore = false,
         loadMoreError = null,
     )

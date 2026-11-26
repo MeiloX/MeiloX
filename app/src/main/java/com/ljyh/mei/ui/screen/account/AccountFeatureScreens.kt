@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.account
 
+import com.ljyh.mei.ui.component.AutomaticPagination
 import com.ljyh.mei.ui.component.sheet.MeiloXBottomSheet
 import com.ljyh.mei.ui.component.sheet.rememberMeiloXSheetDismissal
 import com.ljyh.mei.ui.component.utils.rememberAlertContent
@@ -236,14 +237,21 @@ fun AccountDevicesScreen(
             onRemoveDevice = { pendingDevice = it },
             onRevokeAuthorization = { pendingApp = it },
         )
-        if (state.tab != AccountDeviceTab.Devices && state.more) {
-            item(key = "account-load-more") {
-                Box(Modifier.padding(top = 10.dp)) {
-                    GlasmioButton(viewModel::loadMore) { Text(stringResource(R.string.account_load_more)) }
+        val loadMoreError = state.loadMoreError
+        val nextCursor = state.cursor?.takeIf { state.more && !state.loading && state.error == null }
+        if (loadMoreError != null || nextCursor != null || state.loadingMore) {
+            item(key = "account-authorization-pagination") {
+                if (loadMoreError != null) {
+                    Box(Modifier.padding(top = 10.dp)) { AccountFeatureError(loadMoreError, viewModel::loadMore) }
+                } else {
+                    if (nextCursor != null && !state.loadingMore) {
+                        AutomaticPagination(state.tab to nextCursor, viewModel::loadMore)
+                    }
+                    AccountFeatureLoading()
                 }
             }
         }
-        if (!state.loading && state.error == null &&
+        if (!state.loading && state.error == null && !state.more &&
             (if (state.tab == AccountDeviceTab.Devices) state.devices.isEmpty() else state.applications.isEmpty())) {
             item { Text(stringResource(R.string.account_no_records), Modifier.padding(top = 10.dp).padding(24.dp)) }
         }

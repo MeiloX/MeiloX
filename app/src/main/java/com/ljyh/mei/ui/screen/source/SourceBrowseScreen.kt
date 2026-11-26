@@ -86,7 +86,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -132,7 +131,6 @@ import io.github.neoruaa.glasmio.ui.GlasmioSearchBar
 import io.github.neoruaa.glasmio.ui.GlasmioSegmentedControl
 import io.github.neoruaa.glasmio.scaffold.rememberGlasmioHeaderScrollEdge
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
 import com.ljyh.mei.constants.HomeRowHorizontalPadding
 import com.ljyh.mei.constants.HomeSectionSpacing
 import com.ljyh.mei.constants.HomeSectionTitlePadding
@@ -862,14 +860,6 @@ fun SourceLibraryScreen(
         HistoryViewModel(online.history(), online.repository().screen("library-history", selectedId))
     } else null
     val historyState = historyViewModel?.state?.collectAsState()?.value ?: HistoryUiState()
-    LaunchedEffect(listState, podcastViewModel) {
-        if (podcastViewModel == null) return@LaunchedEffect
-        snapshotFlow { (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1) to listState.layoutInfo.totalItemsCount }
-            .distinctUntilChanged().collect { (last, count) ->
-                if (count > 0 && last >= count - 1 && podcastViewModel.state.value.subscriptionsLoadMoreError == null)
-                    podcastViewModel.loadMoreSubscriptions()
-            }
-    }
     val ownState = if (!hasCoreCollection) SourceContentState(providerId = selectedId)
         else state.takeIf { it.providerId == selectedId } ?: SourceContentState(providerId = selectedId, loading = true)
     val playingLikedTrack = if (selectedId == ProviderIds.NETEASE && hasCoreCollection &&
@@ -1044,7 +1034,7 @@ fun SourceLibraryScreen(
                         }
                     }
                     if (page == LibraryPage.Cloud && !showArtists) {
-                        cloudState?.let { libraryCloudItems(it, player, query.text.trim()) { cloudViewModel?.loadMore() } }
+                        cloudState?.let { libraryCloudItems(it, player, query.text.trim(), ownerKey = cloudViewModel) { cloudViewModel?.loadMore() } }
                     } else if (page == LibraryPage.History && !showArtists) {
                         libraryHistoryItems(historyState, player, query.text.trim())
                     } else {

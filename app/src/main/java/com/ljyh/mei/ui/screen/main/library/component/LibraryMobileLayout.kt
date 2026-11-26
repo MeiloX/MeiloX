@@ -47,7 +47,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,6 +82,7 @@ import com.ljyh.mei.data.model.toMediaItem
 import com.ljyh.mei.playback.PlayerConnection
 import com.ljyh.mei.playback.queue.ListQueue
 import com.ljyh.mei.playback.queue.PlaylistQueueSource
+import com.ljyh.mei.ui.component.AutomaticPagination
 import com.ljyh.mei.ui.component.globalProfileHeaderAction
 import io.github.neoruaa.glasmio.scaffold.GlasmioHeaderAction
 import com.ljyh.mei.ui.component.player.OverlayState
@@ -121,7 +121,6 @@ import com.ljyh.mei.ui.screen.podcast.PodcastUiState
 import com.ljyh.mei.ui.screen.podcast.PodcastTab
 import com.ljyh.mei.utils.rememberPreference
 import io.github.neoruaa.glasmio.scaffold.GlasmioPullToRefreshBox
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * Adds rows directly to the parent lazy list while retaining the visual treatment of
@@ -262,19 +261,6 @@ fun LibraryMobileLayout(
         historyViewModel?.refresh()
     }
     val collapseDistance = with(LocalDensity.current) { 56.dp.toPx() }
-    LaunchedEffect(listState, selectedPage, podcastViewModel) {
-        if (!showsPodcasts || podcastViewModel == null) return@LaunchedEffect
-        snapshotFlow {
-            val layout = listState.layoutInfo
-            (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) to layout.totalItemsCount
-        }.distinctUntilChanged().collect { (lastVisibleIndex, totalItemsCount) ->
-            if (totalItemsCount > 0 && lastVisibleIndex >= totalItemsCount - 1) {
-                if (podcastViewModel.state.value.subscriptionsLoadMoreError == null) {
-                    podcastViewModel.loadMoreSubscriptions()
-                }
-            }
-        }
-    }
     val collapseProgress by remember(listState) {
         derivedStateOf {
             if (listState.firstVisibleItemIndex > 0) 1f
@@ -430,7 +416,7 @@ fun LibraryMobileLayout(
                                 }
                             } else if (!hasSongs && (likedSongsError != null || refresh is LoadState.Error)) {
                                 item(key = "liked-error") {
-                                    CollectionFooter(false, true) {
+                                    CollectionFooter(loading = false) {
                                         if (likedSongsError != null) onRetryLikedSongs() else likedSongs.retry()
                                     }
                                 }
@@ -492,7 +478,6 @@ fun LibraryMobileLayout(
                                 item(key = "liked-continuation-error") {
                                     CollectionFooter(
                                         loading = append is LoadState.Loading || likedSongSearchLoading,
-                                        failed = likedSongsError != null || append is LoadState.Error,
                                     ) {
                                         if (likedSongsError != null) onRetryLikedSongs() else likedSongs.retry()
                                     }
@@ -557,15 +542,7 @@ fun LibraryMobileLayout(
                                     showPressIndication = true,
                                 ) else LibraryPlaylistRow(playlist, playlist.id != visiblePlaylists.lastOrNull()?.id) { onPlaylistClick(playlist.id) }
                             }
-                            if (playlistState.isLoading || playlistState.isLoadingMore || playlistState.error != null || playlistState.hasMore) {
-                                item(key = "playlist-pagination") {
-                                    CollectionFooter(
-                                        loading = playlistState.isLoading || playlistState.isLoadingMore,
-                                        failed = playlistState.error != null,
-                                        onClick = if (playlistState.items.isEmpty() || playlistState.retryFromStart) onRefreshPlaylists else onLoadMorePlaylists,
-                                    )
-                                }
-                            }
+                            collectionPagingFooter("playlist-pagination", playlistState, onRefreshPlaylists, onLoadMorePlaylists)
                         }
 
                         LibraryPage.Albums, LibraryPage.Podcasts -> {
@@ -599,15 +576,7 @@ fun LibraryMobileLayout(
                                         repeat(albumColumns - row.size) { Spacer(Modifier.weight(1f)) }
                                     }
                                 }
-                                if (albumState.isLoading || albumState.isLoadingMore || albumState.error != null || albumState.hasMore) {
-                                    item(key = "album-pagination") {
-                                        CollectionFooter(
-                                            loading = albumState.isLoading || albumState.isLoadingMore,
-                                            failed = albumState.error != null,
-                                            onClick = if (albumState.items.isEmpty() || albumState.retryFromStart) onRefreshAlbums else onLoadMoreAlbums,
-                                        )
-                                    }
-                                }
+                                collectionPagingFooter("album-pagination", albumState, onRefreshAlbums, onLoadMoreAlbums)
                             }
                             if (showsPodcasts && podcastsEnabled) {
                                 if (mergeAlbumPodcasts) {
@@ -627,7 +596,7 @@ fun LibraryMobileLayout(
 
                         LibraryPage.Cloud -> {
                             cloudState?.let { state ->
-                                libraryCloudItems(state, playerConnection, query) { cloudViewModel?.loadMore() }
+                                libraryCloudItems(state, playerConnection, query, ownerKey = cloudViewModel) { cloudViewModel?.loadMore() }
                             }
                         }
 
@@ -679,8 +648,28 @@ internal fun LibraryCollectionHeading(title: String) {
     )
 }
 
+private fun LazyListScope.collectionPagingFooter(
+    key: String,
+    state: LibraryCollectionState<*>,
+    onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
+) {
+    val loading = state.isLoading || state.isLoadingMore
+    if (loading || state.error != null || state.hasMore) {
+        item(key) {
+            if (!loading && state.error == null && state.hasMore) {
+                AutomaticPagination(state.nextOffset, onLoadMore)
+            }
+            CollectionFooter(
+                loading = loading || state.error == null,
+                onRetry = if (state.items.isEmpty() || state.retryFromStart) onRefresh else onLoadMore,
+            )
+        }
+    }
+}
+
 @Composable
-private fun CollectionFooter(loading: Boolean, failed: Boolean, onClick: () -> Unit) {
+private fun CollectionFooter(loading: Boolean, onRetry: () -> Unit) {
     if (loading) {
         Box(Modifier.fillMaxWidth().height(88.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = LocalGlassColors.current.accent)
@@ -688,11 +677,11 @@ private fun CollectionFooter(loading: Boolean, failed: Boolean, onClick: () -> U
     } else {
         GlasmioGroupedList {
             GlasmioListRow(
-                title = stringResource(if (failed) R.string.retry else R.string.library_load_more),
-                subtitle = if (failed) stringResource(R.string.library_collection_load_failed) else null,
-                systemName = if (failed) "arrow.clockwise" else "chevron.down",
+                title = stringResource(R.string.retry),
+                subtitle = stringResource(R.string.library_collection_load_failed),
+                systemName = "arrow.clockwise",
                 showTopSeparator = false,
-                onClick = onClick,
+                onClick = onRetry,
             )
         }
     }
@@ -803,10 +792,12 @@ internal fun LazyListScope.libraryPodcastItems(
     val failed = state.subscriptionsError != null || state.subscriptionsLoadMoreError != null
     if (loading || failed || state.hasMoreSubscriptions) {
         item(key = "library-podcast-pagination") {
+            if (!loading && !failed && state.hasMoreSubscriptions) {
+                AutomaticPagination(viewModel to state.subscriptionOffset, viewModel::loadMoreSubscriptions)
+            }
             CollectionFooter(
-                loading = loading,
-                failed = failed,
-                onClick = if (!state.subscriptionsLoaded || state.subscriptionsError != null) {
+                loading = loading || !failed,
+                onRetry = if (!state.subscriptionsLoaded || state.subscriptionsError != null) {
                     viewModel::refresh
                 } else viewModel::loadMoreSubscriptions,
             )
@@ -825,6 +816,7 @@ internal fun LazyListScope.libraryCloudItems(
     state: CloudMusicUiState,
     playerConnection: PlayerConnection?,
     query: String,
+    ownerKey: Any? = null,
     onLoadMore: () -> Unit,
 ) {
     val songs = state.page?.songs.orEmpty().filterIfSearching(query) { song ->
@@ -832,6 +824,7 @@ internal fun LazyListScope.libraryCloudItems(
             song.artist.containsQuery(query) ||
             song.album.containsQuery(query)
     }
+    val hasMore = state.page?.hasMore == true
     when {
         state.isLoading && state.page == null -> item(key = "library-cloud-loading") {
             Box(Modifier.fillMaxWidth()) {
@@ -840,14 +833,14 @@ internal fun LazyListScope.libraryCloudItems(
                 }
             }
         }
-        songs.isEmpty() -> item(key = "library-cloud-empty") {
+        songs.isEmpty() && !hasMore && !state.isLoadingMore && state.loadMoreError == null -> item(key = "library-cloud-empty") {
             EmptyState(
                 if (query.isNotEmpty()) stringResource(R.string.no_search_results)
                 else state.error ?: stringResource(R.string.library_empty_songs),
                 SfSymbol.Cloud,
             )
         }
-        else -> groupedLazyItems(
+        songs.isNotEmpty() -> groupedLazyItems(
             items = songs,
             key = { "cloud-${it.id}" },
             contentType = "cloud-song",
@@ -875,9 +868,9 @@ internal fun LazyListScope.libraryCloudItems(
             )
         }
     }
-    if (state.page?.hasMore == true || state.isLoadingMore || state.loadMoreError != null) {
+    if (hasMore || state.isLoadingMore || state.loadMoreError != null) {
         item(key = "library-cloud-pagination") {
-            CloudMusicPaginationFooter(state, onLoadMore)
+            CloudMusicPaginationFooter(state, onLoadMore, ownerKey = ownerKey)
         }
     }
 }

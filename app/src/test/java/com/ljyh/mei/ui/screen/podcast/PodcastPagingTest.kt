@@ -66,6 +66,15 @@ class PodcastPagingTest {
     }
 
     @Test
+    fun subscriptionsStopWhenServerReturnsNoRowsButClaimsMore() {
+        val state = PodcastUiState(subscriptionOffset = 7, hasMoreSubscriptions = true)
+            .withSubscriptionPage(PodcastPage(emptyList(), true, 10), reset = false)
+
+        assertEquals(7, state.subscriptionOffset)
+        assertFalse(state.hasMoreSubscriptions)
+    }
+
+    @Test
     fun programCursorKeepsMovingThroughDuplicateAndFullyFilteredPages() {
         var detail = PodcastDetail(
             podcast = podcast(1),
@@ -87,6 +96,20 @@ class PodcastPagingTest {
         detail = detail.withProgramPage(PodcastProgramPage(listOf(program(11)), false, 8))
         assertEquals(listOf("10", "11"), detail.programs.map(PodcastProgram::id))
         assertEquals(8, detail.nextOffset)
+        assertFalse(detail.hasMore)
+    }
+
+    @Test
+    fun programsStopWhenServerReturnsNoRowsButClaimsMore() {
+        val detail = PodcastDetail(
+            podcast = podcast(1),
+            programs = listOf(program(10)),
+            hasMore = true,
+            totalCount = 8,
+            nextOffset = 3,
+        ).withProgramPage(PodcastProgramPage(emptyList(), true, 8))
+
+        assertEquals(3, detail.nextOffset)
         assertFalse(detail.hasMore)
     }
 

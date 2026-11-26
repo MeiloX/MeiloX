@@ -173,7 +173,6 @@
   <string name="private_messages">プライベートメッセージ</string>
   <string name="official_messages">公式メッセージ</string>
   <string name="official_messages_empty">非公式メッセージ</string>
-  <string name="message_load_more">さらに読み込む</string>
   <string name="message_start">メッセージを開始</string>
   <string name="message_search_contacts">フォロー中の人を検索</string>
   <string name="private_conversation">会話</string>
@@ -610,7 +609,6 @@
   <string name="account_followers">フォロワー</string>
   <string name="account_no_follows">まだ誰もフォローしていません</string>
   <string name="account_no_followers">フォロワーはまだいません</string>
-  <string name="account_load_more">さらに読み込む</string>
   <string name="account_playlist_metric">プレイリスト</string>
   <string name="account_listening_rank">再生ランキング</string>
   <string name="account_week">先週</string>
@@ -927,7 +925,6 @@
   <string name="artist_catalog_search_progress">%2$d 件中 %1$d 件が一致。検索中…</string>
   <string name="artist_catalog_search_partial">%2$d 件中 %1$d 件が一致。さらに一致する項目がある可能性があります。</string>
   <string name="artist_catalog_search_complete">%2$d 件中 %1$d 件が一致。</string>
-  <string name="artist_catalog_search_continue">さらに検索</string>
   <!-- values/comment_actions.xml -->
   <string name="comment_hide_replies">返信を非表示</string>
   <string name="comment_show_replies">%1$d 件の返信を表示</string>
@@ -953,7 +950,6 @@
   <string name="library_filter_subscribed">購読中</string>
   <string name="library_empty_created_playlists">プレイリストを作成していません</string>
   <string name="library_empty_subscribed_playlists">購読したプレイリストはありません</string>
-  <string name="library_load_more">さらに読み込む</string>
   <string name="library_collection_load_failed">ライブラリを読み込めませんでした。再度お試しください。</string>
   <string name="album_subscription_update_failed">アルバムの購読を更新できませんでした。再度お試しください。</string>
   <string name="album_subscription_load_failed">アルバムの購読を確認できませんでした。タップして再試行してください。</string>

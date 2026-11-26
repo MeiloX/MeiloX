@@ -173,7 +173,6 @@
     <string name="private_messages">私訊</string>
     <string name="official_messages">官方訊息</string>
     <string name="official_messages_empty">沒有官方訊息</string>
-    <string name="message_load_more">載入更多</string>
     <string name="message_start">發起私訊</string>
     <string name="message_search_contacts">搜尋關注的人</string>
     <string name="private_conversation">對話</string>
@@ -615,7 +614,6 @@
     <string name="account_followers">粉絲</string>
     <string name="account_no_follows">暫無關注</string>
     <string name="account_no_followers">暫無粉絲</string>
-    <string name="account_load_more">載入更多</string>
     <string name="account_playlist_metric">歌單</string>
     <string name="account_listening_rank">我的聽歌排行</string>
     <string name="account_week">最近一週</string>
@@ -932,7 +930,6 @@
     <string name="artist_catalog_search_progress">找到 %1$d 項結果，已檢索 %2$d 項，繼續檢索中…</string>
     <string name="artist_catalog_search_partial">找到 %1$d 項結果，已檢索 %2$d 項，還有更多內容可檢索</string>
     <string name="artist_catalog_search_complete">找到 %1$d 項結果，已檢索全部 %2$d 項</string>
-    <string name="artist_catalog_search_continue">繼續檢索更多內容</string>
     <!-- values-zh-rTW/comment_actions.xml -->
     <string name="comment_hide_replies">收起回覆</string>
     <string name="comment_show_replies">展開 %1$d 則回覆</string>
@@ -958,7 +955,6 @@
     <string name="library_filter_subscribed">我收藏的</string>
     <string name="library_empty_created_playlists">尚未建立歌單</string>
     <string name="library_empty_subscribed_playlists">尚未收藏歌單</string>
-    <string name="library_load_more">載入更多</string>
     <string name="library_collection_load_failed">資料庫暫時無法載入，請重試。</string>
     <string name="album_subscription_update_failed">專輯收藏更新失敗，請重試。</string>
     <string name="album_subscription_load_failed">暫時無法取得專輯收藏狀態，點一下重試。</string>

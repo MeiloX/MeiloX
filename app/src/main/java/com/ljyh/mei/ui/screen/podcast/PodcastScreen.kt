@@ -1,5 +1,6 @@
 package com.ljyh.mei.ui.screen.podcast
 
+import com.ljyh.mei.ui.component.AutomaticPagination
 import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.component.item.FixedCardCaption
 import io.github.neoruaa.glasmio.core.swipeBackExcluded
@@ -43,7 +44,6 @@ import com.ljyh.mei.ui.screen.playlist.DetailSelectionToolbar
 import com.ljyh.mei.ui.screen.playlist.detailMenuItems
 import com.ljyh.mei.ui.screen.playlist.matchesPlaylistSearch
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -92,7 +92,6 @@ import com.ljyh.mei.ui.screen.playlist.component.PlaylistShimmer
 import com.ljyh.mei.ui.screen.playlist.component.PlaylistSurface
 import com.ljyh.mei.ui.screen.playlist.component.formatCompactCount
 import com.ljyh.mei.utils.rememberPreference
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 private const val MaxAutomaticRestorationPages = 3
 
@@ -117,17 +116,6 @@ fun PodcastScreen(
     LaunchedEffect(state.selectedTab, isVisitor) {
         if (state.selectedTab == PodcastTab.Subscriptions && !isVisitor) {
             viewModel.ensureSubscriptionsLoaded()
-        }
-    }
-    LaunchedEffect(listState, state.selectedTab) {
-        if (state.selectedTab != PodcastTab.Subscriptions) return@LaunchedEffect
-        snapshotFlow {
-            val layout = listState.layoutInfo
-            (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) to layout.totalItemsCount
-        }.distinctUntilChanged().collect { (lastVisibleIndex, totalItemsCount) ->
-            if (totalItemsCount > 0 && lastVisibleIndex >= totalItemsCount - 1) {
-                viewModel.loadMoreSubscriptions()
-            }
         }
     }
 
@@ -247,13 +235,18 @@ fun PodcastScreen(
                             },
                         )
                     }
-                    if (state.hasMoreSubscriptions || state.isLoadingMoreSubscriptions ||
-                        state.subscriptionsLoadMoreError != null
-                    ) {
+                    val error = state.subscriptionsError ?: state.subscriptionsLoadMoreError
+                    val loading = state.isSubscriptionsLoading || state.isLoadingMoreSubscriptions
+                    if (state.hasMoreSubscriptions || loading || error != null) {
                         item(key = "podcast-subscriptions-pagination") {
+                            if (state.hasMoreSubscriptions && !loading && error == null) {
+                                AutomaticPagination(state.subscriptionOffset, viewModel::loadMoreSubscriptions)
+                            }
                             PodcastPaginationFooter(
-                                failureMessage = state.subscriptionsLoadMoreError,
-                                onLoadMore = viewModel::loadMoreSubscriptions,
+                                failureMessage = error,
+                                onLoadMore = if (state.subscriptionsError != null) {
+                                    viewModel::refresh
+                                } else viewModel::loadMoreSubscriptions,
                             )
                         }
                     }
@@ -436,15 +429,6 @@ fun PodcastDetailScreen(
         } catch (error: Exception) { searchError = error.message }
         finally { searching = false }
     }
-    LaunchedEffect(id, listState, query, restoringPrograms, state.loadMoreError) {
-        if (query.isNotBlank() || restoringPrograms || state.loadMoreError != null) return@LaunchedEffect
-        snapshotFlow {
-            val layout = listState.layoutInfo
-            (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) to layout.totalItemsCount
-        }.distinctUntilChanged().collect { (lastVisibleIndex, totalItemsCount) ->
-            if (totalItemsCount > 0 && lastVisibleIndex >= totalItemsCount - 1) viewModel.loadMore()
-        }
-    }
     val displayedPrograms = if (query.isBlank()) detail?.programs.orEmpty() else searchResults
     val tracks = remember(displayedPrograms) { displayedPrograms.map { it.toMediaMetadata() } }
     val count = maxOf(detail?.totalCount ?: 0, detail?.podcast?.programCount ?: 0, detail?.programs?.size ?: 0)
@@ -565,8 +549,11 @@ fun PodcastDetailScreen(
             (searchError ?: state.error)?.let { error ->
                 item(key = "podcast-detail-error") { InlineErrorState(error, ::refreshDetail) }
             }
-            if (query.isBlank() && (detail?.hasMore == true || state.isLoadingMore || state.loadMoreError != null)) {
+            if (query.isBlank() && !restoringPrograms && (detail?.hasMore == true || state.isLoadingMore || state.loadMoreError != null)) {
                 item(key = "podcast-program-pagination") {
+                    if (detail?.hasMore == true && !state.isLoading && !state.isLoadingMore && state.loadMoreError == null) {
+                        AutomaticPagination(id to detail.nextOffset, viewModel::loadMore)
+                    }
                     PodcastPaginationFooter(state.loadMoreError, viewModel::loadMore)
                 }
             }

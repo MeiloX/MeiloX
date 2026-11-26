@@ -118,7 +118,7 @@ class CloudMusicTest {
         val viewModel = viewModel { offset ->
             requests += offset
             if (offset == 0) page(listOf(song(1)), true, 4)
-            else if (fail) error("Page unavailable")
+            else if (fail) throw IllegalStateException()
             else page(listOf(song(2)), false, 6)
         }
         runCurrent()

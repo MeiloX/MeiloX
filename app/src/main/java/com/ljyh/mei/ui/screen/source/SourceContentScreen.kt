@@ -11,8 +11,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Velocity
 import com.ljyh.mei.data.model.mediaId
 import com.ljyh.mei.data.model.supportsNeteaseSongActions
 import com.ljyh.mei.ui.screen.playlist.SongListDetailData
@@ -81,6 +86,7 @@ import com.ljyh.mei.ui.navigation.meiloxHeaderAction
 import com.ljyh.mei.ui.screen.Screen
 import com.ljyh.mei.ui.screen.main.library.component.groupedLazyItems
 import com.ljyh.mei.ui.screen.search.LoadingView
+import com.ljyh.mei.ui.component.AutomaticPagination
 import com.ljyh.mei.ui.component.DownloadConfirmDialog
 import com.ljyh.mei.utils.DownloadManager
 import com.ljyh.mei.utils.image.saveImageToGallery
@@ -552,8 +558,12 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
             searchResultsLoading = searchResultsLoading,
             trackNumber = { _, index -> (displayed.getOrNull(index)?.index ?: index) + 1 },
             footer = {
-                if (query.isBlank()) sourceDetailPagingStatus(state, viewModel::refresh, viewModel::loadMore,
-                    automatic = ref !is PlaylistRef, showLoading = pendingTrackCount == 0)
+                if (query.isBlank()) sourceDetailPagingStatus(
+                    state = state,
+                    onRetry = if (state.items.isNotEmpty() && state.hasMore) viewModel::loadMore else viewModel::refresh,
+                    onMore = viewModel::loadMore,
+                    showLoading = pendingTrackCount == 0,
+                )
                 else {
                     searchError?.let { error -> item("source-detail-search-error") {
                         GlasmioListRow(sourceErrorMessage(error), trailing = { Text("重试") }, onClick = { searchAttempt++ })
@@ -602,11 +612,11 @@ internal fun sourceDetailMatches(tracks: List<Track>, query: String): List<Index
     }
 }
 
-private fun LazyListScope.sourceDetailPagingStatus(
+internal fun LazyListScope.sourceDetailPagingStatus(
     state: SourceContentState,
     onRetry: () -> Unit,
     onMore: () -> Unit,
-    automatic: Boolean = true,
+    pagingEnabled: Boolean = true,
     showLoading: Boolean = true,
     horizontalPadding: Dp = 0.dp,
 ) {
@@ -614,13 +624,12 @@ private fun LazyListScope.sourceDetailPagingStatus(
         sourceTrackSkeletons(state, "source-detail-first-page-loading", horizontalPadding)
     }
     if (state.error != null) item("source-detail-retry") {
-        GlasmioListRow(sourceErrorMessage(state.error), trailing = { Text("重试") }, onClick = onRetry)
+        GlasmioListRow(sourceErrorMessage(state.error), trailing = { Text(stringResource(R.string.retry)) }, onClick = onRetry)
     }
-    if (state.hasMore && state.error == null && (automatic || showLoading)) {
-        item("source-detail-append:${state.nextOffset}") {
-            if (automatic) LaunchedEffect(state.providerId, state.providerVersion, state.accountRevision,
-                state.nextOffset, state.nextCursor, state.loading) { if (!state.loading) onMore() }
-            else if (!state.loading) GlasmioListRow(stringResource(R.string.artist_catalog_search_continue), onClick = onMore)
+    if (state.hasMore && state.error == null && !state.refreshing) {
+        if (pagingEnabled && !state.loading) item("source-detail-append") {
+            val page = listOf(state.detail?.ref, state.providerVersion, state.accountRevision, state.nextOffset, state.nextCursor)
+            AutomaticPagination(page, onMore)
         }
         if (showLoading && state.loading) {
             sourceTrackSkeletons(state, "source-detail-append-loading", horizontalPadding)
@@ -856,10 +865,68 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
     } }
     val play = rememberSourceQueuePlayer("source-artist:${ref.providerId}:${ref.artistId}", state.title,
         viewModel, SourceContentRequest.Detail(ref))
+    val searchQuery = query.text.trim()
+    val listState = rememberLazyListState()
+    var searchSettled by remember(ref, albums, searchQuery) { mutableStateOf(searchQuery.isEmpty()) }
     LaunchedEffect(ref) { viewModel.open(SourceContentRequest.Detail(ref)) }
-    LaunchedEffect(ref, albums, query.text) { viewModel.updateArtistCatalogSearch(ref, albums, query.text) }
+    LaunchedEffect(ref, albums, searchQuery) {
+        if (searchQuery.isEmpty()) {
+            viewModel.updateArtistCatalogSearch(ref, albums, "")
+            searchSettled = true
+        } else {
+            viewModel.updateArtistCatalogSearch(ref, albums, searchQuery)?.join()
+            searchSettled = true
+        }
+    }
+    val listScrollable by remember(listState) {
+        derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
+    }
+    val pagingEnabled = searchQuery.isEmpty() || (searchSettled && listScrollable)
+    val overscrollThresholdPx = with(LocalDensity.current) { 24.dp.toPx() }
+    val currentState by rememberUpdatedState(state)
+    val overscrollLoadMore = remember(ref, albums, searchQuery, overscrollThresholdPx, viewModel) {
+        object : NestedScrollConnection {
+            private var draggedUpPx = 0f
+            private var triggered = false
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (searchQuery.isEmpty() || !searchSettled || source != NestedScrollSource.UserInput) return Offset.Zero
+                if (available.y < 0f) {
+                    draggedUpPx += -available.y
+                    if (!triggered && draggedUpPx >= overscrollThresholdPx) {
+                        val latest = currentState
+                        val canLoad = if (albums) {
+                            latest.albumsHasMore && !latest.albumsLoading && !latest.loading && !latest.refreshing &&
+                                latest.albumsError == null && latest.error == null
+                        } else {
+                            latest.hasMore && !latest.loading && !latest.refreshing && latest.error == null
+                        }
+                        if (canLoad) {
+                            triggered = true
+                            if (albums) viewModel.loadMoreArtistAlbums() else viewModel.loadMore()
+                        }
+                    }
+                } else if (available.y > 0f) {
+                    draggedUpPx = 0f
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                draggedUpPx = 0f
+                triggered = false
+                return Velocity.Zero
+            }
+        }
+    }
     MeiloXPinnedListPage(stringResource(if (albums) R.string.artist_all_albums else R.string.artist_all_songs),
         bottomPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues().calculateBottomPadding(),
+        modifier = Modifier.nestedScroll(overscrollLoadMore),
+        listState = listState,
         horizontalContentPadding = 0.dp, largeTitleHorizontalPadding = 20.dp,
         verticalArrangement = Arrangement.spacedBy(0.dp), onNavigateBack = nav::navigateUp) {
         item("catalog-search") {
@@ -869,7 +936,7 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
                 closeContentDescription = stringResource(R.string.cancel), onSearch = { focus.clearFocus() },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 12.dp))
         }
-        if (query.text.isNotBlank()) item("catalog-search-status") {
+        if (searchQuery.isNotEmpty() && state.error == null && (!albums || state.albumsError == null)) item("catalog-search-status") {
             ArtistCatalogSearchStatus(if (albums) records.size else tracks.size,
                 if (albums) visibleAlbums.size else visibleTracks.size,
                 state.loading || state.albumsLoading, if (albums) state.albumsHasMore else state.hasMore)
@@ -889,20 +956,17 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
                     modifier = Modifier.padding(horizontal = if (landscape) 32.dp else 20.dp),
                     album = "", favorite = saved, showDivider = album != visibleAlbums.lastOrNull())
             }
-            if (state.albumsError != null) item("catalog-albums-error") {
-                GlasmioListRow(sourceErrorMessage(state.albumsError!!), onClick = {
-                    if (query.text.isBlank()) viewModel.loadMoreArtistAlbums() else viewModel.continueArtistCatalogSearch()
-                })
-            }
-            if (state.albumsLoading) item("catalog-albums-loading") { LoadingView() }
-            if (state.albumsHasMore && !state.albumsLoading && !state.loading && state.albumsError == null) {
-                item("catalog-albums-more:${state.albumsNextOffset}") {
-                    if (query.text.isBlank()) {
-                        LaunchedEffect(ref, state.providerVersion, state.accountRevision, state.albumsNextOffset, state.albumsNextCursor) {
-                            viewModel.loadMoreArtistAlbums()
-                        }
-                        LoadingView()
-                    } else GlasmioListRow(stringResource(R.string.artist_catalog_search_continue), onClick = viewModel::continueArtistCatalogSearch)
+            state.albumsError?.let { error -> item("catalog-albums-error") {
+                GlasmioListRow(sourceErrorMessage(error), trailing = { Text(stringResource(R.string.retry)) },
+                    onClick = if (state.albumsHasMore) viewModel::loadMoreArtistAlbums else viewModel::refresh)
+            } }
+            if (state.albumsLoading || state.albumsHasMore && state.albumsError == null && state.error == null && pagingEnabled) {
+                item("catalog-albums-pagination") {
+                    if (!state.albumsLoading && !state.loading && !state.refreshing) {
+                        val page = listOf(ref, state.providerVersion, state.accountRevision, state.albumsNextOffset, state.albumsNextCursor)
+                        AutomaticPagination(page, viewModel::loadMoreArtistAlbums)
+                    }
+                    LoadingView()
                 }
             }
         } else {
@@ -919,9 +983,13 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
                     onMore = { menu = track to it }, menuAnchorState = trackMenuAnchor, trackRef = track.ref,
                     hasAlternateVersion = track.hasAlternateVersion)
             }
-            sourceDetailPagingStatus(state, viewModel::refresh, {
-                if (query.text.isBlank()) viewModel.loadMore() else viewModel.continueArtistCatalogSearch()
-            }, automatic = false, horizontalPadding = if (landscape) 32.dp else 20.dp)
+            sourceDetailPagingStatus(
+                state = state,
+                onRetry = if (state.items.isNotEmpty() && state.hasMore) viewModel::loadMore else viewModel::refresh,
+                onMore = viewModel::loadMore,
+                pagingEnabled = pagingEnabled,
+                horizontalPadding = if (landscape) 32.dp else 20.dp,
+            )
         }
         if (!state.loading && state.error == null && (if (albums) records.isEmpty() && !state.albumsHasMore else tracks.isEmpty() && !state.hasMore)) {
             item("artist-catalog-empty") {
@@ -929,7 +997,7 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
                     modifier = Modifier.padding(20.dp), color = LocalGlassColors.current.secondaryContent)
             }
         }
-        if (albums && state.loading) item("artist-catalog-loading") { LoadingView() }
+        if (albums && state.loading && !state.albumsLoading) item("artist-catalog-loading") { LoadingView() }
         if (albums && state.error != null) item("artist-catalog-error") {
             GlasmioListRow(sourceErrorMessage(state.error!!), onClick = viewModel::refresh)
         }

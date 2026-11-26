@@ -699,18 +699,10 @@ class SourceContentViewModel internal constructor(
         }
     }
 
-    fun updateArtistCatalogSearch(ref: ArtistRef, albums: Boolean, query: String) {
+    internal fun updateArtistCatalogSearch(ref: ArtistRef, albums: Boolean, query: String): Job? {
         val selection = Triple(ref, albums, query.trim())
-        if (selection == artistSearchSelection) return
+        if (selection == artistSearchSelection) return artistSearchJob
         artistSearchSelection = selection
-        searchArtistCatalog(selection, debounce = true)
-    }
-
-    fun continueArtistCatalogSearch() {
-        artistSearchSelection?.let { searchArtistCatalog(it, debounce = false) }
-    }
-
-    private fun searchArtistCatalog(selection: Triple<ArtistRef, Boolean, String>, debounce: Boolean) {
         artistSearchJob?.cancel()
         artistSearchPage?.takeIf { it.isActive }?.let {
             generation++
@@ -718,26 +710,31 @@ class SourceContentViewModel internal constructor(
             mutableState.value = state.value.copy(loading = false, albumsLoading = false)
         }
         artistSearchPage = null
-        if (selection.third.isEmpty()) return
+        if (selection.third.isEmpty()) {
+            artistSearchJob = null
+            return null
+        }
         artistSearchJob = viewModelScope.launch {
-            if (debounce) delay(ArtistCatalogSearchDebounceMillis)
-            state.first { !it.loading && (!selection.second || !it.albumsLoading) && it.providerId == selection.first.providerId }
-            repeat(ArtistCatalogSearchPageBudget) { pageIndex ->
-                if (artistSearchSelection != selection || (request.value as? SourceContentRequest.Detail)?.ref != selection.first) return@launch
+            delay(ArtistCatalogSearchDebounceMillis)
+            state.first { !it.loading && (!albums || !it.albumsLoading) && it.providerId == ref.providerId }
+            repeat(ArtistCatalogSearchPageBudget) {
+                if (artistSearchSelection != selection || (request.value as? SourceContentRequest.Detail)?.ref != ref) return@launch
                 val current = state.value
-                if (selection.second) {
-                    if (!current.albumsHasMore || current.albumsError != null && pageIndex > 0) return@launch
+                if (current.error != null) return@launch
+                if (albums) {
+                    if (!current.albumsHasMore || current.albumsError != null) return@launch
                     loadMoreArtistAlbums()
                 } else {
-                    if (!current.hasMore || current.error != null && pageIndex > 0) return@launch
+                    if (!current.hasMore) return@launch
                     loadMore()
                 }
-                val pending = if (selection.second) albumPagination else pagination
+                val pending = if (albums) albumPagination else pagination
                 artistSearchPage = pending
                 try { pending?.join() }
                 finally { if (!currentCoroutineContext().isActive) pending?.cancel() }
             }
         }
+        return artistSearchJob
     }
 
     private companion object {

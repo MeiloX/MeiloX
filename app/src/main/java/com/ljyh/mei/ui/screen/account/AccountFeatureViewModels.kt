@@ -9,6 +9,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
@@ -69,6 +70,8 @@ data class AccountDevicesState(
     val error: String? = null,
     val cursor: String? = null,
     val more: Boolean = false,
+    val loadingMore: Boolean = false,
+    val loadMoreError: String? = null,
 )
 
 @HiltViewModel
@@ -78,6 +81,7 @@ class AccountDevicesViewModel @Inject constructor(onlineRepository: SharedOnline
     private val _state = MutableStateFlow(AccountDevicesState())
     val state = _state.asStateFlow()
     private var job: Job? = null
+    private val authorizationCursors = mutableSetOf<String>()
     init { viewModelScope.launch { repository.sessionChanges.collect { session ->
         job?.cancel(); _state.value = AccountDevicesState(tab = _state.value.tab)
         if (session.isNotBlank()) refresh()
@@ -87,25 +91,39 @@ class AccountDevicesViewModel @Inject constructor(onlineRepository: SharedOnline
         job?.cancel(); _state.value = AccountDevicesState(tab = tab); refresh()
     }
     fun refresh() = load(false)
-    fun loadMore() { if (_state.value.more && !_state.value.loading) load(true) }
+    fun loadMore() {
+        val current = _state.value
+        if (current.more && !current.loading && !current.loadingMore && current.error == null) load(true)
+    }
+
     private fun load(append: Boolean) {
         job?.cancel()
-        val previous = _state.value
+        if (!append) authorizationCursors.clear()
+        val previous = _state.value.copy(loading = false, loadingMore = false, error = null, loadMoreError = null)
+        _state.value = previous.copy(loading = !append, loadingMore = append)
         job = viewModelScope.launch {
-            _state.value = previous.copy(loading = true, error = null)
             try {
                 if (previous.tab == AccountDeviceTab.Devices) {
-                    _state.value = previous.copy(devices = repository.devices(), loading = false)
+                    val devices = repository.devices()
+                    ensureActive()
+                    _state.value = previous.copy(devices = devices)
                 } else {
-                    val page = repository.authorizations(previous.tab == AccountDeviceTab.History,
-                        if (append) previous.cursor.orEmpty() else "")
+                    val cursor = if (append) previous.cursor.orEmpty() else ""
+                    val page = repository.authorizations(previous.tab == AccountDeviceTab.History, cursor)
+                    ensureActive()
+                    val nextCursor = page.cursor?.takeIf(String::isNotBlank)
                     _state.value = previous.copy(
                         applications = ((if (append) previous.applications else emptyList()) + page.records).distinctBy { it.clientId },
-                        cursor = page.cursor, more = page.more, loading = false,
+                        cursor = nextCursor,
+                        more = page.more && nextCursor != null && authorizationCursors.add(nextCursor),
                     )
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { _state.value = previous.copy(loading = false, error = failure.message) }
+            catch (failure: Exception) {
+                ensureActive()
+                val message = failure.message?.takeIf(String::isNotBlank) ?: failure.toString()
+                _state.value = if (append) previous.copy(loadMoreError = message) else previous.copy(error = message)
+            }
         }
     }
     suspend fun removeDevice(device: AccountDevice, captcha: String = "") {
