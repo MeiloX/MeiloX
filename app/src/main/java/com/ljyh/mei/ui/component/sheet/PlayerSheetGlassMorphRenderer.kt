@@ -147,16 +147,23 @@ internal class PlayerSheetGlassMorphRenderer(
     private val materialPreset: NavigationGlassMaterial? = null,
     private val materialDark: Boolean = false,
 ) {
-    private val shader = if (isRuntimeShaderSupported() && appearance.usesRefraction) programs?.refraction ?: RuntimeShader(TransitionRefractionShader) else null
-    private val highlight =
+    private val sharedPrograms = programs
+    private val shaderDelegate = lazy(LazyThreadSafetyMode.NONE) {
+        if (isRuntimeShaderSupported() && appearance.usesRefraction) programs?.refraction ?: RuntimeShader(TransitionRefractionShader) else null
+    }
+    private val shader by shaderDelegate
+    private val highlightDelegate = lazy(LazyThreadSafetyMode.NONE) {
         if (isRuntimeShaderSupported()) programs?.highlight ?: RuntimeShader(TransitionHighlightShader) else null
-    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = highlight }
+    }
+    private val highlight by highlightDelegate
+    private val highlightPaint by lazy(LazyThreadSafetyMode.NONE) { Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = highlight } }
     private val highlightBlender: NativeVibrantColorMatrixBlender? =
         if (Build.VERSION.SDK_INT >= 36) NativeVibrantColorMatrixBlender() else null
     private var sampledHighlight: Highlight? = null
     private var sampledHighlightAlpha = Float.NaN
     private val pressLight = PressHighlightRenderer()
-    private val innerShadows = NavigationInnerShadowRenderer(renderScale = renderScale)
+    private val innerShadowsDelegate = lazy(LazyThreadSafetyMode.NONE) { NavigationInnerShadowRenderer(renderScale = renderScale) }
+    private val innerShadows by innerShadowsDelegate
     private var nativeRecipe: NavigationMaterialRecipe? = null
     internal var presentationDarkFraction: Float = if (materialDark) 1f else 0f
     private var nativeRecipeDarkFraction = Float.NaN
@@ -181,10 +188,11 @@ internal class PlayerSheetGlassMorphRenderer(
         )
     }
     private val sourceDropShadow by sourceDropShadowDelegate
-    private val shadowLiftShader = if (isRuntimeShaderSupported() && appearance.usesBackdrop) RuntimeShader(NavigationShadowLiftShader) else null
-    private val shadowLiftEffect = if (isRuntimeShaderSupported()) {
-        shadowLiftShader?.let { RenderEffect.createRuntimeShaderEffect(it, "content") }
-    } else null
+    private val shadowLift by lazy(LazyThreadSafetyMode.NONE) {
+        if (isRuntimeShaderSupported() && appearance.usesBackdrop) RuntimeShader(NavigationShadowLiftShader).let {
+            it to RenderEffect.createRuntimeShaderEffect(it, "content")
+        } else null
+    }
     private val reusableOutlinePath = Path()
     private var materialWidth = 0
     private var materialHeight = 0
@@ -265,11 +273,13 @@ internal class PlayerSheetGlassMorphRenderer(
     }
 
     fun release() {
-        if (isRuntimeShaderSupported()) {
+        if (isRuntimeShaderSupported() && (shaderDelegate.isInitialized() || sharedPrograms != null)) {
             shader?.let { bindLiquidMenuField(it, null) }
+        }
+        if (isRuntimeShaderSupported() && (highlightDelegate.isInitialized() || sharedPrograms != null)) {
             highlight?.let { bindLiquidMenuField(it, null) }
         }
-        innerShadows.release()
+        if (innerShadowsDelegate.isInitialized()) innerShadows.release()
         dropShadow.release()
         if (sourceDropShadowDelegate.isInitialized()) sourceDropShadow.release()
         nativeFilterScope.reset()
@@ -597,7 +607,8 @@ internal class PlayerSheetGlassMorphRenderer(
             }
             return@with
         }
-        val refractionEffect = if (isRuntimeShaderSupported() && shader != null && (!nativeBackgroundFilter || customOptics)) {
+        val shader: RuntimeShader? = if (!nativeBackgroundFilter || customOptics) this@PlayerSheetGlassMorphRenderer.shader else null
+        val refractionEffect = if (isRuntimeShaderSupported() && shader != null) {
             val opticalBounds = lensBounds ?: bounds
             val sampleBounds = Rect(
                 sourceOffset.x + opticalBounds.left * sampleScale.x,
@@ -645,10 +656,11 @@ internal class PlayerSheetGlassMorphRenderer(
         val liftProgress = shadowLiftProgress.coerceIn(0f, 1f)
         val opticalEffect = if (nativeBackgroundEffect != null && refractionEffect != null)
             RenderEffect.createChainEffect(refractionEffect, nativeBackgroundEffect) else nativeBackgroundEffect ?: refractionEffect
-        val sampledEffect = if (isRuntimeShaderSupported() && !usesNativeMaterial && navigationMaterial && !isDark && shadowLiftEffect != null && liftProgress > 0f) {
-            shadowLiftShader?.setFloatUniform("suppression", 1f - liftProgress)
-            if (opticalEffect != null) RenderEffect.createChainEffect(shadowLiftEffect, opticalEffect)
-            else shadowLiftEffect
+        val shadowLiftPair = if (!usesNativeMaterial && navigationMaterial && !isDark) shadowLift else null
+        val sampledEffect = if (isRuntimeShaderSupported() && shadowLiftPair != null && liftProgress > 0f) {
+            shadowLiftPair.first.setFloatUniform("suppression", 1f - liftProgress)
+            if (opticalEffect != null) RenderEffect.createChainEffect(shadowLiftPair.second, opticalEffect)
+            else shadowLiftPair.second
         } else opticalEffect
         val highlightOpacity = highlightAlpha.coerceIn(0f, 1f)
         if (sampledHighlightAlpha != highlightOpacity) {
@@ -677,24 +689,25 @@ internal class PlayerSheetGlassMorphRenderer(
             }
             drawPath(path, Color(0xFF6E6E6E).copy(alpha = GlassBoxShadowAlpha), style = Stroke(0.65.dp.toPx()))
         }
-        if (isRuntimeShaderSupported() && highlight != null) {
+        val activeHighlight = if (!completeNativeMaterial) highlight else null
+        if (isRuntimeShaderSupported() && activeHighlight != null) {
             val opticalHighlightBounds = lensBounds ?: bounds
-            highlight.setFloatUniform("center", opticalHighlightBounds.center.x, opticalHighlightBounds.center.y)
-            highlight.setFloatUniform("halfSize", opticalHighlightBounds.width / 2f, opticalHighlightBounds.height / 2f)
-            highlight.setFloatUniform("radius", radius)
-            highlight.setFloatUniform("ellipticalCorners", if (cornerRadii != null) 1f else 0f)
-            highlight.setFloatUniform("cornerRadii", cornerRadii?.x ?: radius, cornerRadii?.y ?: radius)
-            highlight.setFloatUniform("secondaryEnabled", if (secondaryLensBounds != null) 1f else 0f)
+            activeHighlight.setFloatUniform("center", opticalHighlightBounds.center.x, opticalHighlightBounds.center.y)
+            activeHighlight.setFloatUniform("halfSize", opticalHighlightBounds.width / 2f, opticalHighlightBounds.height / 2f)
+            activeHighlight.setFloatUniform("radius", radius)
+            activeHighlight.setFloatUniform("ellipticalCorners", if (cornerRadii != null) 1f else 0f)
+            activeHighlight.setFloatUniform("cornerRadii", cornerRadii?.x ?: radius, cornerRadii?.y ?: radius)
+            activeHighlight.setFloatUniform("secondaryEnabled", if (secondaryLensBounds != null) 1f else 0f)
             val secondaryHighlight = secondaryLensBounds ?: opticalHighlightBounds
-            highlight.setFloatUniform("secondaryCenter", secondaryHighlight.center.x, secondaryHighlight.center.y)
-            highlight.setFloatUniform("secondaryHalfSize", secondaryHighlight.width / 2f, secondaryHighlight.height / 2f)
-            highlight.setFloatUniform("secondaryRadii", secondaryLensRadii?.x ?: radius, secondaryLensRadii?.y ?: radius)
-            highlight.setFloatUniform("smoothing", lensSmoothing)
-            bindLiquidMenuField(highlight, menuField)
-            highlight.setFloatUniform("opacity", highlightOpacity)
-            highlight.setFloatUniform("angle", 0f)
-            highlight.setFloatUniform("curvature", .75f)
-            highlight.setFloatUniform("height", scope.density)
+            activeHighlight.setFloatUniform("secondaryCenter", secondaryHighlight.center.x, secondaryHighlight.center.y)
+            activeHighlight.setFloatUniform("secondaryHalfSize", secondaryHighlight.width / 2f, secondaryHighlight.height / 2f)
+            activeHighlight.setFloatUniform("secondaryRadii", secondaryLensRadii?.x ?: radius, secondaryLensRadii?.y ?: radius)
+            activeHighlight.setFloatUniform("smoothing", lensSmoothing)
+            bindLiquidMenuField(activeHighlight, menuField)
+            activeHighlight.setFloatUniform("opacity", highlightOpacity)
+            activeHighlight.setFloatUniform("angle", 0f)
+            activeHighlight.setFloatUniform("curvature", .75f)
+            activeHighlight.setFloatUniform("height", scope.density)
         }
         // This rectangle anchors the light field; only the moving glass outline clips it.
         val lightBounds = pressHighlightBounds ?: bounds
@@ -955,7 +968,7 @@ internal class PlayerSheetGlassMorphRenderer(
 
 /** Reuse the standard native material graph over a morph's viewport-coordinate source. */
 private class MorphNativeFilterScope : BackdropEffectScopeImpl() {
-    override val supportsTwoRateNativeOpticalStage: Boolean get() = false
+    override val supportsTwoRateNativeOpticalStage: Boolean get() = true
     override val supportsNativeGlassHardwareLinearSampling: Boolean get() = true
     override var shape: Shape = RectangleShape
 
@@ -984,9 +997,20 @@ float3 roundedFieldGradient(float2 point, float2 origin, float2 extent, float2 r
     return nativeGlassRoundedField(point - origin, extent, radii, 0.0);
 }
 float3 liquidAnalyticFieldGradient(float2 point) {
-    float3 a = roundedFieldGradient(point, center, halfSize, cornerRadii);
-    if (secondaryEnabled < 0.5) return a;
-    float3 b = roundedFieldGradient(point, secondaryCenter, secondaryHalfSize, secondaryRadii);
+    float3 a = float3(0.0);
+    float3 b = float3(0.0);
+    for (int lobe = 0; lobe < 2; ++lobe) {
+        float2 c = lobe == 0 ? center : secondaryCenter;
+        float2 hs = lobe == 0 ? halfSize : secondaryHalfSize;
+        float2 cr = lobe == 0 ? cornerRadii : secondaryRadii;
+        float3 f = roundedFieldGradient(point, c, hs, cr);
+        if (lobe == 0) {
+            a = f;
+            if (secondaryEnabled < 0.5) return a;
+        } else {
+            b = f;
+        }
+    }
     // QuartzCore SDFUnion, iOS 24A434, 0x1c39e27d0: only opposing
     // unit gradients widen the polynomial union between the two skins.
     float k = smoothing * clamp(0.5 - 0.5 * dot(a.yz, b.yz), 0.0, 1.0);
