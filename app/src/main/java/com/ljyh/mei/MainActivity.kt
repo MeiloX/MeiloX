@@ -957,10 +957,22 @@ class MainActivity : ComponentActivity() {
                         windowInsetsController.isAppearanceLightStatusBars = !statusBarDark
                         onDispose { }
                     }
-                    DisposableEffect(window, isPlayerPage, keepScreenOnInPlayer) {
+                    val keepScreenOnSettled by remember(playerBottomSheetState) {
+                        derivedStateOf {
+                            when {
+                                playerBottomSheetState.isTransitioning -> null
+                                else -> playerBottomSheetState.isExpanded
+                            }
+                        }
+                    }
+                    DisposableEffect(window, keepScreenOnSettled, keepScreenOnInPlayer) {
                         val keepScreenOnFlag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                        val wantsScreenOn = isPlayerPage && keepScreenOnInPlayer
                         val hasScreenOn = window.attributes.flags and keepScreenOnFlag != 0
+                        val wantsScreenOn = when {
+                            !keepScreenOnInPlayer -> false
+                            keepScreenOnSettled != null -> keepScreenOnSettled == true
+                            else -> hasScreenOn
+                        }
                         if (hasScreenOn != wantsScreenOn) {
                             if (wantsScreenOn) window.addFlags(keepScreenOnFlag)
                             else window.clearFlags(keepScreenOnFlag)

@@ -51,6 +51,9 @@ import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.icons.SfIcon
 
+private val PortraitSongCoverShape = ContinuousRoundedRectangle(songListCoverCornerRadius(false))
+private val LandscapeSongCoverShape = ContinuousRoundedRectangle(songListCoverCornerRadius(true))
+
 /** Shared landscape catalog columns; the album column follows the available viewport. */
 @Composable
 internal fun LandscapeMediaRow(
@@ -128,7 +131,7 @@ internal fun LandscapeMediaRow(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     PlayingImageView(imageUrl = image, isPlaying = false, trackRef = trackRef,
-                        modifier = Modifier.size(songListCoverSize(true)).clip(ContinuousRoundedRectangle(songListCoverCornerRadius(true))))
+                        modifier = Modifier.size(songListCoverSize(true)).clip(LandscapeSongCoverShape))
                     Box(Modifier.weight(if (showAlbum) 1f else 1.25f)) {
                         MediaRowName(
                             text = title,
@@ -218,7 +221,7 @@ internal fun PortraitMediaRow(
                         imageUrl = image,
                         isPlaying = false,
                         trackRef = trackRef,
-                        modifier = Modifier.size(songListCoverSize(false)).clip(ContinuousRoundedRectangle(songListCoverCornerRadius(false))),
+                        modifier = Modifier.size(songListCoverSize(false)).clip(PortraitSongCoverShape),
                     )
                     Column(Modifier.weight(1f)) {
                         MediaRowName(
@@ -229,7 +232,11 @@ internal fun PortraitMediaRow(
                             color = if (isCurrentTrack) colors.accent else colors.content,
                             copyAction = R.string.track_action_copy_name.takeIf { copyNamesOnLongPress },
                         )
-                        val subtitle = listOf(artist, detail, suffix.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ")
+                        val subtitle = if (detail.isBlank() && suffix.isNullOrBlank()) {
+                            artist
+                        } else {
+                            listOf(artist, detail, suffix.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ")
+                        }
                         if (subtitle.isNotBlank()) MediaRowName(
                             text = subtitle,
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 17.sp),
