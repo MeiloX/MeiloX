@@ -780,6 +780,8 @@
     <string name="player_automix_active">自動混音中</string>
     <string name="player_automix_transitioning_to">正在切換到%1$s</string>
     <string name="track_quality_unavailable">暫無可用音質資訊</string>
+    <string name="track_alternate_version_badge">其他版本可播</string>
+    <string name="track_alternate_version_empty">目前沒有可播放的版本</string>
     <string name="track_quality_local_file">本機檔案</string>
     <string name="menu_expanded">已展開</string>
     <string name="menu_collapsed">已收起</string>

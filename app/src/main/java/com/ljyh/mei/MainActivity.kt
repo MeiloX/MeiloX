@@ -220,6 +220,9 @@ import com.ljyh.mei.recognition.RecognitionSource
 import com.ljyh.mei.recognition.SongRecognitionSession
 import com.ljyh.mei.ui.component.ClipboardLinkPrompt
 import com.ljyh.mei.ui.component.CopyNamePopoverHost
+import com.ljyh.mei.ui.component.item.LocalTrackAlternateVersionPicker
+import com.ljyh.mei.ui.component.item.TrackAlternateVersionSheet
+import com.ljyh.mei.ui.component.item.rememberTrackAlternateVersionPicker
 import com.ljyh.mei.ui.component.IconButton
 import com.ljyh.mei.ui.component.VersionUpdateAlert
 import com.ljyh.mei.ui.component.player.BottomSheetPlayer
@@ -343,6 +346,8 @@ class MainActivity : ComponentActivity() {
     lateinit var sourceLinks: com.ljyh.mei.source.core.SourceLinkRouter
     @Inject
     lateinit var sourceRouter: com.ljyh.mei.source.core.SourceRouter
+    @Inject
+    lateinit var sourceFeatures: com.ljyh.mei.source.core.SourceFeatureClient
     @Inject
     lateinit var sourcePreferences: com.ljyh.mei.source.core.SourcePreferences
     @Inject
@@ -1185,6 +1190,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val searchToolbarVisible = active && !(isLandscape && adaptiveNavigation.sidebarExpanded)
                     val landscapeTopSearchOverlay = isLandscape && searchToolbarVisible
+                    val alternateVersionPicker = rememberTrackAlternateVersionPicker(sourceRouter.registry, sourcePreferences, database)
                     CompositionLocalProvider(
                         com.ljyh.mei.ui.local.LocalSelectionToolbar provides selectionToolbar,
                         LocalDatabase provides database,
@@ -1192,6 +1198,7 @@ class MainActivity : ComponentActivity() {
                         LocalPlayerConnection provides playerConnection,
                         LocalPlayerAwareWindowInsets provides pageWindowInsets,
                         LocalUserData provides userData,
+                        LocalTrackAlternateVersionPicker provides alternateVersionPicker,
                     ) {
                     GlasmioAdaptiveNavigationScaffold(
                         state = adaptiveNavigation,
@@ -1907,6 +1914,18 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                         if (!pictureInPictureMode) com.ljyh.mei.ui.screen.source.SourcePlatformEffectHost(sourceEffects)
+                        if (!pictureInPictureMode) TrackAlternateVersionSheet(
+                            alternateVersionPicker,
+                            sourceFeatures,
+                            currentRoute = { navController.currentRoute },
+                        ) { track ->
+                            val media = track.toMediaMetadata().toMediaItem()
+                            playerConnection?.playQueue(ListQueue(
+                                id = "alternate-version-${media.mediaId}",
+                                title = track.title,
+                                items = listOf(media.mediaId to media),
+                            ))
+                        }
                         if (!isRuntimeShaderSupported()) {
                             val dismissNotice: () -> Unit = {
                                 compatibilityNoticeDismissed = true

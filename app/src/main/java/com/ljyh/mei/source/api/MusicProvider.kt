@@ -31,6 +31,7 @@ data class Track(
     val isrc: String? = null,
     val version: String? = null,
     val explicit: Boolean = false,
+    val hasAlternateVersion: Boolean = false,
 )
 data class PageRequest(val offset: Int = 0, val limit: Int = 30, val cursor: String? = null, val refresh: Boolean = false) {
     init { require(offset >= 0 && limit in 1..100 && (cursor == null || cursor.length <= 4096)) }

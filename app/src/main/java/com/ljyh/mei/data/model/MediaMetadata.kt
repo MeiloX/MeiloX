@@ -39,6 +39,7 @@ data class MediaMetadata(
         ?: TrackRef(ProviderIds.NETEASE, id.toString()),
     val isrc: String? = null,
     val recordingVersion: String? = null,
+    val hasAlternateVersion: Boolean = false,
 ) {
     data class Artist(
         val id: Long,
@@ -68,6 +69,7 @@ data class MediaMetadata(
 }
 
 const val PLACEHOLDER_URI = "https://placeholder.media"
+internal const val EXTRA_HAS_ALTERNATE_VERSION = "com.ljyh.mei.hasAlternateVersion"
 
 fun PodcastProgram.toMediaMetadata() = MediaMetadata(
     id = mainSongId ?: -id,
@@ -244,6 +246,7 @@ fun MediaMetadata.toMediaItem() = MediaItem.Builder()
             .setExtras(Bundle().apply {
                 putLong("duration", duration)
                 putStringArrayList("artist_list", ArrayList(artists.map { it.name }))
+                if (hasAlternateVersion) putBoolean(EXTRA_HAS_ALTERNATE_VERSION, true)
             })
             .build()
     )
@@ -253,6 +256,9 @@ fun MediaMetadata.toMediaItem() = MediaItem.Builder()
 
 val MediaItem.metadata: MediaMetadata?
     get() = localConfiguration?.tag as? MediaMetadata
+
+internal val MediaItem.hasAlternateVersion: Boolean
+    get() = metadata?.hasAlternateVersion ?: (mediaMetadata.extras?.getBoolean(EXTRA_HAS_ALTERNATE_VERSION) == true)
 
 fun Track.toMediaMetadata() = MediaMetadata(
     id = if (ref.providerId == ProviderIds.NETEASE) ref.trackId.toLongOrNull() ?: 0L else 0L,
@@ -276,6 +282,7 @@ fun Track.toMediaMetadata() = MediaMetadata(
     trackRef = ref,
     isrc = isrc,
     recordingVersion = version,
+    hasAlternateVersion = hasAlternateVersion,
 )
 
 fun MediaMetadata.toSourceTrack() = Track(
@@ -288,6 +295,7 @@ fun MediaMetadata.toSourceTrack() = Track(
     explicit = explicit,
     isrc = isrc,
     version = recordingVersion,
+    hasAlternateVersion = hasAlternateVersion,
 )
 
 val MediaMetadata.supportsNeteaseSongActions: Boolean

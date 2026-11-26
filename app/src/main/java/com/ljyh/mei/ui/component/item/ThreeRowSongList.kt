@@ -54,6 +54,7 @@ import com.ljyh.mei.constants.HomeSongActionSize
 import com.ljyh.mei.constants.songListCoverCornerRadius
 import com.ljyh.mei.constants.HomeSongCoverSize
 import com.ljyh.mei.constants.HomeSongRowSpacing
+import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.ui.component.copyNameActions
 import com.ljyh.mei.ui.component.home.homeArtworkBorder
 import com.ljyh.mei.ui.component.playlist.PlayingImageView
@@ -129,10 +130,13 @@ internal fun HomeSongListRow(
     coverSize: Dp = songListCoverSize(rememberDeviceInfo().isLandscape),
     isPlaying: Boolean = false,
     menuAnchorState: GlasmioMenuAnchorState? = null,
+    trackRef: TrackRef? = null,
+    hasAlternateVersion: Boolean = false,
 ) {
     val landscape = rememberDeviceInfo().isLandscape
     val shape = remember(landscape) { ContinuousRoundedRectangle(songListCoverCornerRadius(landscape)) }
     val moreLabel = stringResource(R.string.more_actions_title)
+    val alternateVersion = trackAlternateVersionAction(trackRef, title, hasAlternateVersion)
     val configuration = LocalViewConfiguration.current
     val actionConfiguration =
         remember(configuration) {
@@ -147,7 +151,7 @@ internal fun HomeSongListRow(
                 artistName = subtitle,
                 enabled = true,
             )
-            .clickable(interactionSource = null, indication = null, onClick = onClick),
+            .clickable(interactionSource = null, indication = null, onClick = alternateVersion?.onRowClick ?: onClick),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -180,15 +184,22 @@ internal fun HomeSongListRow(
                 ),
                 copyAction = R.string.track_action_copy_name,
             )
-            MediaRowName(
-                text = subtitle,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = LocalTextStyle.current.copy(
-                    fontSize = if (landscape) 13.sp else 12.sp,
-                    lineHeight = if (landscape) LocalTextStyle.current.lineHeight else 17.sp,
-                ),
-                copyAction = R.string.artist_action_copy_name,
-            )
+            val subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+            AlternateVersionSubtitle(
+                showBadge = alternateVersion != null,
+                color = subtitleColor,
+                onBadgeClick = alternateVersion?.onBadgeClick,
+            ) {
+                MediaRowName(
+                    text = subtitle,
+                    color = subtitleColor,
+                    style = LocalTextStyle.current.copy(
+                        fontSize = if (landscape) 13.sp else 12.sp,
+                        lineHeight = if (landscape) LocalTextStyle.current.lineHeight else 17.sp,
+                    ),
+                    copyAction = R.string.artist_action_copy_name,
+                )
+            }
         }
         CompositionLocalProvider(LocalViewConfiguration provides actionConfiguration) {
             TrackMenuTrigger(menuAnchorState, onMore) { trigger, openMenu ->

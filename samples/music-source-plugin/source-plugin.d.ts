@@ -28,6 +28,7 @@ export interface Track {
   artists: Array<string | { name: string; artistId?: string }>;
   album?: string | { title: string; albumId?: string };
   durationMs: number; artworkUrl?: string; isrc?: string; version?: string; explicit?: boolean;
+  hasAlternateVersion?: boolean;
 }
 export interface AudioResource {
   uri: string; quality: string; headers?: Record<string, string>; expiresAtMs?: number;

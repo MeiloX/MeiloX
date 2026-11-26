@@ -1,5 +1,8 @@
 package com.ljyh.mei.ui.screen.song
 
+import com.ljyh.mei.ui.component.item.AlternateVersionSubtitle
+import com.ljyh.mei.ui.component.item.trackAlternateVersionAction
+
 import com.ljyh.mei.ui.navigation.meiloxHeaderAction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -371,12 +374,15 @@ private fun WikiLabeledRow(label: String, value: String) {
 
 @Composable
 private fun WikiSongRow(song: SongWikiSongReference, onClick: () -> Unit) {
+    val alternateVersion = trackAlternateVersionAction(song.track.ref, song.title, song.track.hasAlternateVersion)
     WikiArtworkRow(
         artworkUrl = song.artworkUrl,
         title = song.title,
         subtitle = listOfNotNull(song.artist, song.note).joinToString(" · ").ifBlank { null },
         symbolName = "play.fill",
-        onClick = onClick,
+        showAlternateVersion = alternateVersion != null,
+        onAlternateVersionClick = alternateVersion?.onBadgeClick,
+        onClick = alternateVersion?.onRowClick ?: onClick,
     )
 }
 
@@ -386,6 +392,8 @@ private fun WikiArtworkRow(
     title: String,
     subtitle: String?,
     symbolName: String,
+    showAlternateVersion: Boolean = false,
+    onAlternateVersionClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     GlasmioCard(
@@ -401,14 +409,21 @@ private fun WikiArtworkRow(
             )
             Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
                 Text(title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                subtitle?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                val subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+                AlternateVersionSubtitle(
+                    showBadge = showAlternateVersion,
+                    color = subtitleColor,
+                    onBadgeClick = onAlternateVersionClick,
+                ) {
+                    subtitle?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = subtitleColor,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
             SfIcon(

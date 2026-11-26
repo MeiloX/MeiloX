@@ -50,6 +50,7 @@ class SourceIdentityTest {
             TrackRef("demo", "曲目:42/音轨"), "Title",
             listOf(SourceArtist("Artist", ArtistRef("demo", "artist:string"))),
             SourceAlbum("Album", AlbumRef("demo", "album/string")), 180_000, isrc = "TEST00000001", version = "Live", explicit = true,
+            hasAlternateVersion = true,
         )
         val metadata = original.toMediaMetadata()
         assertEquals(0L, metadata.id)
@@ -71,6 +72,7 @@ class SourceIdentityTest {
         val gson = Gson()
         val snapshot = PlaybackSnapshot(items = listOf(PlaybackItemSnapshot(
             TrackRefCodec.mediaId(ref), trackRef = TrackRefCodec.encode(ref), albumRef = AlbumRef("demo", "album:one"),
+            hasAlternateVersion = true,
         )))
         assertEquals(3, snapshot.schemaVersion)
         assertEquals(snapshot, gson.fromJson(gson.toJson(snapshot), PlaybackSnapshot::class.java))
@@ -78,6 +80,7 @@ class SourceIdentityTest {
             val old = gson.fromJson("""{"schemaVersion":$version,"items":[{"mediaId":"42"}]}""", PlaybackSnapshot::class.java)
             assertEquals("42", old.items.single().mediaId)
             assertNull(old.items.single().trackRef)
+            assertEquals(false, old.items.single().hasAlternateVersion)
         }
     }
 }

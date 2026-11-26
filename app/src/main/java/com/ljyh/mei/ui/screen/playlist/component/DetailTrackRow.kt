@@ -6,9 +6,11 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.height
 import com.ljyh.mei.ui.component.copyNameActions
+import com.ljyh.mei.ui.component.item.AlternateVersionBadge
 import com.ljyh.mei.ui.component.item.MediaRowName
 import com.ljyh.mei.ui.component.item.PortraitMediaRow
 import com.ljyh.mei.ui.component.item.TrackMenuTrigger
+import com.ljyh.mei.ui.component.item.trackAlternateVersionAction
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -100,10 +102,12 @@ internal fun DetailTrackRow(
             menuAnchorState = menuAnchorState,
             trackRef = track.trackRef,
             copyNamesOnLongPress = true,
+            hasAlternateVersion = track.hasAlternateVersion,
         )
         return
     }
 
+    val alternateVersionAction = trackAlternateVersionAction(track.trackRef, track.title, track.hasAlternateVersion)
     val rowIndication = trackRowPressIndication()
     val numberWidth = if (showArtwork) 0.dp else albumTrackNumberWidth()
     val numberColumnWidth = maxOf(numberWidth, DetailTrackIndicatorWidth)
@@ -116,7 +120,9 @@ internal fun DetailTrackRow(
             artistName = artist,
             enabled = copyNamesOnLongPress,
         ).then(
-            if (selected == null) Modifier.clickable(interactionSource = null, indication = rowIndication, onClick = onClick)
+            if (selected == null) Modifier.clickable(
+                interactionSource = null, indication = rowIndication, onClick = alternateVersionAction?.onRowClick ?: onClick,
+            )
             else Modifier.selectable(
                 selected = selected, interactionSource = null, indication = rowIndication,
                 role = Role.Checkbox, onClick = onClick,
@@ -204,13 +210,24 @@ internal fun DetailTrackRow(
                     copyAction = R.string.track_action_copy_name.takeIf { copyNamesOnLongPress },
                     maxLines = if (showArtwork) 1 else 2,
                 )
-                if (showArtwork) {
-                    MediaRowName(
-                        text = artist,
-                        color = colors.secondaryContent,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (compactRows) 13.sp else 12.sp, lineHeight = if (compactRows) 18.sp else 17.sp),
-                        copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
-                    )
+                if (showArtwork || alternateVersionAction != null) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (alternateVersionAction != null) {
+                            AlternateVersionBadge(onClick = alternateVersionAction.onBadgeClick)
+                        }
+                        if (showArtwork) MediaRowName(
+                            text = artist,
+                            color = colors.secondaryContent,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = if (compactRows) 13.sp else 12.sp,
+                                lineHeight = if (compactRows) 18.sp else 17.sp,
+                            ),
+                            copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
+                        )
+                    }
                 }
             }
             if (showDuration) {

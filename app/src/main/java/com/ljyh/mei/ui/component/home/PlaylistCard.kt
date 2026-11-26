@@ -44,6 +44,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.constants.PlaylistCardSize
+import com.ljyh.mei.ui.component.item.AlternateVersionSubtitle
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
@@ -67,6 +68,8 @@ fun PlaylistCard(
     cardSize: Dp = PlaylistCardSize,
     titleMaxLines: Int = 2,
     secondaryTitle: String? = null,
+    showAlternateVersion: Boolean = false,
+    onAlternateVersionClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val textShadow = PlaylistCardTextShadow
@@ -128,17 +131,26 @@ fun PlaylistCard(
             fontWeight = FontWeight.Medium,
             modifier = Modifier.fillMaxWidth()
         )
-        if (!secondaryTitle.isNullOrBlank()) {
-            Text(
-                text = secondaryTitle,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.fillMaxWidth()
-            )
+        if (showAlternateVersion || !secondaryTitle.isNullOrBlank()) {
+            val subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+            AlternateVersionSubtitle(
+                showBadge = showAlternateVersion,
+                color = subtitleColor,
+                onBadgeClick = onAlternateVersionClick,
+            ) {
+                if (!secondaryTitle.isNullOrBlank()) {
+                    Text(
+                        text = secondaryTitle,
+                        overflow = TextOverflow.Ellipsis,
+                        color = subtitleColor,
+                        maxLines = 1,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
         }
         if (extInfo != null) {
             Row(

@@ -97,6 +97,8 @@ fun HistoryScreen(
                 GroupedSongRow(
                     title = item.song.title,
                     artist = item.song.artists.joinToString(" / ") { it.name },
+                    trackRef = item.song.trackRef,
+                    hasAlternateVersion = item.song.hasAlternateVersion,
                     detail = item.playedAt?.let(::relativeTime),
                     showTopSeparator = index > 0,
                     leading = {

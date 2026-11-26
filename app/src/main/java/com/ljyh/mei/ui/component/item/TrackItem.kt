@@ -66,6 +66,7 @@ fun Track(
     val indication = if (showPressIndication) LocalIndication.current else trackRowPressIndication()
     val artist = track.artists.joinToString(" / ") { it.name }
     val copyNamesOnLongPress = selected == null
+    val alternateVersionAction = trackAlternateVersionAction(track.trackRef, track.title, track.hasAlternateVersion)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -76,7 +77,9 @@ fun Track(
                 enabled = copyNamesOnLongPress,
             )
             .then(
-                if (selected == null) Modifier.clickable(interactionSource = null, indication = indication, onClick = onClick)
+                if (selected == null) Modifier.clickable(
+                    interactionSource = null, indication = indication, onClick = alternateVersionAction?.onRowClick ?: onClick,
+                )
                 else Modifier.selectable(
                     selected = selected, interactionSource = null, indication = indication,
                     role = Role.Checkbox, onClick = onClick,
@@ -133,12 +136,19 @@ fun Track(
                     copyAction = R.string.track_action_copy_name.takeIf { copyNamesOnLongPress },
                 )
 
-                MediaRowName(
-                    text = artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
-                )
+                val subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+                AlternateVersionSubtitle(
+                    showBadge = alternateVersionAction != null,
+                    color = subtitleColor,
+                    onBadgeClick = alternateVersionAction?.onBadgeClick,
+                ) {
+                    MediaRowName(
+                        text = artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = subtitleColor,
+                        copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
+                    )
+                }
             }
         }
 

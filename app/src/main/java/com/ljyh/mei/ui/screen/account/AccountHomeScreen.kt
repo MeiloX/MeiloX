@@ -604,6 +604,8 @@ fun ListeningRankScreen(userId: String, viewModel: ListeningRankViewModel = hilt
                             GroupedSongRow(
                                 title = record.song.name,
                                 artist = record.song.artists.joinToString(" / "),
+                                trackRef = record.song.track.ref,
+                                hasAlternateVersion = record.song.track.hasAlternateVersion,
                                 detail = record.playCount?.let {
                                     stringResource(R.string.listening_rank_play_count, NumberFormat.getIntegerInstance().format(it))
                                 } ?: stringResource(R.string.listening_count_unavailable),

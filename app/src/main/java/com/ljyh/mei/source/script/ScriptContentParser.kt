@@ -30,7 +30,8 @@ internal class ScriptContentParser(
         } ?: SourceAlbum("")
         return Track(TrackRef(providerId, text(value, "trackId", 2048)), text(value, "title", 1000), artists, album,
             optionalLong(value, "durationMs") ?: 0L, artwork(value), optionalText(value, "isrc", 100),
-            optionalText(value, "version", 1000), optionalBoolean(value, "explicit") ?: false)
+            optionalText(value, "version", 1000), optionalBoolean(value, "explicit") ?: false,
+            hasAlternateVersion = optionalBoolean(value, "hasAlternateVersion") ?: false)
     }
 
     private suspend fun legacyTrack(value: JsonObject): Track {

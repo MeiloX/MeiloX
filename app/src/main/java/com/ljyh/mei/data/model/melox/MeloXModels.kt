@@ -211,6 +211,7 @@ data class RecognizedSong(
     val coverUrl: String?,
     val durationMs: Long,
     val startTimeMs: Long?,
+    val hasAlternateVersion: Boolean = false,
 ) {
     val id: String get() = ref.trackId
     constructor(id: Long, name: String, artists: List<String>, album: String, coverUrl: String?, durationMs: Long, startTimeMs: Long?) :

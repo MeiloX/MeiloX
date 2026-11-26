@@ -116,6 +116,10 @@ internal fun mergeHistoryEntries(
         addAll(local)
         remote?.let(::addAll)
     }
+    val alternateVersions = remote.orEmpty().asSequence()
+        .filter { it.song.hasAlternateVersion }
+        .map { it.song.trackRef }
+        .toSet()
     val selected = LinkedHashMap<String, Candidate>()
     candidates.forEachIndexed { index, entry ->
         val existing = selected[entry.song.mediaId]
@@ -138,7 +142,12 @@ internal fun mergeHistoryEntries(
                 else -> left.firstIndex.compareTo(right.firstIndex)
             }
         }
-        .map(Candidate::entry)
+        .map { (entry) ->
+            val song = entry.song
+            if (!song.hasAlternateVersion && song.trackRef in alternateVersions) {
+                entry.copy(song = song.copy(hasAlternateVersion = true))
+            } else entry
+        }
 }
 
 private fun Long?.isNewerThan(other: Long?): Boolean = when {

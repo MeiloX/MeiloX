@@ -176,18 +176,10 @@ fun LazyListScope.SourceTrackResults(
             title = track.title,
             artist = artist,
             subtitle = artist.takeIf(String::isNotBlank),
+            trackRef = track.ref,
+            hasAlternateVersion = track.hasAlternateVersion,
             showTopSeparator = index > 0,
-            leading = {
-                val context = LocalContext.current
-                val request = remember(context, track.ref, track.artworkUrl) {
-                    ImageRequest.Builder(context)
-                        .data(track.artworkUrl.smallImage())
-                        .sourceTrackArtwork(track.ref)
-                        .build()
-                }
-                AsyncImage(request, null, contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(44.dp).clip(ContinuousRoundedRectangle(10.dp)))
-            },
+            leading = { SearchTrackArtwork(track) },
             trailing = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (showProviderName) {
@@ -232,6 +224,16 @@ fun LazyListScope.SourceTrackResults(
             }
         }
     }
+}
+
+@Composable
+private fun SearchTrackArtwork(track: Track) {
+    val context = LocalContext.current
+    val request = remember(context, track.ref, track.artworkUrl) {
+        ImageRequest.Builder(context).data(track.artworkUrl.smallImage()).sourceTrackArtwork(track.ref).build()
+    }
+    AsyncImage(request, null, contentScale = ContentScale.Crop,
+        modifier = Modifier.size(44.dp).clip(ContinuousRoundedRectangle(10.dp)))
 }
 
 internal fun sourceSearchErrorText(code: SourceErrorCode): String = when (code) {

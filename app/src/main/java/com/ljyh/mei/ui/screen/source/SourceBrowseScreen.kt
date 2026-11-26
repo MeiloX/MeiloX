@@ -169,8 +169,10 @@ import com.ljyh.mei.ui.component.playlist.rememberFavoriteTrackIds
 import com.ljyh.mei.ui.component.playlist.songListDividerColor
 import com.ljyh.mei.ui.component.playlist.FavoriteTrackStar
 import com.ljyh.mei.source.api.TrackRefCodec
+import com.ljyh.mei.ui.component.item.AlternateVersionBadge
 import com.ljyh.mei.ui.component.item.HomeSongListRow
 import com.ljyh.mei.ui.component.item.ThreeRowSongList
+import com.ljyh.mei.ui.component.item.trackAlternateVersionAction
 import com.ljyh.mei.ui.component.shimmer.ShimmerHost
 import com.ljyh.mei.ui.component.utils.rememberDeviceInfo
 import com.ljyh.mei.ui.local.LocalNavController
@@ -424,6 +426,13 @@ internal fun SourceFeedSectionContent(
             val cardKeys = remember(section.cards) { section.cards.map { it.id } }
             HomeRecommendationRow(cardKeys) { index ->
                 val card = section.cards[index]
+                val ref = (card.target as? SourceFeedTarget.Content)?.ref
+                val track = ref?.let { tracks.firstOrNull { track -> track.ref == it } }
+                val alternateVersion = trackAlternateVersionAction(
+                    track?.ref,
+                    card.title.ifBlank { track?.title.orEmpty() },
+                    track?.hasAlternateVersion == true,
+                )
                 val cardExtInfo = remember(card.iconUrl, card.subtitle) {
                     CardExtInfo(icon = card.iconUrl.takeIf(String::isNotEmpty), text = card.subtitle)
                 }
@@ -432,7 +441,9 @@ internal fun SourceFeedSectionContent(
                     extInfo = cardExtInfo,
                     cardWidth = if (landscape) RecommendCardWidth else PortraitRecommendCardWidth,
                     cardHeight = if (landscape) RecommendCardHeight else PortraitRecommendCardHeight,
-                    isLoading = loadingCard == card.id, onClick = cardClick)
+                    showAlternateVersion = alternateVersion != null,
+                    onAlternateVersionClick = alternateVersion?.onBadgeClick,
+                    isLoading = loadingCard == card.id, onClick = alternateVersion?.onRowClick ?: cardClick)
             }
         } else if (section.layout == SourceFeedLayout.HERO) {
             val itemKeys = remember(section.items) {
@@ -440,6 +451,8 @@ internal fun SourceFeedSectionContent(
             }
             HomeRecommendationRow(itemKeys) { index ->
                 val value = section.items[index]
+                val track = (value as? SourceItem.TrackItem)?.track
+                val alternateVersion = trackAlternateVersionAction(track?.ref, value.title, track?.hasAlternateVersion == true)
                 val subtitle = remember(value) {
                     when (value) {
                         is SourceItem.TrackItem -> value.track.artists.joinToString(" / ") { it.name }
@@ -456,7 +469,9 @@ internal fun SourceFeedSectionContent(
                     showPlay = value is SourceItem.TrackItem,
                     cardWidth = if (landscape) RecommendCardWidth else PortraitRecommendCardWidth,
                     cardHeight = if (landscape) RecommendCardHeight else PortraitRecommendCardHeight,
-                    onClick = onItemClick)
+                    showAlternateVersion = alternateVersion != null,
+                    onAlternateVersionClick = alternateVersion?.onBadgeClick,
+                    onClick = alternateVersion?.onRowClick ?: onItemClick)
             }
         } else if (section.layout == SourceFeedLayout.TRACKS && tracks.isNotEmpty()) {
             val favoriteIds = rememberFavoriteTrackIds(remember(tracks) { tracks.map { it.toMediaMetadata() } })
@@ -495,6 +510,8 @@ internal fun SourceFeedSectionContent(
                         moreModifier = Modifier.testTag("HomeSongMore:${track.ref.trackId}"),
                         onMore = onTrackMore,
                         menuAnchorState = menuAnchorState,
+                        trackRef = track.ref,
+                        hasAlternateVersion = track.hasAlternateVersion,
                     )
                 }
             }
@@ -509,13 +526,24 @@ internal fun SourceFeedSectionContent(
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
                 if (section.cards.isNotEmpty()) items(section.cards, key = { it.id }) { card ->
+                    val ref = (card.target as? SourceFeedTarget.Content)?.ref
+                    val track = ref?.let { tracks.firstOrNull { track -> track.ref == it } }
+                    val alternateVersion = trackAlternateVersionAction(
+                        track?.ref,
+                        card.title.ifBlank { track?.title.orEmpty() },
+                        track?.hasAlternateVersion == true,
+                    )
                     val onCardClick = remember(onAction, card) { { onAction(card) } }
                     PlaylistCard(id = card.id, title = card.title, coverImg = card.artworkUrl,
                         subTitle = card.coverCaptions.takeIf { it.isNotEmpty() }, extInfo = card.detail,
                         imageSize = false, cardSize = cardSize,
                         titleMaxLines = card.titleMaxLines, secondaryTitle = card.subtitle.takeIf(String::isNotBlank),
-                        onClick = onCardClick)
+                        showAlternateVersion = alternateVersion != null,
+                        onAlternateVersionClick = alternateVersion?.onBadgeClick,
+                        onClick = alternateVersion?.onRowClick ?: onCardClick)
                 } else items(section.items, key = { "${it.ref.providerId}:${it.ref.type.wireName}:${it.ref.contentId}" }) { value ->
+                    val track = (value as? SourceItem.TrackItem)?.track
+                    val alternateVersion = trackAlternateVersionAction(track?.ref, value.title, track?.hasAlternateVersion == true)
                     val subtitle = remember(value) {
                         when (value) {
                             is SourceItem.TrackItem -> value.track.artists.joinToString(" / ") { it.name }
@@ -537,7 +565,9 @@ internal fun SourceFeedSectionContent(
                         cardSize = cardSize,
                         secondaryTitle = subtitle.takeIf(String::isNotBlank),
                         imageSize = false,
-                        onClick = open,
+                        showAlternateVersion = alternateVersion != null,
+                        onAlternateVersionClick = alternateVersion?.onBadgeClick,
+                        onClick = alternateVersion?.onRowClick ?: open,
                     )
                 }
             }
@@ -597,22 +627,27 @@ private fun SourceDiscoverCard(item: SourceItem, featured: Boolean, onClick: () 
                 }
             }
         }
-    } else Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        val shape = ContinuousRoundedRectangle(16.dp)
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(shape).homeArtworkBorder(shape)) {
-            AsyncImage(item.artworkUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            (item as? SourceItem.PlaylistItem)?.playlist?.playCount?.let { count ->
-                Row(Modifier.align(Alignment.TopEnd).padding(6.dp)
-                    .background(Color.Black.copy(alpha = 0.42f), ContinuousRoundedRectangle(50))
-                    .padding(horizontal = 7.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SfIcon("play.fill", null, tint = Color.White, size = 11.dp)
-                    Spacer(Modifier.width(3.dp))
-                    Text(sourcePlaylistPlayCount(count), style = IosTypography.caption, color = Color.White, fontWeight = FontWeight.SemiBold)
+    } else {
+        val track = (item as? SourceItem.TrackItem)?.track
+        val alternateVersion = trackAlternateVersionAction(track?.ref, item.title, track?.hasAlternateVersion == true)
+        Column(Modifier.fillMaxWidth().clickable(onClick = alternateVersion?.onRowClick ?: onClick)) {
+            val shape = ContinuousRoundedRectangle(16.dp)
+            Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(shape).homeArtworkBorder(shape)) {
+                AsyncImage(item.artworkUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                (item as? SourceItem.PlaylistItem)?.playlist?.playCount?.let { count ->
+                    Row(Modifier.align(Alignment.TopEnd).padding(6.dp)
+                        .background(Color.Black.copy(alpha = 0.42f), ContinuousRoundedRectangle(50))
+                        .padding(horizontal = 7.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SfIcon("play.fill", null, tint = Color.White, size = 11.dp)
+                        Spacer(Modifier.width(3.dp))
+                        Text(sourcePlaylistPlayCount(count), style = IosTypography.caption, color = Color.White, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
+            Spacer(Modifier.height(7.dp))
+            Text(item.title, style = IosTypography.subheadline, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (alternateVersion != null) AlternateVersionBadge(onClick = alternateVersion.onBadgeClick)
         }
-        Spacer(Modifier.height(7.dp))
-        Text(item.title, style = IosTypography.subheadline, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -1061,7 +1096,8 @@ fun SourceLibraryScreen(
                                         favorite = true, showDivider = item.ref != lastFilteredRef,
                                         copyNamesOnLongPress = true,
                                         onClick = onTrackClick,
-                                        onMore = onTrackMore, menuAnchorState = trackMenuAnchor, trackRef = item.ref)
+                                        onMore = onTrackMore, menuAnchorState = trackMenuAnchor, trackRef = item.ref,
+                                        hasAlternateVersion = item.track.hasAlternateVersion)
                                 }
                             }
                             is SourceItem.PlaylistItem -> {

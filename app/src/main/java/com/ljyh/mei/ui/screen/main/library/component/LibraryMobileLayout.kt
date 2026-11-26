@@ -710,6 +710,8 @@ internal fun LibraryLandscapeSongRow(
         landscape = true,
         image = song.coverUrl,
         title = song.title,
+        trackRef = song.trackRef,
+        hasAlternateVersion = song.hasAlternateVersion,
         artist = song.artists.joinToString(" / ") { it.name },
         detail = formatDuration(song.duration),
         onClick = onClick,
@@ -733,6 +735,8 @@ private fun LibrarySongRow(
         modifier = Modifier.padding(horizontal = if (rememberDeviceInfo().isLandscape) 0.dp else 4.dp),
         image = song.coverUrl,
         title = song.title,
+        trackRef = song.trackRef,
+        hasAlternateVersion = song.hasAlternateVersion,
         artist = song.artists.joinToString(" / ") { it.name },
         detail = if (rememberDeviceInfo().isLandscape) formatDuration(song.duration) else "",
         onClick = onClick,
@@ -919,6 +923,8 @@ internal fun LazyListScope.libraryHistoryItems(
             GroupedSongRow(
                 title = item.song.title,
                 artist = item.song.artists.joinToString(" / ") { it.name },
+                trackRef = item.song.trackRef,
+                hasAlternateVersion = item.song.hasAlternateVersion,
                 detail = item.playedAt?.let { DateUtils.getRelativeTimeSpanString(it).toString() },
                 showTopSeparator = index > 0,
                 leading = {

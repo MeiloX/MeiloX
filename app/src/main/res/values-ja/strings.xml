@@ -775,6 +775,8 @@
   <string name="player_automix_active">AutoMix でミックス中</string>
   <string name="player_automix_transitioning_to">%1$s に切り替え中</string>
   <string name="track_quality_unavailable">利用できる音質情報がありません</string>
+  <string name="track_alternate_version_badge">別バージョン可</string>
+  <string name="track_alternate_version_empty">再生できるバージョンが見つかりません</string>
   <string name="track_quality_local_file">ローカルのファイル</string>
   <string name="menu_expanded">展開済み</string>
   <string name="menu_collapsed">折りたたみ済み</string>

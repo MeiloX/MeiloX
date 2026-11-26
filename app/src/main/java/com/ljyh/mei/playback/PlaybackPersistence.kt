@@ -16,9 +16,11 @@ import com.google.gson.annotations.SerializedName
 import com.ljyh.mei.constants.PlaybackSnapshotKey
 import com.ljyh.mei.constants.RestorePlaybackPositionKey
 import com.ljyh.mei.constants.RestorePlaybackStateKey
+import com.ljyh.mei.data.model.EXTRA_HAS_ALTERNATE_VERSION
 import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.data.model.PLACEHOLDER_URI
 import com.ljyh.mei.data.model.createPlaceholder
+import com.ljyh.mei.data.model.hasAlternateVersion
 import com.ljyh.mei.data.model.metadata
 import com.ljyh.mei.utils.dataStore
 import com.ljyh.mei.playback.queue.PlaylistQueueSource
@@ -135,6 +137,8 @@ data class PlaybackItemSnapshot(
     val albumRef: AlbumRef? = null,
     val isrc: String? = null,
     val recordingVersion: String? = null,
+    @field:SerializedName("hasAlternateVersion")
+    val hasAlternateVersion: Boolean = false,
 )
 
 data class PlaybackArtistSnapshot(
@@ -297,6 +301,7 @@ class PlaybackPersistence(
             albumRef = domainMetadata?.album?.ref,
             isrc = domainMetadata?.isrc,
             recordingVersion = domainMetadata?.recordingVersion,
+            hasAlternateVersion = hasAlternateVersion,
         )
     }
 
@@ -344,6 +349,7 @@ class PlaybackPersistence(
             trackRef = ref,
             isrc = isrc,
             recordingVersion = recordingVersion,
+            hasAlternateVersion = hasAlternateVersion,
         )
         val displayMetadata = androidx.media3.common.MediaMetadata.Builder()
             .setTitle(domainMetadata.title)
@@ -354,6 +360,7 @@ class PlaybackPersistence(
             .setExtras(Bundle().apply {
                 putLong("duration", durationMs)
                 putStringArrayList("artist_list", ArrayList(resolvedArtists.map { it.name }))
+                if (hasAlternateVersion) putBoolean(EXTRA_HAS_ALTERNATE_VERSION, true)
             })
             .apply {
                 artworkUri.takeIf { it.isNotBlank() }?.let { setArtworkUri(Uri.parse(it)) }

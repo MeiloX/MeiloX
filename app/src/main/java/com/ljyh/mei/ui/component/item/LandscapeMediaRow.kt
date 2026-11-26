@@ -78,6 +78,7 @@ internal fun LandscapeMediaRow(
     menuAnchorState: GlasmioMenuAnchorState? = null,
     trackRef: TrackRef? = null,
     copyNamesOnLongPress: Boolean = false,
+    hasAlternateVersion: Boolean = false,
 ) {
     val colors = LocalGlassColors.current
     if (!landscape) {
@@ -102,9 +103,11 @@ internal fun LandscapeMediaRow(
             menuAnchorState = menuAnchorState,
             trackRef = trackRef,
             copyNamesOnLongPress = copyNamesOnLongPress,
+            hasAlternateVersion = hasAlternateVersion,
         )
         return
     }
+    val alternateVersionAction = trackAlternateVersionAction(trackRef, title, hasAlternateVersion)
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val showAlbum = album != null && maxWidth >= 1000.dp
         Column {
@@ -119,7 +122,7 @@ internal fun LandscapeMediaRow(
                     showPressIndication -> LocalIndication.current
                     else -> null
                 },
-                onClick = onClick,
+                onClick = alternateVersionAction?.onRowClick ?: onClick,
             ) else Modifier)) {
                 if (favorite) FavoriteTrackStar(
                     Modifier.align(Alignment.CenterStart).offset(x = (-18).dp),
@@ -141,7 +144,14 @@ internal fun LandscapeMediaRow(
                             copyAction = R.string.track_action_copy_name.takeIf { copyNamesOnLongPress },
                         )
                     }
-                    Box(Modifier.weight(if (showAlbum) 0.85f else 1f)) {
+                    Row(
+                        Modifier.weight(if (showAlbum) 0.85f else 1f),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (alternateVersionAction != null) {
+                            AlternateVersionBadge(onClick = alternateVersionAction.onBadgeClick)
+                        }
                         MediaRowName(
                             text = artist,
                             style = LocalTextStyle.current.copy(fontSize = 16.sp),
@@ -192,8 +202,10 @@ internal fun PortraitMediaRow(
     menuAnchorState: GlasmioMenuAnchorState? = null,
     trackRef: TrackRef? = null,
     copyNamesOnLongPress: Boolean = false,
+    hasAlternateVersion: Boolean = false,
 ) {
     val colors = LocalGlassColors.current
+    val alternateVersionAction = trackAlternateVersionAction(trackRef, title, hasAlternateVersion)
     Box(modifier.fillMaxWidth()) {
         Column {
             Box(Modifier.copyNameActions(
@@ -207,7 +219,7 @@ internal fun PortraitMediaRow(
                     showPressIndication -> LocalIndication.current
                     else -> null
                 },
-                onClick = onClick,
+                onClick = alternateVersionAction?.onRowClick ?: onClick,
             ) else Modifier)) {
                 if (favorite) FavoriteTrackStar(
                     Modifier.align(Alignment.CenterStart).offset(x = (-16).dp),
@@ -239,13 +251,23 @@ internal fun PortraitMediaRow(
                         } else {
                             listOf(artist, detail, suffix.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ")
                         }
-                        if (subtitle.isNotBlank()) MediaRowName(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 17.sp),
-                            color = colors.secondaryContent,
-                            copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
-                            copyName = artist,
-                        )
+                        if (subtitle.isNotBlank() || alternateVersionAction != null) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (alternateVersionAction != null) {
+                                    AlternateVersionBadge(onClick = alternateVersionAction.onBadgeClick)
+                                }
+                                if (subtitle.isNotBlank()) MediaRowName(
+                                    text = subtitle,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 17.sp),
+                                    color = colors.secondaryContent,
+                                    copyAction = R.string.artist_action_copy_name.takeIf { copyNamesOnLongPress },
+                                    copyName = artist,
+                                )
+                            }
+                        }
                     }
                     if (onMore != null) {
                         MediaRowMenuButton(Modifier.offset(x = 8.dp), 16.dp, menuAnchorState, onMore)

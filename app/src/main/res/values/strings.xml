@@ -780,6 +780,8 @@
     <string name="player_automix_active">AutoMix active</string>
     <string name="player_automix_transitioning_to">Transitioning to %1$s</string>
     <string name="track_quality_unavailable">No available quality information</string>
+    <string name="track_alternate_version_badge">Alt version</string>
+    <string name="track_alternate_version_empty">No playable version found</string>
     <string name="track_quality_local_file">Local File</string>
     <string name="menu_expanded">Expanded</string>
     <string name="menu_collapsed">Collapsed</string>

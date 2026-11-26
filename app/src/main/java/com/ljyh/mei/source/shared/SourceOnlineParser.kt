@@ -43,7 +43,8 @@ internal class SourceOnlineParser(val providerId: String, private val instanceId
             names.mapIndexed { index, name -> SourceArtist(name,
                 ids.getOrNull(index)?.takeIf { ids.size == names.size }?.let { ArtistRef(providerId, it) }) },
             SourceAlbum(p.optional("album").orEmpty(), albumId?.let { AlbumRef(providerId, it) }),
-            p.featureLong("durationMs"), p.optional("coverUrl").orEmpty()), p.optionalLong("playedAt"))
+            p.featureLong("durationMs"), p.optional("coverUrl").orEmpty(),
+            hasAlternateVersion = p.featureBoolean("hasAlternateVersion")), p.optionalLong("playedAt"))
     }
     fun cloud(value: JsonElement): OnlineCloudSong = value.featureObject().let { p -> OnlineCloudSong(
         p.text("id"), p.text("name"), p.optional("artist").orEmpty(), p.optional("album").orEmpty(), p.optional("coverUrl"),
@@ -71,7 +72,10 @@ internal class SourceOnlineParser(val providerId: String, private val instanceId
     fun wiki(value: JsonElement): OnlineSongWiki = value.featureObject().let { p ->
         OnlineSongWiki(decode(p.get("memories") ?: invalidFeature()), decode(p.get("tagGroups") ?: invalidFeature()),
             decode(p.get("attributes") ?: invalidFeature()), decode(p.get("associationGroups") ?: invalidFeature()), decode(p.get("reviews") ?: invalidFeature()),
-            p.featureList("similarSongs").map { it.featureObject().let { row -> OnlineWikiSong(row.text("id"), row.text("title"), row.optional("artist"), row.optional("note"), row.optional("artworkUrl"), providerId) } }.distinctBy { it.id },
+            p.featureList("similarSongs").map { it.featureObject().let { row ->
+                OnlineWikiSong(row.text("id"), row.text("title"), row.optional("artist"), row.optional("note"),
+                    row.optional("artworkUrl"), providerId, hasAlternateVersion = row.featureBoolean("hasAlternateVersion"))
+            } }.distinctBy { it.id },
             p.featureList("relatedPlaylists").map { it.featureObject().let { row -> OnlineWikiPlaylist(row.text("id"), row.text("title"), row.optional("artworkUrl"), row.featureLong("playCount"), providerId) } }.distinctBy { it.id },
             safeContributionUrl(p.optional("contributionUrl")))
     }

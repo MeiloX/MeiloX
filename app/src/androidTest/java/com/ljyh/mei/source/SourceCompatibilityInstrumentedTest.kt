@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit
 import okhttp3.FormBody
 import okhttp3.Request
 import com.google.gson.JsonObject
+import com.ljyh.mei.data.model.hasAlternateVersion
 import com.ljyh.mei.data.model.metadata
 import com.ljyh.mei.data.model.toMediaItem
 import com.ljyh.mei.data.model.toMediaMetadata
@@ -785,6 +786,7 @@ class SourceCompatibilityInstrumentedTest {
         assertEquals(listOf(TrackRef("netease", "42"), TrackRef("local", "local_42"), TrackRef("netease", "-99")),
             oldItems.map { it.metadata!!.trackRef })
         assertEquals(listOf("42", "local_42", TrackRefCodec.mediaId(TrackRef("netease", "-99"))), oldItems.map { it.mediaId })
+        assertTrue(oldItems.none { it.hasAlternateVersion })
 
         val ref = TrackRef("demo", "42:歌曲/音轨")
         val snapshot = PlaybackSnapshot(items = listOf(PlaybackItemSnapshot(
@@ -792,6 +794,7 @@ class SourceCompatibilityInstrumentedTest {
             artists = listOf(PlaybackArtistSnapshot(name = "Artist", ref = ArtistRef("demo", "artist:string"))),
             albumTitle = "Album", albumRef = AlbumRef("demo", "album/string"),
             isrc = "TEST00000001", recordingVersion = "Live",
+            hasAlternateVersion = true,
         )))
         val restored = persistence.restoreItems(gson.fromJson(gson.toJson(snapshot), PlaybackSnapshot::class.java)).single()
         assertEquals(ref, restored.metadata!!.trackRef)
@@ -802,6 +805,8 @@ class SourceCompatibilityInstrumentedTest {
         assertEquals(snapshot.items.single().albumRef, restored.metadata!!.album.ref)
         assertEquals(ref, TrackRefCodec.decode(restored.mediaId))
         assertEquals(TrackRefCodec.storageKey(ref), restored.localConfiguration!!.customCacheKey)
+        assertTrue(restored.metadata!!.hasAlternateVersion)
+        assertTrue(restored.buildUpon().setTag(null).build().hasAlternateVersion)
         var captured: PlaybackSnapshot? = null
         instrumentation.runOnMainSync {
             val player = ExoPlayer.Builder(context).build()
@@ -813,6 +818,7 @@ class SourceCompatibilityInstrumentedTest {
         assertEquals(TrackRefCodec.encode(ref), captured!!.items.single().trackRef)
         assertEquals("TEST00000001", captured!!.items.single().isrc)
         assertEquals("Live", captured!!.items.single().recordingVersion)
+        assertTrue(captured!!.items.single().hasAlternateVersion)
         assertEquals(snapshot.items.single().albumRef, captured!!.items.single().albumRef)
         assertEquals(snapshot.items.single().artists.single().ref, captured!!.items.single().artists.single().ref)
     }

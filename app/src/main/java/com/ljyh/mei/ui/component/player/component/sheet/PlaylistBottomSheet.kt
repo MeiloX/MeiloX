@@ -51,9 +51,18 @@ import coil3.compose.AsyncImage
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.R
 import com.ljyh.mei.data.model.MediaMetadata
+import com.ljyh.mei.data.model.hasAlternateVersion
 import com.ljyh.mei.data.model.metadata
+import com.ljyh.mei.data.model.toMediaItem
+import com.ljyh.mei.data.model.toMediaMetadata
 import com.ljyh.mei.playback.playbackOrderIndices
 import com.ljyh.mei.playback.queueEntryId
+import com.ljyh.mei.source.api.ProviderIds
+import com.ljyh.mei.source.api.Track
+import com.ljyh.mei.source.api.TrackRef
+import com.ljyh.mei.source.api.TrackRefCodec
+import com.ljyh.mei.ui.component.item.AlternateVersionSubtitle
+import com.ljyh.mei.ui.component.item.trackAlternateVersionAction
 import com.ljyh.mei.ui.component.sheet.rememberMeiloXSheetDismissal
 import io.github.neoruaa.glasmio.scaffold.rememberGlasmioHeaderScrollEdge
 import io.github.neoruaa.glasmio.ui.LocalGlasmioSheetContentPadding
@@ -196,13 +205,25 @@ fun PlaylistContent(
                     ReorderableItem(reorderableLazyListState, key = entry.key) {
                         val mediaItem = entry.mediaItem
                         val display = mediaItem.mediaMetadata
+                        val fallbackRef = TrackRefCodec.decode(mediaItem.mediaId)
+                            ?: TrackRef(ProviderIds.NETEASE, mediaItem.mediaId.ifEmpty { "0" })
                         val metadata = mediaItem.metadata ?: MediaMetadata(
                             id = mediaItem.mediaId.toLongOrNull() ?: 0L,
                             title = display.title?.toString().orEmpty(),
                             coverUrl = display.artworkUri?.toString().orEmpty(),
-                            artists = emptyList(),
-                            duration = 0L,
+                            artists = display.extras?.getStringArrayList("artist_list")
+                                ?.filter(String::isNotBlank)
+                                ?.map { MediaMetadata.Artist(0L, it) }
+                                .orEmpty()
+                                .ifEmpty {
+                                    display.artist?.toString()?.takeIf(String::isNotBlank)
+                                        ?.let { listOf(MediaMetadata.Artist(0L, it)) }
+                                        .orEmpty()
+                                },
+                            duration = display.extras?.getLong("duration") ?: 0L,
                             album = MediaMetadata.Album(0L, display.albumTitle?.toString().orEmpty()),
+                            trackRef = fallbackRef,
+                            hasAlternateVersion = mediaItem.hasAlternateVersion,
                         )
                         val shape = when {
                             queueEntries.size == 1 -> ContinuousRoundedRectangle(26.dp)
@@ -227,6 +248,12 @@ fun PlaylistContent(
                                 isCurrentPlaying = entry.rawIndex == currentMediaItemIndex,
                                 onItemClick = {
                                     playerConnection.service.queueManager.seekToQueueEntry(entry.key)
+                                },
+                                onSelectAlternate = { track ->
+                                    playerConnection.service.queueManager.replaceQueueEntryAndPlay(
+                                        entry.key,
+                                        track.toMediaMetadata().toMediaItem(),
+                                    )
                                 },
                                 onRemoveClick = {
                                     if (queueEntries.size > 1) {
@@ -297,8 +324,15 @@ fun PlaylistItem(
     isCurrentPlaying: Boolean,
     onItemClick: () -> Unit,
     onRemoveClick: () -> Unit,
+    onSelectAlternate: ((Track) -> Unit)? = null,
 ) {
     val colors = LocalGlassColors.current
+    val alternateVersion = trackAlternateVersionAction(
+        metadata.trackRef,
+        metadata.title,
+        metadata.hasAlternateVersion,
+        onSelectTrack = onSelectAlternate,
+    )
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -313,7 +347,7 @@ fun PlaylistItem(
                     )
                 }
             }
-            .clickable(onClick = onItemClick)
+            .clickable(onClick = alternateVersion?.onRowClick ?: onItemClick)
             .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -333,13 +367,18 @@ fun PlaylistItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                "${metadata.artists.joinToString(", ") { it.name }} · ${formatDuration(metadata.duration)}",
-                style = IosTypography.caption,
-                color = colors.secondaryContent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            AlternateVersionSubtitle(
+                showBadge = alternateVersion != null,
+                onBadgeClick = alternateVersion?.onBadgeClick,
+            ) {
+                Text(
+                    "${metadata.artists.joinToString(", ") { it.name }} · ${formatDuration(metadata.duration)}",
+                    style = IosTypography.caption,
+                    color = colors.secondaryContent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (isCurrentPlaying) {
             SfIcon("speaker.wave.2.fill", null, size = 17.dp, tint = colors.accent)

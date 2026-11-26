@@ -252,7 +252,8 @@ class SourceHomeFeedCache internal constructor(
             val content = when (value) {
                 is SourceItem.TrackItem -> value.track.let { obj("trackId" to it.ref.trackId, "title" to it.title,
                     "artists" to artists(it.artists), "album" to obj("title" to it.album.title, "albumId" to it.album.ref?.albumId),
-                    "durationMs" to it.durationMs, "artworkUrl" to it.artworkUrl, "isrc" to it.isrc, "version" to it.version, "explicit" to it.explicit) }
+                    "durationMs" to it.durationMs, "artworkUrl" to it.artworkUrl, "isrc" to it.isrc, "version" to it.version,
+                    "explicit" to it.explicit, "hasAlternateVersion" to it.hasAlternateVersion.takeIf { available -> available }) }
                 is SourceItem.PlaylistItem -> value.playlist.let { obj("playlistId" to it.ref.playlistId, "title" to it.title,
                     "artworkUrl" to it.artworkUrl, "creatorName" to it.creatorName, "trackCount" to it.trackCount, "description" to it.description, "playCount" to it.playCount, "subtitle" to it.subtitle,
                     "editableActions" to strings(it.editableActions.map { action -> action.wireName })) }

@@ -64,6 +64,7 @@ import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.constants.RecommendCardCornerRadius
 import com.ljyh.mei.constants.RecommendCardHeight
 import com.ljyh.mei.constants.RecommendCardWidth
+import com.ljyh.mei.ui.component.item.AlternateVersionBadge
 import io.github.neoruaa.glasmio.glass.createProgressiveBackdropBlurRenderEffect
 import com.ljyh.mei.utils.largeImage
 import kotlin.math.ceil
@@ -80,6 +81,8 @@ fun RecommendCard(
     isLoading: Boolean = false,
     cardWidth: Dp = RecommendCardWidth,
     cardHeight: Dp = RecommendCardHeight,
+    showAlternateVersion: Boolean = false,
+    onAlternateVersionClick: (() -> Unit)? = null,
     onClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -163,7 +166,7 @@ fun RecommendCard(
                     bottom = 16.dp,
                 ),
         ) {
-            RecommendationDescription(extInfo)
+            RecommendationDescription(extInfo, showAlternateVersion, onAlternateVersionClick)
             Spacer(Modifier.height(2.dp))
             Text(
                 text = title.orEmpty(),
@@ -316,13 +319,21 @@ private fun RecommendationArtworkExtension(
 }
 
 @Composable
-private fun RecommendationDescription(extInfo: CardExtInfo) {
+private fun RecommendationDescription(
+    extInfo: CardExtInfo,
+    showAlternateVersion: Boolean,
+    onAlternateVersionClick: (() -> Unit)? = null,
+) {
     val iconModel = extInfo.icon?.takeIf { it.isNotBlank() }
     val currentIconModel = rememberUpdatedState(iconModel)
     var iconTerminal by remember(iconModel) { mutableStateOf(iconModel == null) }
     var iconSucceeded by remember(iconModel) { mutableStateOf(false) }
     val color = Color.White.copy(alpha = 0.8f)
     Row(verticalAlignment = Alignment.CenterVertically) {
+        if (showAlternateVersion) {
+            AlternateVersionBadge(color = color, onClick = onAlternateVersionClick)
+            Spacer(Modifier.width(6.dp))
+        }
         if (iconModel != null && (!iconTerminal || iconSucceeded)) {
             AsyncImage(
                 model = iconModel,

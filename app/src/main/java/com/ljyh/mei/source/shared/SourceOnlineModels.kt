@@ -87,8 +87,14 @@ data class OnlinePodcastPage(val podcasts: List<OnlinePodcast>, val hasMore: Boo
 data class OnlinePodcastProgramPage(val programs: List<OnlinePodcastProgram>, val hasMore: Boolean, val totalCount: Int, val fetchedCount: Int = programs.size)
 data class OnlinePodcastDetail(val podcast: OnlinePodcast, val programs: List<OnlinePodcastProgram>, val hasMore: Boolean, val totalCount: Int, val nextOffset: Int = programs.size)
 
-data class OnlineWikiSong(val id: String, val title: String, val artist: String?, val note: String?, val artworkUrl: String?, val providerId: String) {
-    val track: Track get() = Track(TrackRef(providerId, id), title, artist.orEmpty().split(" / ").filter(String::isNotBlank).map { SourceArtist(it) }, artworkUrl = artworkUrl.orEmpty())
+data class OnlineWikiSong(
+    val id: String, val title: String, val artist: String?, val note: String?, val artworkUrl: String?, val providerId: String,
+    val hasAlternateVersion: Boolean = false,
+) {
+    val track: Track get() = Track(
+        TrackRef(providerId, id), title, artist.orEmpty().split(" / ").filter(String::isNotBlank).map { SourceArtist(it) },
+        artworkUrl = artworkUrl.orEmpty(), hasAlternateVersion = hasAlternateVersion,
+    )
 }
 data class OnlineWikiPlaylist(val id: String, val title: String, val artworkUrl: String?, val playCount: Long, val providerId: String) {
     val ref: PlaylistRef get() = PlaylistRef(providerId, id)

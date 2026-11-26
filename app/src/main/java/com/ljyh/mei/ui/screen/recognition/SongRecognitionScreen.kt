@@ -1,5 +1,8 @@
 package com.ljyh.mei.ui.screen.recognition
 
+import com.ljyh.mei.ui.component.item.AlternateVersionSubtitle
+import com.ljyh.mei.ui.component.item.trackAlternateVersionAction
+
 import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
@@ -232,9 +235,10 @@ fun SongRecognitionScreen(viewModel: SongRecognitionViewModel = hiltViewModel(),
         }
         state.error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
         items(state.results, key = { it.ref.toString() }) { song ->
+            val alternateVersion = trackAlternateVersionAction(song.ref, song.name, song.hasAlternateVersion)
             GlasmioCard(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = {
+                onClick = alternateVersion?.onRowClick ?: {
                     viewModel.media(song) { media ->
                         val lastPosition = song.durationMs.takeIf { it > 0 }?.minus(1) ?: Int.MAX_VALUE.toLong()
                         playerConnection?.playQueue(ListQueue(
@@ -260,12 +264,20 @@ fun SongRecognitionScreen(viewModel: SongRecognitionViewModel = hiltViewModel(),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Text(
-                            song.artists.joinToString(" / "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
+                        val subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        AlternateVersionSubtitle(
+                            showBadge = alternateVersion != null,
+                            color = subtitleColor,
+                            onBadgeClick = alternateVersion?.onBadgeClick,
+                        ) {
+                            Text(
+                                song.artists.joinToString(" / "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = subtitleColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                     SfIcon(SfSymbol.PlayFilled, stringResource(R.string.player_play))
                 }

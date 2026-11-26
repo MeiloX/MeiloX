@@ -35,6 +35,7 @@ import com.ljyh.mei.ui.component.playlist.AddToPlaylistSheet
 import com.ljyh.mei.ui.component.playlist.CreatePlaylistSheet
 import com.ljyh.mei.ui.component.playlist.rememberFavoriteTrackIds
 import com.ljyh.mei.ui.component.sheet.rememberMeiloXSheetDismissal
+import com.ljyh.mei.ui.component.item.GroupedSongRow
 import com.ljyh.mei.ui.component.item.LandscapeMediaRow
 import com.ljyh.mei.utils.color.ColorExtractionUtils
 import io.github.neoruaa.glasmio.core.IosTypography
@@ -158,31 +159,42 @@ internal fun LazyListScope.sourceContentItems(
         key = { "$keyPrefix-${it.index}-${it.value.ref.type.wireName}-${Uri.encode(it.value.ref.providerId)}-${Uri.encode(it.value.ref.contentId)}" },
         firstItemTopPadding = firstItemTopPadding, contentType = "source-content") { indexed, index ->
         val item = indexed.value
-        GlasmioListRow(
-            title = item.title,
-            subtitle = subtitle(item).takeIf(String::isNotBlank),
-            showTopSeparator = index > 0,
-            leading = {
-                AsyncImage(item.artworkUrl, null, contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(44.dp).clip(if (item is SourceItem.ArtistItem) CircleShape else ContinuousRoundedRectangle(10.dp)))
-            },
-            trailing = if (item is SourceItem.TrackItem) ({
-                TrackMenuTrigger(menuAnchorState, { onMore(item.track, it) }) { trigger, openMenu ->
-                    Box(
-                        Modifier.size(40.dp).then(trigger)
-                            .clickable(interactionSource = null, indication = null, onClick = openMenu),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        SfIcon("ellipsis", stringResource(R.string.more_actions_title), size = 18.dp)
+        val leading: @Composable () -> Unit = {
+            AsyncImage(item.artworkUrl, null, contentScale = ContentScale.Crop,
+                modifier = Modifier.size(44.dp).clip(if (item is SourceItem.ArtistItem) CircleShape else ContinuousRoundedRectangle(10.dp)))
+        }
+        val subtitleText = subtitle(item).takeIf(String::isNotBlank)
+        if (item is SourceItem.TrackItem) {
+            GroupedSongRow(
+                title = item.title,
+                artist = item.track.artists.joinToString(" / ") { it.name },
+                subtitle = subtitleText,
+                showTopSeparator = index > 0,
+                leading = leading,
+                trailing = {
+                    TrackMenuTrigger(menuAnchorState, { onMore(item.track, it) }) { trigger, openMenu ->
+                        Box(
+                            Modifier.size(40.dp).then(trigger)
+                                .clickable(interactionSource = null, indication = null, onClick = openMenu),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            SfIcon("ellipsis", stringResource(R.string.more_actions_title), size = 18.dp)
+                        }
                     }
-                }
-            }) else null,
-            showDisclosure = item !is SourceItem.TrackItem,
-            onClick = {
-                if (item is SourceItem.TrackItem) onPlay(tracks, trackIndices[index])
-                else onOpen(item.ref)
-            },
-        )
+                },
+                onClick = { onPlay(tracks, trackIndices[indexed.index]) },
+                trackRef = item.track.ref,
+                hasAlternateVersion = item.track.hasAlternateVersion,
+            )
+        } else {
+            GlasmioListRow(
+                title = item.title,
+                subtitle = subtitleText,
+                showTopSeparator = index > 0,
+                leading = leading,
+                onClick = { onOpen(item.ref) },
+            )
+        }
     }
 }
 
@@ -904,7 +916,8 @@ fun SourceArtistCatalogScreen(ref: ArtistRef, albums: Boolean, viewModel: Source
                     album = track.album.title, favorite = track.toMediaMetadata().mediaId in favoriteIds,
                     showDivider = indexed != visibleTracks.lastOrNull(), fullWidthTrackPress = true,
                     copyNamesOnLongPress = true,
-                    onMore = { menu = track to it }, menuAnchorState = trackMenuAnchor, trackRef = track.ref)
+                    onMore = { menu = track to it }, menuAnchorState = trackMenuAnchor, trackRef = track.ref,
+                    hasAlternateVersion = track.hasAlternateVersion)
             }
             sourceDetailPagingStatus(state, viewModel::refresh, {
                 if (query.text.isBlank()) viewModel.loadMore() else viewModel.continueArtistCatalogSearch()

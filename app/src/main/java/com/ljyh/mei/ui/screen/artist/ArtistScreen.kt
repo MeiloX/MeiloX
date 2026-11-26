@@ -888,6 +888,8 @@ internal fun ArtistPopularSongs(
                         moreModifier = Modifier.testTag("ArtistSongMore:${track.id}"),
                         coverSize = ArtistSongCoverSize,
                         menuAnchorState = menuAnchorState,
+                        trackRef = track.trackRef,
+                        hasAlternateVersion = track.hasAlternateVersion,
                     )
                 }
             }

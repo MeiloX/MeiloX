@@ -129,6 +129,18 @@ class BoundSourceFeatures internal constructor(
         return capability.parseFeatureTrack(value).also { ensureCurrent() }
     }
 
+    suspend fun alternateVersion(ref: TrackRef): Track? {
+        ensureCurrent()
+        require(ref.providerId == providerId)
+        if (!supports("playback", "alternateVersion")) return null
+        val response = invoke("playback", "alternateVersion", JsonObject().apply { addProperty("trackId", ref.trackId) })
+        if (response.isJsonNull) return null
+        if (!response.isJsonObject) throw SourceException(SourceErrorCode.INVALID_RESPONSE)
+        return track(response.asJsonObject).also {
+            if (it.ref.providerId != providerId || it.ref == ref) throw SourceException(SourceErrorCode.INVALID_RESPONSE)
+        }
+    }
+
     suspend fun completeTrackIds(playlistId: String, collection: LibraryCollection?): SourceTrackIndex? {
         ensureCurrent()
         if (SourceCapability.TRACK !in owner.capabilities) return null

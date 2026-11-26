@@ -188,6 +188,8 @@ Cloud list parameters retain their explicit `offset` and `limit`; the screen req
 
 The host binds feature calls to one provider object, instance, version, account revision and screen scope. Changing the default browse source cannot retarget an open edit, conversation, upload or login form. Disabling, replacing, removing or changing that owner's account cancels in-flight work and closes pending host interactions. Host callers alone may opt named login/logout/account-web flows into a final same-provider session transition. Pending effects still require the original account.
 
+Tracks can declare `hasAlternateVersion: true` when their service flags an alternate recording. The read-only `playback/alternateVersion` feature accepts `{trackId}` and returns the service's recommended `Track` or `null`. The user can play the recommended recording by its own track ID.
+
 Shared presenters retain the app's original playlist/album/artist UI, grouped rows, menus and playback controls. Advanced shared schemas cover account/security/login, cloud, podcasts, listening statistics/history, song wiki, comments, private messages, recognition and listening together. IDs stay strings throughout these schemas. For example, `podcasts.search` returns `{podcasts,hasMore,totalCount,fetchedCount}`; account playlist pages return `{playlists,hasMore,nextOffset}`. Aggregation across larger libraries runs outside one isolated response.
 
 Comments use semantic `contentId`, `contentType` (`track`, `album`, `playlist`, `program`) and `sortType` (`recommended`, `hot`, `time`). Service thread prefixes, sort integers and cursor recipes belong to the plugin. Existing UI actions use only the selected source's capabilities; an unsupported action cannot fall back to NetEase.

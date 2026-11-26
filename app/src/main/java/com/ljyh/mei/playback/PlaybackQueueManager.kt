@@ -169,6 +169,25 @@ class PlaybackQueueManager(
         }
     }
 
+    fun replaceQueueEntryAndPlay(entryId: String, replacement: MediaItem) {
+        cancelPendingSimilarStart()
+        queueSelectionJob?.cancel()
+        queueSelectionJob = scope.launch(Dispatchers.Main) {
+            val index = (0 until player.mediaItemCount).firstOrNull {
+                player.getMediaItemAt(it).queueEntryId == entryId
+            } ?: return@launch
+            val stablePlayer = player as? StableDeckPlayer ?: return@launch
+            val order = player.playbackOrderIndices(true)
+            stablePlayer.withInternalQueueUpdate {
+                player.replaceMediaItem(index, replacement)
+                if (order.size == player.mediaItemCount) stablePlayer.setPlaybackOrder(order)
+                player.seekToDefaultPosition(index)
+                if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                player.playWhenReady = true
+            }
+        }
+    }
+
     fun cancelServerShuffle() {
         pendingInitialShuffleReset = false
         cancelLocalShuffle()

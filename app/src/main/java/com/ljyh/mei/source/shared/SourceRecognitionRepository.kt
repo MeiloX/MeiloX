@@ -37,7 +37,8 @@ class SourceRecognitionSession internal constructor(val owner: BoundSourceFeatur
                 RecognizedSong(TrackRef(owner.providerId, row.featureText("id")!!), row.featureText("name", maximum = 1000)!!,
                     row.featureList("artists", 50).map { if (!it.isJsonPrimitive || !it.asJsonPrimitive.isString || it.asString.length > 1000) invalidFeature() else it.asString },
                     row.featureText("album", true, 1000).orEmpty(), row.featureText("coverUrl", true, 8192), row.featureLong("durationMs"),
-                    row.get("startTimeMs")?.takeUnless { it.isJsonNull }?.let { row.featureLong("startTimeMs") })
+                    row.get("startTimeMs")?.takeUnless { it.isJsonNull }?.let { row.featureLong("startTimeMs") },
+                    hasAlternateVersion = row.featureBoolean("hasAlternateVersion"))
             }.distinctBy { it.ref }
     }
 }

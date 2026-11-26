@@ -3,6 +3,7 @@ package com.ljyh.mei.ui.component.item
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.ljyh.mei.R
+import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.ui.component.CopyNamePopover
 import com.ljyh.mei.ui.component.LocalCopyNamePopoverHost
 import com.ljyh.mei.ui.component.copyNameActions
@@ -20,7 +21,10 @@ internal fun GroupedSongRow(
     subtitle: String? = artist,
     detail: String? = null,
     trailing: (@Composable () -> Unit)? = null,
+    trackRef: TrackRef? = null,
+    hasAlternateVersion: Boolean = false,
 ) {
+    val alternateVersion = trackAlternateVersionAction(trackRef, title, hasAlternateVersion)
     val hasHost = LocalCopyNamePopoverHost.current != null
     val subtitleContent: (@Composable () -> Unit)? = subtitle?.let { text ->
         @Composable {
@@ -71,10 +75,16 @@ internal fun GroupedSongRow(
             artistName = artist,
             enabled = true,
         ),
-        subtitleContent = subtitleContent,
+        subtitleContent = if (alternateVersion == null) subtitleContent else {
+            {
+                AlternateVersionSubtitle(showBadge = true, onBadgeClick = alternateVersion.onBadgeClick) {
+                    subtitleContent?.invoke()
+                }
+            }
+        },
         detail = detail,
         leading = leading,
-        onClick = onClick,
+        onClick = alternateVersion?.onRowClick ?: onClick,
         trailing = trailing,
         showTopSeparator = showTopSeparator,
     )

@@ -1,8 +1,17 @@
 package com.ljyh.mei.ui.component.player.component.applemusic
 
+import com.ljyh.mei.data.model.hasAlternateVersion
+import com.ljyh.mei.data.model.toMediaItem
+import com.ljyh.mei.data.model.toMediaMetadata
+import com.ljyh.mei.source.api.Track
+import com.ljyh.mei.source.api.TrackRefCodec
+import com.ljyh.mei.ui.local.LocalPlayerConnection
+
 import com.ljyh.mei.ui.component.LocalCopyNamePopoverHost
 import com.ljyh.mei.ui.component.copyNameActions
+import com.ljyh.mei.ui.component.item.AlternateVersionSubtitle
 import com.ljyh.mei.ui.component.item.MediaRowName
+import com.ljyh.mei.ui.component.item.trackAlternateVersionAction
 import com.ljyh.mei.ui.component.item.trackPressViewport
 import com.ljyh.mei.ui.component.item.trackRowPressIndication
 import com.ljyh.mei.ui.component.player.component.playerAdditiveLayer
@@ -1813,6 +1822,25 @@ internal fun QueueSongRow(
     val display = entry.mediaItem.mediaMetadata
     val title = metadata?.title ?: display.title?.toString().orEmpty()
     val artist = metadata?.artists?.joinToString(", ") { it.name } ?: display.artist?.toString().orEmpty()
+    val playerConnection = LocalPlayerConnection.current
+    val onSelectAlternate = remember(playerConnection, entry.key) {
+        playerConnection?.let { connection ->
+            { track: Track ->
+                connection.service.queueManager.replaceQueueEntryAndPlay(
+                    entry.key,
+                    track.toMediaMetadata().toMediaItem(),
+                )
+            }
+        }
+    }
+    val alternateVersion = if (entry.mediaItem.hasAlternateVersion) {
+        trackAlternateVersionAction(
+            metadata?.trackRef ?: TrackRefCodec.decode(entry.mediaItem.mediaId),
+            title,
+            true,
+            onSelectTrack = onSelectAlternate,
+        )
+    } else null
     val cover = metadata?.coverUrl ?: display.artworkUri?.toString().orEmpty()
     val context = LocalContext.current
     val coverRequest = remember(context, cover, metadata?.trackRef) {
@@ -1833,7 +1861,7 @@ internal fun QueueSongRow(
             enabled = enabled,
             interactionSource = rowInteraction,
             indication = null,
-            onClick = onClick,
+            onClick = alternateVersion?.onRowClick ?: onClick,
         )
     } else Modifier
     Box(modifier.then(press)) {
@@ -1908,16 +1936,23 @@ internal fun QueueSongRow(
                             copyAction = R.string.track_action_copy_name.takeIf { allowLongPress },
                             sharedMenuAnchor = rowMenuAnchor,
                         )
-                        MediaRowName(
-                            text = artist,
-                            color = Color.White.copy(alpha = 0.5f),
-                            style = artistStyle.copy(
-                                fontSize = 13.sp,
-                                lineHeight = if (landscapeSongListStyle) 18.sp else 17.sp,
-                            ),
-                            copyAction = R.string.artist_action_copy_name.takeIf { allowLongPress },
-                            sharedMenuAnchor = rowMenuAnchor,
-                        )
+                        val subtitleColor = Color.White.copy(alpha = 0.5f)
+                        AlternateVersionSubtitle(
+                            showBadge = alternateVersion != null,
+                            color = subtitleColor,
+                            onBadgeClick = alternateVersion?.onBadgeClick?.takeIf { interactive && enabled },
+                        ) {
+                            MediaRowName(
+                                text = artist,
+                                color = subtitleColor,
+                                style = artistStyle.copy(
+                                    fontSize = 13.sp,
+                                    lineHeight = if (landscapeSongListStyle) 18.sp else 17.sp,
+                                ),
+                                copyAction = R.string.artist_action_copy_name.takeIf { allowLongPress },
+                                sharedMenuAnchor = rowMenuAnchor,
+                            )
+                        }
                     }
                 }
                 if (dragHandleModifier != null) {

@@ -657,7 +657,8 @@ class HomeRepositoryTest {
             return SourceFeedPage(listOf(SourceFeedSection("hero", title, SourceFeedLayout.HERO, items,
                 targets.mapIndexed { index, target -> SourceFeedCard("card-$index", "Card", artwork, "Subtitle", artwork, target) }),
                 SourceFeedSection("tracks", "Tracks", SourceFeedLayout.TRACKS, (1..120).map {
-                    SourceItem.TrackItem(Track(TrackRef("qq", "track-$it"), "Track $it", listOf(SourceArtist("Artist", artist.ref)), SourceAlbum("Album", album.ref), 1000, artwork))
+                    SourceItem.TrackItem(Track(TrackRef("qq", "track-$it"), "Track $it", listOf(SourceArtist("Artist", artist.ref)),
+                        SourceAlbum("Album", album.ref), 1000, artwork, hasAlternateVersion = it == 1))
                 }), SourceFeedSection("radar", "Radar", SourceFeedLayout.PLAYLISTS, listOf(SourceItem.PlaylistItem(playlist)),
                     listOf(SourceFeedCard("radar-card", "", artwork, "Creator", "", SourceFeedTarget.Content(playlist.ref),
                         coverCaptions = listOf("First caption", "Second caption"), detail = "120 plays", titleMaxLines = 1)))),
