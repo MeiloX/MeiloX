@@ -1679,12 +1679,16 @@ class MainActivity : ComponentActivity() {
                                 // Keep expanded navigation and both compact controls below the mini-player.
                                 .zIndex(0.5f)
                                 // Detach the off-screen bottom bar (and its page backdrop pyramid) from
-                                // HWUI prepareTree once the expanded player covers the viewport opaquely.
+                                // HWUI prepareTree once it slides below the viewport or the player covers it.
                                 .layout { measurable, constraints ->
                                     val placeable = measurable.measure(constraints)
                                     layout(placeable.width, placeable.height) {
                                         if (pageVisible.value) {
-                                            placeable.place(0, 0)
+                                            val slidePx = ((navigationBottomMargin + NavigationBarHeight) *
+                                                playerBottomSheetState.progress.coerceIn(0f, 1f)).roundToPx()
+                                            if (slidePx < placeable.height + 2.dp.roundToPx()) {
+                                                placeable.place(0, slidePx)
+                                            }
                                         }
                                     }
                                 },
@@ -2012,12 +2016,7 @@ private fun AnimatedBottomNavigationRow(
             .glasmioNavigationScrollHint(hint.progress) {
                 TransformOrigin(.5f, hint.pivotFromTop().toPx() / size.height.coerceAtLeast(1f))
             }
-            .padding(bottom = bottomMargin)
-            .offset {
-                val slideOffset = (bottomMargin + NavigationBarHeight) *
-                    playerBottomSheetState.progress.coerceIn(0f, 1f)
-                IntOffset(x = 0, y = slideOffset.roundToPx())
-            },
+            .padding(bottom = bottomMargin),
     )
 }
 

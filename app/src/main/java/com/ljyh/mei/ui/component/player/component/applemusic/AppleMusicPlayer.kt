@@ -118,6 +118,7 @@ import io.github.neoruaa.glasmio.scaffold.GlasmioBottomSheetState
 import io.github.neoruaa.glasmio.scaffold.HorizontalSwipeDirection
 import io.github.neoruaa.glasmio.glass.trackBackdropPosition
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -957,7 +958,8 @@ internal fun AppleMusicDetailPages(
     var queuePrepared by remember { mutableStateOf(false) }
     LaunchedEffect(preloadQueue) {
         if (preloadQueue && !queuePrepared) {
-            // Leave the sheet's settling frame free of queue initialization.
+            // Defer hidden queue composition until well after the sheet expansion settles.
+            delay(750L)
             withFrameNanos { }
             queuePrepared = true
         }
