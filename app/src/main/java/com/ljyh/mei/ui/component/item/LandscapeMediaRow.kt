@@ -124,6 +124,7 @@ internal fun LandscapeMediaRow(
                 if (favorite) FavoriteTrackStar(
                     Modifier.align(Alignment.CenterStart).offset(x = (-18).dp),
                     tint = colors.secondaryContent,
+                    luminosityBlend = false,
                 )
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -211,6 +212,7 @@ internal fun PortraitMediaRow(
                 if (favorite) FavoriteTrackStar(
                     Modifier.align(Alignment.CenterStart).offset(x = (-16).dp),
                     tint = colors.secondaryContent,
+                    luminosityBlend = false,
                 )
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 4.dp),

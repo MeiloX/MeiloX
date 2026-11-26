@@ -56,13 +56,18 @@ private fun rememberSourceFavoriteTrackIds(refs: Set<TrackRef>): Set<String> {
 internal fun FavoriteTrackStar(
     modifier: Modifier = Modifier,
     tint: Color = LocalGlassColors.current.secondaryContent,
+    luminosityBlend: Boolean = true,
 ) {
     SfIcon(
         systemName = "star.fill",
         contentDescription = null,
-        modifier = modifier.graphicsLayer {
-            blendMode = BlendMode.Luminosity
-            compositingStrategy = CompositingStrategy.Offscreen
+        modifier = if (luminosityBlend) {
+            modifier.graphicsLayer {
+                blendMode = BlendMode.Luminosity
+                compositingStrategy = CompositingStrategy.Offscreen
+            }
+        } else {
+            modifier
         },
         tint = tint,
         size = 11.dp,

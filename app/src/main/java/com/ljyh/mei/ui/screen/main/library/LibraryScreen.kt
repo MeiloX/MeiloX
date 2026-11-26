@@ -45,7 +45,6 @@ fun LibraryScreen(
     val settings by sourceViewModel.settings.collectAsState()
     val providers by sourceViewModel.libraryChoices.collectAsState()
     val nav = LocalNavController.current
-    LaunchedEffect(sourceViewModel) { sourceViewModel.useBrowsePreference() }
     val providerId = settings?.preferredBrowseProvider
     when {
         providerId == null -> MeiloXLoadingPage(
@@ -69,7 +68,10 @@ fun LibraryScreen(
             bottomPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues().calculateBottomPadding(),
             onNavigateBack = if (isNavigationTab) null else ({ nav.navigateUp() }),
             actions = { listOfNotNull(
-                sourcePickerHeaderAction(providers, providerId, sourceViewModel::selectProvider),
+                sourcePickerHeaderAction(providers, providerId) { id ->
+                    sourceViewModel.useBrowsePreference()
+                    sourceViewModel.selectProvider(id)
+                },
                 if (isNavigationTab) globalProfileHeaderAction() else null,
             ) },
         ) {

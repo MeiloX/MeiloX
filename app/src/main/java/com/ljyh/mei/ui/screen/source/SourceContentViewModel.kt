@@ -145,7 +145,7 @@ class SourceContentViewModel internal constructor(
     private val detailTracksMutex = Mutex()
     private var detailTracksCache: SourceDetailTracks? = null
     private var playlistPreload: Job? = null
-    private val trackCacheGson = Gson()
+    private val trackCacheGson by lazy(LazyThreadSafetyMode.NONE) { Gson() }
 
     init {
         viewModelScope.launch {

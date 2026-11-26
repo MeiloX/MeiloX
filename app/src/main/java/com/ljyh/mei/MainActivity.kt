@@ -1390,6 +1390,8 @@ class MainActivity : ComponentActivity() {
                                             },
                                         )
                                     }
+                                    val currentRouteState = rememberUpdatedState(currentRoute)
+                                    val currentActiveState = rememberUpdatedState(active)
                                     val navEntries = rememberDecoratedNavEntries(
                                         backStack = backStack,
                                         entryDecorators = listOf(
@@ -1413,17 +1415,24 @@ class MainActivity : ComponentActivity() {
                                                                 playerBottomSheetState.isDismissed)
                                                     },
                                                 )
-                                                LaunchedEffect(currentRoute) {
-                                                    if (meiRoute.route == currentRoute) {
-                                                        entryTopAppBarScrollBehavior.state
-                                                            .resetHeightOffset()
-                                                    }
-                                                }
-                                                LaunchedEffect(active) {
-                                                    if (active && meiRoute.route == currentRoute) {
-                                                        entryTopAppBarScrollBehavior.state
-                                                            .resetHeightOffset()
-                                                    }
+                                                LaunchedEffect(meiRoute.route, entryTopAppBarScrollBehavior) {
+                                                    var initialized = false
+                                                    var prevRoute: String? = null
+                                                    var prevActive = false
+                                                    snapshotFlow { currentRouteState.value to currentActiveState.value }
+                                                        .collect { (routeNow, searchActive) ->
+                                                            val routeChanged = !initialized || routeNow != prevRoute
+                                                            val activeChanged = !initialized || searchActive != prevActive
+                                                            initialized = true
+                                                            prevRoute = routeNow
+                                                            prevActive = searchActive
+                                                            if (meiRoute.route == routeNow &&
+                                                                (routeChanged || (activeChanged && searchActive))
+                                                            ) {
+                                                                entryTopAppBarScrollBehavior.state
+                                                                    .resetHeightOffset()
+                                                            }
+                                                        }
                                                 }
                                                 val entryPlayerAwareWindowInsets = remember(
                                                     meiRoute.route,

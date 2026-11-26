@@ -225,7 +225,7 @@ fun SourceFeedScreen(
     val nav = LocalNavController.current
     val bottom = LocalPlayerAwareWindowInsets.current.asPaddingValues().calculateBottomPadding()
     val play = rememberSourceQueuePlayer("source-feed:$selectedId:${kind.name}", title)
-    val choices = browsableProviders(providers)
+    val choices = remember(providers) { browsableProviders(providers) }
     val categories = state.categories.takeIf { state.providerId == selectedId }.orEmpty()
     var loadingCard by remember(selectedId, categoryId) { mutableStateOf<String?>(null) }
     var cardJob by remember { mutableStateOf<Job?>(null) }
@@ -483,7 +483,8 @@ internal fun SourceFeedSectionContent(
                 Box {
                     if (TrackRefCodec.mediaId(track.ref) in favoriteIds) FavoriteTrackStar(
                         Modifier.align(Alignment.CenterStart).offset(x = (-14).dp).testTag("HomeSongFavorite:${track.ref.trackId}"),
-                        tint = LocalGlassColors.current.secondaryContent)
+                        tint = LocalGlassColors.current.secondaryContent,
+                        luminosityBlend = false)
                     HomeSongListRow(
                         coverUrl = track.artworkUrl,
                         title = track.title,
@@ -645,7 +646,7 @@ fun SourceLibraryScreen(
     initialCollection: LibraryCollection? = null,
     category: LibraryPage? = null,
     viewModel: SourceContentViewModel = hiltViewModel(key = "source-library:${category?.name ?: initialCollection?.name ?: "main"}"),
-    createdViewModel: SourceContentViewModel = hiltViewModel(key = "source-library-created:${category?.name ?: "main"}"),
+    createdViewModel: SourceContentViewModel? = null,
 ) {
     val context = LocalContext.current
     val localPreferences = com.ljyh.mei.ui.local.LocalAppPreferences.current
@@ -653,7 +654,6 @@ fun SourceLibraryScreen(
     if (preferences == null) { MeiloXLoadingPage(stringResource(category?.titleRes ?: R.string.app_tab_library)); return }
     val style = preferences?.get(LibraryStyleKey).toEnum(LibraryStyle.Default)
     val state by viewModel.state.collectAsState()
-    val createdState by createdViewModel.state.collectAsState()
     val selectedId by viewModel.selectedProviderId.collectAsState()
     val providers by viewModel.providers.collectAsState()
     val provider = providers.firstOrNull { it.id == selectedId }
@@ -692,6 +692,9 @@ fun SourceLibraryScreen(
         else -> LibraryCollection.LIKED_TRACKS
     }
     val needsCreated = page == LibraryPage.Playlists && collection != LibraryCollection.CREATED_PLAYLISTS && LibraryCollection.CREATED_PLAYLISTS in available
+    val resolvedCreatedViewModel: SourceContentViewModel? = createdViewModel
+        ?: if (needsCreated) hiltViewModel(key = "source-library-created:${category?.name ?: "main"}") else null
+    val createdState = resolvedCreatedViewModel?.state?.collectAsState()?.value
     val listState = rememberSaveable(selectedId, page, showArtists, saver = LazyListState.Saver) { LazyListState() }
     val nav = LocalNavController.current
     fun openPage(value: LibraryPage) {
@@ -724,13 +727,16 @@ fun SourceLibraryScreen(
     val hasCoreCollection = collection in available && page !in setOf(LibraryPage.Cloud, LibraryPage.History, LibraryPage.Downloads)
     val libraryRequest = remember(collection) { SourceContentRequest.Library(collection) }
     val createdLibraryRequest = remember { SourceContentRequest.Library(LibraryCollection.CREATED_PLAYLISTS) }
-    LaunchedEffect(collection, page, selectedId, categoryOverview, hasCoreCollection) {
+    LaunchedEffect(collection, page, selectedId, categoryOverview, hasCoreCollection, resolvedCreatedViewModel) {
         if (!categoryOverview && hasCoreCollection) viewModel.open(libraryRequest)
-        if (!categoryOverview && needsCreated) createdViewModel.open(createdLibraryRequest)
+        if (!categoryOverview && needsCreated) resolvedCreatedViewModel?.open(createdLibraryRequest)
     }
     var appliedDefault by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(preferences, selectedId, provider) {
-        if (preferences == null || selectedId.isBlank() || provider == null || appliedDefault || category != null || initialCollection != null) return@LaunchedEffect
+    val needsDefaultRedirect = !appliedDefault && category == null && initialCollection == null &&
+        (defaultPage != null && defaultPage in overviewPages && (style == LibraryStyle.AppleMusic || selectedPage != defaultPage) ||
+            defaultPage == LibraryPage.History && preferences?.get(ListeningHistoryEnabledKey) != false)
+    LaunchedEffect(preferences, selectedId, provider, needsDefaultRedirect) {
+        if (!needsDefaultRedirect || preferences == null || selectedId.isBlank() || provider == null) return@LaunchedEffect
         appliedDefault = true
         if (defaultPage != null && defaultPage in overviewPages) {
             if (style == LibraryStyle.AppleMusic) Screen.LibraryCategory.navigate(nav) { addPath(defaultPage!!.name) }
@@ -763,7 +769,7 @@ fun SourceLibraryScreen(
         revisionFlow?.collectAsState(initial = (revisionFlow as? kotlinx.coroutines.flow.StateFlow<String?>)?.value)?.value
     }
     val requiresSignIn = provider?.status == SourceStatus.NEEDS_CONFIGURATION ||
-        listOfNotNull(state.takeIf { hasCoreCollection }, createdState.takeIf { needsCreated }).any { loaded ->
+        listOfNotNull(state.takeIf { hasCoreCollection }, createdState?.takeIf { needsCreated }).any { loaded ->
             loaded.providerId == selectedId && loaded.providerVersion == provider?.version &&
                 (revisionFlow == null || loaded.accountRevision == accountRevision) && !loaded.loading &&
                 (loaded.error == SourceErrorCode.AUTH_REQUIRED || loaded.error == SourceErrorCode.AUTH_EXPIRED ||
@@ -835,7 +841,7 @@ fun SourceLibraryScreen(
         page == LibraryPage.Songs && !showArtists) {
         player?.mediaMetadata?.collectAsState()?.value?.takeIf { it.supportsNeteaseSongActions }?.trackRef
     } else null
-    val extra = createdState.takeIf { needsCreated && it.providerId == selectedId }
+    val extra = createdState?.takeIf { needsCreated && it.providerId == selectedId }
     val displayed = remember(page, showArtists, playlistFilter, collection, ownState.items, extra?.items) {
         if (page == LibraryPage.Playlists && !showArtists) when (playlistFilter) {
             "created" -> if (collection == LibraryCollection.CREATED_PLAYLISTS) ownState.items else extra?.items.orEmpty()
@@ -879,7 +885,8 @@ fun SourceLibraryScreen(
             } == true
             else -> {
                 val coreRefreshing = hasCoreCollection && refreshCollection(viewModel, libraryRequest)
-                val createdRefreshing = needsCreated && refreshCollection(createdViewModel, createdLibraryRequest)
+                val createdRefreshing = needsCreated && resolvedCreatedViewModel != null &&
+                    refreshCollection(resolvedCreatedViewModel, createdLibraryRequest)
                 val podcastsRefreshing = podcastViewModel?.let {
                     it.selectTab(PodcastTab.Subscriptions)
                     it.refresh()
@@ -892,7 +899,7 @@ fun SourceLibraryScreen(
     fun more() {
         val pageSize = if (query.text.isBlank()) 30 else 100
         if (ownState.hasMore) viewModel.loadMore(pageSize)
-        if (extra?.hasMore == true) createdViewModel.loadMore(pageSize)
+        if (extra?.hasMore == true) resolvedCreatedViewModel?.loadMore(pageSize)
     }
     LaunchedEffect(query.text, ownState.nextCursor, extra?.nextCursor, combined.loading) {
         if (query.text.isNotBlank() && !combined.loading && combined.error == null && combined.hasMore) { delay(250); more() }
