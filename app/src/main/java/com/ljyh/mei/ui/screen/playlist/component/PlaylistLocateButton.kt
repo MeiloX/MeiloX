@@ -25,19 +25,22 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.LayerOutsets
-import android.graphics.RenderEffect
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import android.graphics.Shader
-import androidx.compose.ui.graphics.asComposeRenderEffect
+import kotlin.math.roundToInt
 import com.ljyh.mei.R
 import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.ui.component.sheet.LocalMiniPlayerVerticalOffset
@@ -217,20 +220,48 @@ private fun PlaylistLocateButtonChrome(
                 EnterExitState.PreEnter, EnterExitState.PostExit -> 0f
             }
         }
+        val blurLayer = rememberGraphicsLayer()
+        val blurPadPx = with(LocalDensity.current) { 32.dp.roundToPx() }
         Box(
-            Modifier.graphicsLayer {
-                // Match GlasmioNavigationScaffold's group/member toolbar motion.
-                val p = actionProgress.coerceIn(0f, 1f)
-                val scale = .24f + .92f * p - .16f * p * p
-                alpha = p * p
-                scaleX = scale
-                scaleY = scale
-                outsets = LayerOutsets(32.dp, 32.dp, 32.dp, 32.dp)
-                val blur = 10.dp.toPx() * (1f - p)
-                renderEffect = if (blur > .01f) {
-                    RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.DECAL).asComposeRenderEffect()
-                } else null
-            },
+            Modifier
+                .graphicsLayer {
+                    // Match GlasmioNavigationScaffold's group/member toolbar motion.
+                    val p = actionProgress.coerceIn(0f, 1f)
+                    val scale = .24f + .92f * p - .16f * p * p
+                    alpha = p * p
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .drawWithContent {
+                    val p = actionProgress.coerceIn(0f, 1f)
+                    val blur = 10.dp.toPx() * (1f - p)
+                    if (blur <= .01f) {
+                        drawContent()
+                    } else {
+                        val targetSize = IntSize(
+                            size.width.roundToInt().coerceAtLeast(1) + blurPadPx * 2,
+                            size.height.roundToInt().coerceAtLeast(1) + blurPadPx * 2,
+                        )
+                        blurLayer.clip = true
+                        blurLayer.record(size = targetSize) {
+                            drawContext.transform.translate(blurPadPx.toFloat(), blurPadPx.toFloat())
+                            try {
+                                this@drawWithContent.drawContent()
+                            } finally {
+                                drawContext.transform.translate(-blurPadPx.toFloat(), -blurPadPx.toFloat())
+                            }
+                        }
+                        blurLayer.renderEffect = io.github.neoruaa.glasmio.glass.createAnimatedBlurComposeRenderEffect(
+                            blur, Shader.TileMode.DECAL,
+                        )
+                        drawContext.transform.translate(-blurPadPx.toFloat(), -blurPadPx.toFloat())
+                        try {
+                            drawLayer(blurLayer)
+                        } finally {
+                            drawContext.transform.translate(blurPadPx.toFloat(), blurPadPx.toFloat())
+                        }
+                    }
+                },
         ) {
             GlasmioIconButton(
                 onClick = { registration.locating = true },

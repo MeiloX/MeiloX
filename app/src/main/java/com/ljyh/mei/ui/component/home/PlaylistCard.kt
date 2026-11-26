@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -49,6 +50,11 @@ import io.github.neoruaa.glasmio.icons.SfSymbol
 import com.ljyh.mei.utils.largeImage
 
 private val PlaylistCardShape = ContinuousRoundedRectangle(8.dp)
+private val PlaylistCardTextShadow = Shadow(
+    color = Color.Black.copy(alpha = 0.7f),
+    offset = Offset(2f, 2f),
+    blurRadius = 4f,
+)
 
 @Composable
 fun PlaylistCard(
@@ -63,12 +69,7 @@ fun PlaylistCard(
     secondaryTitle: String? = null,
     onClick: () -> Unit
 ) {
-    // 常用阴影样式，提取出来复用
-    val textShadow = Shadow(
-        color = Color.Black.copy(alpha = 0.7f),
-        offset = Offset(2f, 2f),
-        blurRadius = 4f
-    )
+    val textShadow = PlaylistCardTextShadow
 
     Column(
         modifier = Modifier
@@ -187,14 +188,15 @@ internal fun HomeCoverImage(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        if (!hasImage) {
-            SfIcon(
-                symbol = SfSymbol.MusicNote,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                size = 32.dp,
-            )
-        }
+        // Toggle placeholder visibility in draw phase so cached artwork loads never recompose
+        // or detach/attach SfIcon mid-scroll.
+        SfIcon(
+            symbol = SfSymbol.MusicNote,
+            contentDescription = null,
+            modifier = Modifier.drawWithContent { if (!hasImage) drawContent() },
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            size = 32.dp,
+        )
         AsyncImage(
             model = model,
             contentDescription = null,

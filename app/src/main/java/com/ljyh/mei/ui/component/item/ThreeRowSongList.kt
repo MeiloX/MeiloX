@@ -33,10 +33,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import com.ljyh.mei.R
 import io.github.neoruaa.glasmio.icons.SfIcon
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
@@ -128,7 +131,7 @@ internal fun HomeSongListRow(
     menuAnchorState: GlasmioMenuAnchorState? = null,
 ) {
     val landscape = rememberDeviceInfo().isLandscape
-    val shape = ContinuousRoundedRectangle(songListCoverCornerRadius(landscape))
+    val shape = remember(landscape) { ContinuousRoundedRectangle(songListCoverCornerRadius(landscape)) }
     val moreLabel = stringResource(R.string.more_actions_title)
     val configuration = LocalViewConfiguration.current
     val actionConfiguration =
@@ -139,7 +142,6 @@ internal fun HomeSongListRow(
         }
     Row(
         Modifier.fillMaxWidth()
-            .clip(shape)
             .copyNameActions(
                 trackName = title,
                 artistName = subtitle,
@@ -149,7 +151,14 @@ internal fun HomeSongListRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(coverSize).clip(shape).homeArtworkBorder(shape)) {
+        Box(
+            Modifier.size(coverSize)
+                // Cache the static squircle-clipped artwork + border tile in a GPU layer to avoid
+                // per-frame SW path mask texture uploads while scrolling the home feed.
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .clip(shape)
+                .homeArtworkBorder(shape),
+        ) {
             PlayingImageView(imageUrl = coverUrl, isPlaying = false, modifier = Modifier.matchParentSize())
             if (isPlaying) {
                 Box(
@@ -185,7 +194,7 @@ internal fun HomeSongListRow(
             TrackMenuTrigger(menuAnchorState, onMore) { trigger, openMenu ->
                 Box(
                     modifier = moreModifier.size(HomeSongActionSize).offset(x = (-6).dp)
-                        .clip(ContinuousRoundedRectangle(HomeSongActionSize / 2))
+                        .clip(CircleShape)
                         .then(trigger)
                         .clickable(
                             interactionSource = null, indication = null, role = Role.Button,

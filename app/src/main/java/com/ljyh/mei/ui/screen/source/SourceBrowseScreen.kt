@@ -186,6 +186,7 @@ import com.ljyh.mei.ui.screen.playlist.component.TrackItemShimmer
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import io.github.neoruaa.glasmio.core.swipeBackExcluded
 import io.github.neoruaa.glasmio.glass.GlasmioMenuAnchorState
+import io.github.neoruaa.glasmio.glass.createAnimatedBlurComposeRenderEffect
 import io.github.neoruaa.glasmio.glass.rememberGlasmioMenuAnchorState
 import io.github.neoruaa.glasmio.icons.SfIcon
 import io.github.neoruaa.glasmio.icons.SfSymbol
@@ -269,7 +270,13 @@ fun SourceFeedScreen(
     val feedRequest = remember(kind, categoryId, providerId) { SourceContentRequest.Feed(kind, categoryId, providerId) }
     LaunchedEffect(feedRequest) { viewModel.open(feedRequest) }
 
+    val greeting = remember { getGreeting() }
+    val onOpenContent = remember(nav) { { ref: ContentRef -> navigateSourceContent(nav, ref) } }
+    val onMoreTrack = remember(selection) { { track: Track, anchor: Rect -> selection.value = track to anchor } }
+    val currentOpenCard = rememberUpdatedState(::openCard)
+    val onActionCard = remember { { card: SourceFeedCard -> currentOpenCard.value(card) } }
     BoxWithConstraints(Modifier.fillMaxSize()) {
+        val feedMaxWidth = maxWidth
         val device = rememberDeviceInfo()
         val discoverColumns = if (device.isTablet) ((maxWidth - 20.dp) / 176.dp).toInt().coerceAtLeast(1) else 2
         val refreshing = state.providerId == selectedId && state.refreshing
@@ -329,8 +336,7 @@ fun SourceFeedScreen(
                                     val blurPx = 6.dp.toPx() * collapse
                                     clip = blurPx >= 0.5f
                                     renderEffect = if (blurPx >= 0.5f) {
-                                        AndroidRenderEffect.createBlurEffect(blurPx, blurPx, Shader.TileMode.CLAMP)
-                                            .asComposeRenderEffect()
+                                        createAnimatedBlurComposeRenderEffect(blurPx, Shader.TileMode.CLAMP, size)
                                     } else null
                                 }
                             }.padding(horizontal = 16.dp)
@@ -357,11 +363,20 @@ fun SourceFeedScreen(
                                 { track, anchor -> selection.value = track to anchor }, ::openCard, loadingCard, trackMenuAnchor)
                         } else state.sections.forEachIndexed { index, section ->
                             item(key = "source-feed:${state.providerId}:${section.id}") {
-                                SourceFeedSectionContent(if (index == 0 && section.layout == SourceFeedLayout.HERO) section.copy(title = getGreeting()) else section,
-                                    onOpen = { navigateSourceContent(nav, it) }, onPlay = play,
-                                    onMore = { track, anchor -> selection.value = track to anchor }, onAction = ::openCard,
-                                    loadingCard = loadingCard, homeTrackRows = kind == FeedKind.HOME,
-                                    menuAnchorState = trackMenuAnchor)
+                                val resolvedSection = remember(section, index, greeting) {
+                                    if (index == 0 && section.layout == SourceFeedLayout.HERO) section.copy(title = greeting) else section
+                                }
+                                SourceFeedSectionContent(
+                                    resolvedSection,
+                                    onOpen = onOpenContent,
+                                    onPlay = play,
+                                    onMore = onMoreTrack,
+                                    onAction = onActionCard,
+                                    loadingCard = loadingCard,
+                                    homeTrackRows = kind == FeedKind.HOME,
+                                    menuAnchorState = trackMenuAnchor,
+                                    availableWidth = feedMaxWidth,
+                                )
                             }
                         }
                         sourceBrowseStatus(state, state.sections.sumOf { if (it.cards.isNotEmpty()) it.cards.size else it.items.size },
@@ -389,8 +404,10 @@ internal fun SourceFeedSectionContent(
     loadingCard: String? = null,
     homeTrackRows: Boolean = false,
     menuAnchorState: GlasmioMenuAnchorState? = null,
+    availableWidth: Dp = Dp.Unspecified,
 ) {
-    val landscape = rememberDeviceInfo().isLandscape
+    val device = rememberDeviceInfo()
+    val landscape = device.isLandscape
     val spacing = homeCardSpacing(landscape)
     val tracks = remember(section.items) { section.items.filterIsInstance<SourceItem.TrackItem>().map { it.track } }
     Column(Modifier.fillMaxWidth()) {
@@ -404,28 +421,42 @@ internal fun SourceFeedSectionContent(
             overflow = TextOverflow.Ellipsis,
         )
         if (section.layout == SourceFeedLayout.HERO && section.cards.isNotEmpty()) {
-            HomeRecommendationRow(section.cards.map { it.id }) { index ->
+            val cardKeys = remember(section.cards) { section.cards.map { it.id } }
+            HomeRecommendationRow(cardKeys) { index ->
                 val card = section.cards[index]
+                val cardExtInfo = remember(card.iconUrl, card.subtitle) {
+                    CardExtInfo(icon = card.iconUrl.takeIf(String::isNotEmpty), text = card.subtitle)
+                }
+                val cardClick = remember(onAction, card) { { onAction(card) } }
                 RecommendCard(cover = card.artworkUrl, title = card.title,
-                    extInfo = CardExtInfo(icon = card.iconUrl.takeIf(String::isNotEmpty), text = card.subtitle),
+                    extInfo = cardExtInfo,
                     cardWidth = if (landscape) RecommendCardWidth else PortraitRecommendCardWidth,
                     cardHeight = if (landscape) RecommendCardHeight else PortraitRecommendCardHeight,
-                    isLoading = loadingCard == card.id, onClick = { onAction(card) })
+                    isLoading = loadingCard == card.id, onClick = cardClick)
             }
         } else if (section.layout == SourceFeedLayout.HERO) {
-            HomeRecommendationRow(section.items.map { "${it.ref.providerId}:${it.ref.type.wireName}:${it.ref.contentId}" }) { index ->
+            val itemKeys = remember(section.items) {
+                section.items.map { "${it.ref.providerId}:${it.ref.type.wireName}:${it.ref.contentId}" }
+            }
+            HomeRecommendationRow(itemKeys) { index ->
                 val value = section.items[index]
-                val subtitle = when (value) {
-                    is SourceItem.TrackItem -> value.track.artists.joinToString(" / ") { it.name }
-                    is SourceItem.PlaylistItem -> value.playlist.creatorName
-                    is SourceItem.AlbumItem -> value.album.artists.joinToString(" / ") { it.name }
-                    is SourceItem.ArtistItem -> ""
+                val subtitle = remember(value) {
+                    when (value) {
+                        is SourceItem.TrackItem -> value.track.artists.joinToString(" / ") { it.name }
+                        is SourceItem.PlaylistItem -> value.playlist.creatorName
+                        is SourceItem.AlbumItem -> value.album.artists.joinToString(" / ") { it.name }
+                        is SourceItem.ArtistItem -> ""
+                    }
                 }
-                RecommendCard(cover = value.artworkUrl, title = value.title, extInfo = CardExtInfo(text = subtitle),
+                val extInfo = remember(subtitle) { CardExtInfo(text = subtitle) }
+                val onItemClick = remember(value, tracks, onPlay, onOpen) {
+                    { if (value is SourceItem.TrackItem) onPlay(tracks, tracks.indexOf(value.track)) else onOpen(value.ref) }
+                }
+                RecommendCard(cover = value.artworkUrl, title = value.title, extInfo = extInfo,
                     showPlay = value is SourceItem.TrackItem,
                     cardWidth = if (landscape) RecommendCardWidth else PortraitRecommendCardWidth,
                     cardHeight = if (landscape) RecommendCardHeight else PortraitRecommendCardHeight,
-                    onClick = { if (value is SourceItem.TrackItem) onPlay(tracks, tracks.indexOf(value.track)) else onOpen(value.ref) })
+                    onClick = onItemClick)
             }
         } else if (section.layout == SourceFeedLayout.TRACKS && tracks.isNotEmpty()) {
             val favoriteIds = rememberFavoriteTrackIds(remember(tracks) { tracks.map { it.toMediaMetadata() } })
@@ -433,39 +464,42 @@ internal fun SourceFeedSectionContent(
             val playingTrack = if (player?.isPlaying?.collectAsState()?.value == true) {
                 player.mediaMetadata.collectAsState().value?.trackRef
             } else null
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val requestedWidth = homePlaylistCardSize(landscape) * 2 + spacing
-                val columnWidth = if (landscape) minOf(requestedWidth,
-                    (maxWidth - HomeRowHorizontalPadding * 2 - HomeSongNextPagePeek).coerceAtLeast(220.dp)) else requestedWidth
-                ThreeRowSongList(
-                    itemCount = tracks.size,
-                    columnWidth = columnWidth,
-                    columnSpacing = spacing,
-                    contentPadding = PaddingValues(horizontal = HomeRowHorizontalPadding),
-                    coverSize = songListCoverSize(landscape),
-                    modifier = Modifier.swipeBackExcluded(),
-                ) { index ->
-                    val track = tracks[index]
-                    Box {
-                        if (TrackRefCodec.mediaId(track.ref) in favoriteIds) FavoriteTrackStar(
-                            Modifier.align(Alignment.CenterStart).offset(x = (-14).dp).testTag("HomeSongFavorite:${track.ref.trackId}"),
-                            tint = LocalGlassColors.current.secondaryContent)
-                        HomeSongListRow(
-                            coverUrl = track.artworkUrl,
-                            title = track.title,
-                            subtitle = track.artists.joinToString(" / ") { it.name },
-                            coverSize = songListCoverSize(landscape),
-                            onClick = { onPlay(tracks, index) },
-                            isPlaying = playingTrack == track.ref,
-                            moreModifier = Modifier.testTag("HomeSongMore:${track.ref.trackId}"),
-                            onMore = { onMore(track, it) },
-                            menuAnchorState = menuAnchorState,
-                        )
-                    }
+            val requestedWidth = homePlaylistCardSize(landscape) * 2 + spacing
+            val resolvedMaxWidth = if (availableWidth != Dp.Unspecified) availableWidth else device.screenWidthDp.dp
+            val columnWidth = if (landscape) minOf(requestedWidth,
+                (resolvedMaxWidth - HomeRowHorizontalPadding * 2 - HomeSongNextPagePeek).coerceAtLeast(220.dp)) else requestedWidth
+            ThreeRowSongList(
+                itemCount = tracks.size,
+                columnWidth = columnWidth,
+                columnSpacing = spacing,
+                contentPadding = PaddingValues(horizontal = HomeRowHorizontalPadding),
+                coverSize = songListCoverSize(landscape),
+                modifier = Modifier.swipeBackExcluded(),
+            ) { index ->
+                val track = tracks[index]
+                val subtitle = remember(track.artists) { track.artists.joinToString(" / ") { it.name } }
+                val onTrackPlay = remember(onPlay, tracks, index) { { onPlay(tracks, index) } }
+                val onTrackMore = remember(onMore, track) { { rect: Rect -> onMore(track, rect) } }
+                Box {
+                    if (TrackRefCodec.mediaId(track.ref) in favoriteIds) FavoriteTrackStar(
+                        Modifier.align(Alignment.CenterStart).offset(x = (-14).dp).testTag("HomeSongFavorite:${track.ref.trackId}"),
+                        tint = LocalGlassColors.current.secondaryContent)
+                    HomeSongListRow(
+                        coverUrl = track.artworkUrl,
+                        title = track.title,
+                        subtitle = subtitle,
+                        coverSize = songListCoverSize(landscape),
+                        onClick = onTrackPlay,
+                        isPlaying = playingTrack == track.ref,
+                        moreModifier = Modifier.testTag("HomeSongMore:${track.ref.trackId}"),
+                        onMore = onTrackMore,
+                        menuAnchorState = menuAnchorState,
+                    )
                 }
             }
         } else {
             val rowState = rememberLazyListState()
+            val cardSize = homePlaylistCardSize(landscape)
             LazyRow(
                 state = rowState,
                 flingBehavior = rememberHomeRowFlingBehavior(rowState),
@@ -474,27 +508,32 @@ internal fun SourceFeedSectionContent(
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
                 if (section.cards.isNotEmpty()) items(section.cards, key = { it.id }) { card ->
+                    val onCardClick = remember(onAction, card) { { onAction(card) } }
                     PlaylistCard(id = card.id, title = card.title, coverImg = card.artworkUrl,
                         subTitle = card.coverCaptions.takeIf { it.isNotEmpty() }, extInfo = card.detail,
-                        imageSize = false, cardSize = homePlaylistCardSize(landscape),
+                        imageSize = false, cardSize = cardSize,
                         titleMaxLines = card.titleMaxLines, secondaryTitle = card.subtitle.takeIf(String::isNotBlank),
-                        onClick = { onAction(card) })
+                        onClick = onCardClick)
                 } else items(section.items, key = { "${it.ref.providerId}:${it.ref.type.wireName}:${it.ref.contentId}" }) { value ->
-                    val subtitle = when (value) {
-                        is SourceItem.TrackItem -> value.track.artists.joinToString(" / ") { it.name }
-                        is SourceItem.PlaylistItem -> value.playlist.creatorName
-                        is SourceItem.AlbumItem -> value.album.artists.joinToString(" / ") { it.name }
-                        is SourceItem.ArtistItem -> ""
+                    val subtitle = remember(value) {
+                        when (value) {
+                            is SourceItem.TrackItem -> value.track.artists.joinToString(" / ") { it.name }
+                            is SourceItem.PlaylistItem -> value.playlist.creatorName
+                            is SourceItem.AlbumItem -> value.album.artists.joinToString(" / ") { it.name }
+                            is SourceItem.ArtistItem -> ""
+                        }
                     }
-                    val open = {
-                        if (value is SourceItem.TrackItem) onPlay(tracks, tracks.indexOfFirst { it.ref == value.ref }.coerceAtLeast(0))
-                        else onOpen(value.ref)
+                    val open = remember(value, tracks, onPlay, onOpen) {
+                        {
+                            if (value is SourceItem.TrackItem) onPlay(tracks, tracks.indexOfFirst { it.ref == value.ref }.coerceAtLeast(0))
+                            else onOpen(value.ref)
+                        }
                     }
                     PlaylistCard(
                         id = "${value.ref.providerId}:${value.ref.contentId}",
                         title = value.title,
                         coverImg = value.artworkUrl,
-                        cardSize = homePlaylistCardSize(landscape),
+                        cardSize = cardSize,
                         secondaryTitle = subtitle.takeIf(String::isNotBlank),
                         imageSize = false,
                         onClick = open,
@@ -909,8 +948,8 @@ fun SourceLibraryScreen(
             if (page == LibraryPage.History && historyState.canClearLocalHistory && historyViewModel != null)
                 meiloxHeaderAction("source-library-clear-history", stringResource(R.string.clear_history), historyViewModel::clearHistory) { SfIcon("trash", null) } else null,
             if (isNavigationTab) globalProfileHeaderAction(shareContent) else null) }) { contentPadding ->
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val columns = (maxWidth / 180.dp).toInt().coerceAtLeast(2)
+        Box(Modifier.fillMaxSize()) {
+            val columns = (rememberDeviceInfo().screenWidthDp.dp / 180.dp).toInt().coerceAtLeast(2)
             LibraryCollectionRefresh(
                 enabled = hasCoreCollection || mergePodcasts || cloudViewModel != null || historyViewModel != null,
                 isRefreshing = pullRefreshing && collectionLoading,
