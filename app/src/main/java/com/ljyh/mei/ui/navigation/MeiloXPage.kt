@@ -222,7 +222,9 @@ fun MeiloXPinnedPage(
     val hidesHeading = header != null && isLandscape && !LocalGlasmioSidebarExpanded.current
     val trailingActions = actions()
     val locatorHost = LocalPlaylistLocateHost.current
-    val locatorRegistration = locatorHost?.registrationFor(LocalPlaylistLocateOwner.current)
+    val locatorRegistration = if (isLandscape) {
+        locatorHost?.registrationFor(LocalPlaylistLocateOwner.current)
+    } else null
     val locatorAction = if (isLandscape && locatorRegistration?.shouldShow == true) {
             meiloxHeaderAction(
                 key = "playlist-locate",

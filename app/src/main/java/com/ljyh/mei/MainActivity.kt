@@ -196,6 +196,7 @@ import com.ljyh.mei.constants.LiquidGlassEnabledKey
 import com.ljyh.mei.constants.PredictiveBackAnimationEnabledKey
 import com.ljyh.mei.constants.ReduceTransparencyKey
 import com.ljyh.mei.constants.LastSelectedTabKey
+import com.ljyh.mei.constants.PlaybackSnapshotKey
 import com.ljyh.mei.constants.PlayerKeepScreenOnKey
 import com.ljyh.mei.constants.RecognizeClipboardLinksKey
 import com.ljyh.mei.constants.LandscapeMiniPlayerHeight
@@ -314,7 +315,9 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -414,14 +417,39 @@ class MainActivity : ComponentActivity() {
                 }
             }
             // Search chrome belongs to the search destination, including back navigation.
-            val active = navController.currentRoute == Screen.Search.route
+            val active by remember(navController) {
+                derivedStateOf { navController.currentRoute == Screen.Search.route }
+            }
             var focusSearchOnEntry by remember { mutableStateOf(false) }
             val dynamicTheme by rememberPreference(DynamicThemeKey, defaultValue = false)
             val accentColorArgb by rememberPreference(AccentColorKey, DefaultAccentColorArgb)
             val appAppearance by rememberEnumPreference(AppAppearanceKey, AppAppearance.System)
-            val (lastSelectedTab, setLastSelectedTab) = rememberPreference(LastSelectedTabKey, Index.Home.name)
+            var lastSelectedTab by remember {
+                mutableStateOf(initialPreferences[LastSelectedTabKey] ?: Index.Home.name)
+            }
+            LaunchedEffect(context) {
+                context.dataStore.data
+                    .map { it[LastSelectedTabKey] ?: Index.Home.name }
+                    .distinctUntilChanged()
+                    .collect { lastSelectedTab = it }
+            }
+            val setLastSelectedTab: (String) -> Unit = remember(context) {
+                { tabName ->
+                    lastSelectedTab = tabName
+                    lifecycleScope.launch {
+                        context.dataStore.edit { prefs ->
+                            if (prefs[LastSelectedTabKey] != tabName) {
+                                prefs[LastSelectedTabKey] = tabName
+                            }
+                        }
+                    }
+                }
+            }
             val recognizeClipboardLinks by rememberPreference(RecognizeClipboardLinksKey, false)
-            val navigationPreferences by context.dataStore.data
+            val navigationPreferencesFlow = remember(context) {
+                context.dataStore.data.distinctUntilChanged(::sameObservedAppPreferences)
+            }
+            val navigationPreferences by navigationPreferencesFlow
                 .collectAsState<Preferences, Preferences?>(initial = initialPreferences)
             LaunchedEffect(navigationPreferences?.glassHdrOutputEnabled()) {
                 if (navigationPreferences?.glassHdrOutputEnabled() != initialHdrOutput) {
@@ -600,8 +628,11 @@ class MainActivity : ComponentActivity() {
                     scrollSheet == null || scrollSheet.isCollapsed || scrollSheet.isDismissed
                 }
             }
+            val navigationViewportProvider = remember(pageHeaders, navController) {
+                { pageHeaders.entry(navController.currentRoute ?: Screen.Home.route).viewport }
+            }
             val navigationScroll = rememberMeiloXNavigationScrollState(
-                viewport = pageHeaders.entry(navController.currentRoute ?: Screen.Home.route).viewport,
+                viewportProvider = navigationViewportProvider,
                 enabled = navigationScrollAllowed.value && !active && !keepBottomBarExpanded &&
                     scrollSheetAllowsNavigation,
             )
@@ -707,13 +738,19 @@ class MainActivity : ComponentActivity() {
                     val density = LocalDensity.current
                     val navigationLayoutDirection = LocalLayoutDirection.current
                     val windowsInsets = WindowInsets.systemBars
-                    val pageWindowInsets = if (horizontalSafeAreaEnabled) windowsInsets
+                    val pageWindowInsets = remember(horizontalSafeAreaEnabled, windowsInsets) {
+                        if (horizontalSafeAreaEnabled) windowsInsets
                         else windowsInsets.only(WindowInsetsSides.Vertical)
+                    }
                     val navigationInsets = WindowInsets.navigationBars
-                    val currentRoute = navController.currentRoute
-                    val handlesKeyboardInsets = active || currentRoute == Screen.Search.route ||
-                        currentRoute?.startsWith("${Screen.PrivateConversation.route}/") == true ||
-                        currentRoute?.startsWith("${Screen.Comment.route}/") == true
+                    val handlesKeyboardInsets by remember(navController) {
+                        derivedStateOf {
+                            val route = navController.currentRoute
+                            active || route == Screen.Search.route ||
+                                route?.startsWith("${Screen.PrivateConversation.route}/") == true ||
+                                route?.startsWith("${Screen.Comment.route}/") == true
+                        }
+                    }
                     DisposableEffect(handlesKeyboardInsets) {
                         val previousMode = window.attributes.softInputMode
                         if (handlesKeyboardInsets) {
@@ -804,11 +841,15 @@ class MainActivity : ComponentActivity() {
 
 
                     val currentNavigationItems = rememberUpdatedState(navigationItems)
-                    val shouldAllowNavigationBar =
-                        (currentRoute == null ||
-                                navigationItems.fastAny { it.route == currentRoute } ||
-                                currentRoute == Screen.Search.route) &&
+                    val shouldAllowNavigationBar by remember(navController, currentNavigationItems) {
+                        derivedStateOf {
+                            val route = navController.currentRoute
+                            (route == null ||
+                                currentNavigationItems.value.fastAny { it.route == route } ||
+                                route == Screen.Search.route) &&
                                 !active
+                        }
+                    }
                     SideEffect { navigationScrollAllowed.value = shouldAllowNavigationBar && !isLandscape }
                     // Route visibility must not reset the expanded/compact shape. This keeps a
                     // MiniNav compact while it fades out. The expanded preference overrides
@@ -936,7 +977,11 @@ class MainActivity : ComponentActivity() {
                                 if (playerDismissed) 0.dp else miniPlayerHeight),
                         ).asPaddingValues(density)
                     }
-                    val pageDarkAppearance = currentRoute?.let { pageAppearanceOverrides[it]?.second }
+                    val pageDarkAppearance by remember(navController, pageAppearanceOverrides) {
+                        derivedStateOf {
+                            navController.currentRoute?.let { pageAppearanceOverrides[it]?.second }
+                        }
+                    }
                     val statusBarDark = isPlayerPage || (pageDarkAppearance ?: effectiveDark)
                     val windowConfiguration = LocalConfiguration.current
                     // Configure window layout only when its configuration or theme changes.
@@ -1126,21 +1171,17 @@ class MainActivity : ComponentActivity() {
                     val pageCacheActive = remember(playerBottomSheetState) {
                         derivedStateOf { playerBottomSheetState.isTransitioning }
                     }
-                    val selectedNavigationItem = navigationItems.firstOrNull { it.route == currentRoute }
-                        ?: navigationItems.firstOrNull { it.name == lastSelectedTab }
-                        ?: Index.Home
                     val sidebarLibraryPages = remember(podcastsEnabled) {
                         LibraryPage.entries.filter { it != LibraryPage.Podcasts || podcastsEnabled }
                     }
-                    val selectedLibraryPage = sidebarLibraryPages.firstOrNull {
-                        currentRoute == "${Screen.LibraryCategory.route}/${it.name}"
-                    }
-                    val selectNavigationItem: (Index) -> Unit = { screen ->
-                        focusManager.clearFocus()
-                        setLastSelectedTab(screen.name)
-                        if (currentRoute == screen.route) {
-                            navController.currentBackStackEntry?.savedStateHandle?.set("scrollToTop", true)
-                        } else navController.navigateTopLevel(screen.route)
+                    val selectNavigationItem: (Index) -> Unit = remember(navController, focusManager, setLastSelectedTab) {
+                        { screen ->
+                            focusManager.clearFocus()
+                            setLastSelectedTab(screen.name)
+                            if (navController.currentRoute == screen.route) {
+                                navController.currentBackStackEntry?.savedStateHandle?.set("scrollToTop", true)
+                            } else navController.navigateTopLevel(screen.route)
+                        }
                     }
                     val searchToolbarVisible = active && !(isLandscape && adaptiveNavigation.sidebarExpanded)
                     val landscapeTopSearchOverlay = isLandscape && searchToolbarVisible
@@ -1159,6 +1200,13 @@ class MainActivity : ComponentActivity() {
                         extendContentUnderSidebar = true,
                         contentBackdrop = pageContentBackdrop,
                         sidebar = {
+                            val sidebarRoute = navController.currentRoute
+                            val selectedNavigationItem = navigationItems.firstOrNull { it.route == sidebarRoute }
+                                ?: navigationItems.firstOrNull { it.name == lastSelectedTab }
+                                ?: Index.Home
+                            val selectedLibraryPage = sidebarLibraryPages.firstOrNull {
+                                sidebarRoute == "${Screen.LibraryCategory.route}/${it.name}"
+                            }
                             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
                                 .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)) {
                                 GlasmioSidebarToolbar(
@@ -1390,15 +1438,36 @@ class MainActivity : ComponentActivity() {
                                             },
                                         )
                                     }
-                                    val currentRouteState = rememberUpdatedState(currentRoute)
                                     val currentActiveState = rememberUpdatedState(active)
-                                    val navEntries = rememberDecoratedNavEntries(
-                                        backStack = backStack,
-                                        entryDecorators = listOf(
-                                            rememberSaveableStateHolderNavEntryDecorator(),
-                                            viewModelEntryDecorator,
-                                        ),
-                                        entryProvider = { route ->
+                                    val windowsInsetsState = rememberUpdatedState(windowsInsets)
+                                    val bottomInsetState = rememberUpdatedState(bottomInset)
+                                    val navigationBottomMarginState = rememberUpdatedState(navigationBottomMargin)
+                                    val navigationBarExpandedState = rememberUpdatedState(navigationBarExpanded)
+                                    val playerDismissedState = rememberUpdatedState(playerDismissed)
+                                    val isLandscapeState = rememberUpdatedState(isLandscape)
+                                    val landscapeTopSearchOverlayState = rememberUpdatedState(landscapeTopSearchOverlay)
+                                    val imeInsetsState = rememberUpdatedState(imeInsets)
+                                    val saveableEntryDecorator = rememberSaveableStateHolderNavEntryDecorator<NavKey>()
+                                    val entryDecorators = remember(saveableEntryDecorator, viewModelEntryDecorator) {
+                                        listOf(saveableEntryDecorator, viewModelEntryDecorator)
+                                    }
+                                    val retainedNavEntries = remember { mutableMapOf<NavKey, NavEntry<NavKey>>() }
+                                    val entryProvider = remember(
+                                        navController,
+                                        pageHeaders,
+                                        playerBottomSheetState,
+                                        currentNavigationItems,
+                                        currentActiveState,
+                                        windowsInsetsState,
+                                        bottomInsetState,
+                                        navigationBottomMarginState,
+                                        navigationBarExpandedState,
+                                        playerDismissedState,
+                                        isLandscapeState,
+                                        landscapeTopSearchOverlayState,
+                                        imeInsetsState,
+                                    ) {
+                                        val buildEntry: (NavKey) -> NavEntry<NavKey> = { route ->
                                             val meiRoute = route as MeiRoute
                                             NavEntry(
                                                 key = route,
@@ -1406,8 +1475,9 @@ class MainActivity : ComponentActivity() {
                                             ) {
                                                 // Retained entries must observe preferences loaded after recreation.
                                                 val entryNavigationItems = currentNavigationItems.value
-                                                val entryWindowInsets = if (LocalGlasmioHorizontalSafeAreaEnabled.current) windowsInsets
-                                                    else windowsInsets.only(WindowInsetsSides.Vertical)
+                                                val currentWindowInsets = windowsInsetsState.value
+                                                val entryWindowInsets = if (LocalGlasmioHorizontalSafeAreaEnabled.current) currentWindowInsets
+                                                    else currentWindowInsets.only(WindowInsetsSides.Vertical)
                                                 val entryTopAppBarScrollBehavior = rememberGlasmioAppBarScrollBehavior(
                                                     canScroll = {
                                                         !meiRoute.route.startsWith("search_result/") &&
@@ -1419,7 +1489,7 @@ class MainActivity : ComponentActivity() {
                                                     var initialized = false
                                                     var prevRoute: String? = null
                                                     var prevActive = false
-                                                    snapshotFlow { currentRouteState.value to currentActiveState.value }
+                                                    snapshotFlow { navController.currentRoute to currentActiveState.value }
                                                         .collect { (routeNow, searchActive) ->
                                                             val routeChanged = !initialized || routeNow != prevRoute
                                                             val activeChanged = !initialized || searchActive != prevActive
@@ -1434,32 +1504,37 @@ class MainActivity : ComponentActivity() {
                                                             }
                                                         }
                                                 }
+                                                val currentBottomInset = bottomInsetState.value
+                                                val currentNavBottomMargin = navigationBottomMarginState.value
+                                                val currentNavBarExpanded = navigationBarExpandedState.value
+                                                val currentPlayerDismissed = playerDismissedState.value
+                                                val currentIsLandscape = isLandscapeState.value
                                                 val entryPlayerAwareWindowInsets = remember(
                                                     meiRoute.route,
-                                                    bottomInset,
-                                                    navigationBottomMargin,
+                                                    currentBottomInset,
+                                                    currentNavBottomMargin,
                                                     entryNavigationItems,
-                                                    navigationBarExpanded,
-                                                    playerDismissed,
+                                                    currentNavBarExpanded,
+                                                    currentPlayerDismissed,
                                                     entryWindowInsets,
-                                                    isLandscape,
+                                                    currentIsLandscape,
                                                 ) {
                                                     playerAwareWindowInsetsForRoute(
                                                         route = meiRoute.route,
-                                                        isLandscape = isLandscape,
+                                                        isLandscape = currentIsLandscape,
                                                         navigationItems = entryNavigationItems,
-                                                        navigationBarVisible = navigationBarExpanded,
-                                                        playerDismissed = playerDismissed,
+                                                        navigationBarVisible = currentNavBarExpanded,
+                                                        playerDismissed = currentPlayerDismissed,
                                                         windowsInsets = entryWindowInsets,
-                                                        bottomInset = bottomInset,
-                                                        navigationBottomMargin = navigationBottomMargin,
+                                                        bottomInset = currentBottomInset,
+                                                        navigationBottomMargin = currentNavBottomMargin,
                                                     )
                                                 }
                                                 CompositionLocalProvider(
                                                     com.ljyh.mei.ui.navigation.LocalMeiloXSearchTopPadding provides
-                                                        if (landscapeTopSearchOverlay && meiRoute.route == Screen.Search.route) 56.dp + com.ljyh.mei.constants.LandscapeSearchTopAdjustment else 0.dp,
+                                                        if (landscapeTopSearchOverlayState.value && meiRoute.route == Screen.Search.route) 56.dp + com.ljyh.mei.constants.LandscapeSearchTopAdjustment else 0.dp,
                                                     LocalPlayerAwareWindowInsets provides
-                                                        if (meiRoute.route == Screen.Search.route) entryPlayerAwareWindowInsets.union(imeInsets)
+                                                        if (meiRoute.route == Screen.Search.route) entryPlayerAwareWindowInsets.union(imeInsetsState.value)
                                                         else entryPlayerAwareWindowInsets,
                                                 ) {
                                                     MeiloXPageEntry(meiRoute, pageHeaders) {
@@ -1473,7 +1548,20 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                 }
                                             }
-                                        },
+                                        }
+                                        { route: NavKey ->
+                                            val meiRoute = route as MeiRoute
+                                            if (meiRoute.route in homeNavigationRoutes) {
+                                                retainedNavEntries.getOrPut(route) { buildEntry(route) }
+                                            } else {
+                                                buildEntry(route)
+                                            }
+                                        }
+                                    }
+                                    val navEntries = rememberDecoratedNavEntries(
+                                        backStack = backStack,
+                                        entryDecorators = entryDecorators,
+                                        entryProvider = entryProvider,
                                     )
                                     val sceneStrategies = remember { listOf(SinglePaneSceneStrategy<NavKey>()) }
                                     val sceneState = rememberSceneState(
@@ -1495,22 +1583,25 @@ class MainActivity : ComponentActivity() {
                                         isBackEnabled = !predictiveBackAnimationEnabled && canGoBack,
                                         onBackCompleted = { navController.popBackStack() },
                                     )
-                                    val selectedIndex = navigationItems.firstOrNull { it.route == currentRoute }
-                                        ?: navigationItems.firstOrNull { it.name == lastSelectedTab }
-                                        ?: Index.Home
-                                    val navigationTabs = navigationItems.map { item ->
-                                        GlasmioTabItem(
-                                            key = item,
-                                            label = stringResource(item.labelRes),
-                                            symbol = item.symbol,
-                                        )
-                                    }
+                                    val navigationTabs = if (isLandscape) {
+                                        navigationItems.map { item ->
+                                            GlasmioTabItem(
+                                                key = item,
+                                                label = stringResource(item.labelRes),
+                                                symbol = item.symbol,
+                                            )
+                                        }
+                                    } else emptyList()
                                     GlasmioNavigationScaffold(
                                         motion = headerMotion,
                                         contentBackdrop = pageContentBackdrop,
                                         header = { pageHeaders.entry(it).spec },
                                         topBar = if (isLandscape) ({ availableWidth ->
-                                            val header = currentRoute?.let { pageHeaders.entry(it).spec }
+                                            val topBarRoute = navController.currentRoute
+                                            val selectedIndex = navigationItems.firstOrNull { it.route == topBarRoute }
+                                                ?: navigationItems.firstOrNull { it.name == lastSelectedTab }
+                                                ?: Index.Home
+                                            val header = topBarRoute?.let { pageHeaders.entry(it).spec }
                                             AnimatedVisibility(
                                                 visible = navigationPreferences != null &&
                                                     playerVisibilitySynchronized &&
@@ -1531,7 +1622,7 @@ class MainActivity : ComponentActivity() {
                                                         onSelected = selectNavigationItem,
                                                         onSearchClick = {
                                                             focusSearchOnEntry = true
-                                                            if (currentRoute != Screen.Search.route) navController.navigate(Screen.Search.route)
+                                                            if (navController.currentRoute != Screen.Search.route) navController.navigate(Screen.Search.route)
                                                         },
                                                         onSidebarToggle = adaptiveNavigation::toggleSidebar,
                                                         sidebarToggleLabel = stringResource(
@@ -1564,38 +1655,53 @@ class MainActivity : ComponentActivity() {
                                             LocalPlaylistLocateHost provides playlistLocateHost,
                                             LocalLibrarySharePresenter provides librarySharePresenter,
                                         ) {
+                                        val onNavDisplayBack = remember(navController) {
+                                            {
+                                                navController.popBackStack()
+                                                Unit
+                                            }
+                                        }
+                                        val navTransitionSpec = remember(navigationLayoutDirection, density.density) {
+                                            { scope: androidx.compose.animation.AnimatedContentTransitionScope<androidx.navigation3.scene.Scene<NavKey>> ->
+                                                if (scope.usesHomeAlphaTransition()) {
+                                                    scope.homeAlphaTransition()
+                                                } else {
+                                                    iosTransitionSpec<NavKey>(navigationLayoutDirection, density.density).invoke(scope)
+                                                }
+                                            }
+                                        }
+                                        val navPopTransitionSpec = remember(navigationLayoutDirection, density.density) {
+                                            { scope: androidx.compose.animation.AnimatedContentTransitionScope<androidx.navigation3.scene.Scene<NavKey>> ->
+                                                if (scope.usesHomeAlphaTransition()) {
+                                                    scope.homeAlphaTransition()
+                                                } else {
+                                                    iosPopTransitionSpec<NavKey>(navigationLayoutDirection, density.density).invoke(scope)
+                                                }
+                                            }
+                                        }
+                                        val navPredictivePopTransitionSpec = remember(navigationLayoutDirection, density.density) {
+                                            { scope: androidx.compose.animation.AnimatedContentTransitionScope<androidx.navigation3.scene.Scene<NavKey>>, swipeEdge: Int ->
+                                                if (scope.usesHomeAlphaTransition()) {
+                                                    scope.homeAlphaTransition()
+                                                } else {
+                                                    iosPredictivePopTransitionSpec<NavKey>(navigationLayoutDirection, density.density)
+                                                        .invoke(scope, swipeEdge)
+                                                }
+                                            }
+                                        }
                                         GlasmioNavDisplay(
                                             sceneState = sceneState,
                                             motion = headerMotion,
                                             // NavDisplay retains this state in remembered gesture calculations.
                                             navigationEventState = navigationEventState,
                                             // The scene-state overload needs this callback for in-content swipe back.
-                                            onBack = { navController.popBackStack() },
+                                            onBack = onNavDisplayBack,
                                             swipeBackEnabled = !active && !playerContentVisible,
                                             retainedTabKeys = homeNavigationRoutes,
                                             modifier = Modifier.fillMaxSize(),
-                                            transitionSpec = {
-                                                if (usesHomeAlphaTransition()) {
-                                                    homeAlphaTransition()
-                                                } else {
-                                                    iosTransitionSpec<NavKey>(navigationLayoutDirection, density.density).invoke(this)
-                                                }
-                                            },
-                                            popTransitionSpec = {
-                                                if (usesHomeAlphaTransition()) {
-                                                    homeAlphaTransition()
-                                                } else {
-                                                    iosPopTransitionSpec<NavKey>(navigationLayoutDirection, density.density).invoke(this)
-                                                }
-                                            },
-                                            predictivePopTransitionSpec = { swipeEdge ->
-                                                if (usesHomeAlphaTransition()) {
-                                                    homeAlphaTransition()
-                                                } else {
-                                                    iosPredictivePopTransitionSpec<NavKey>(navigationLayoutDirection, density.density)
-                                                        .invoke(this, swipeEdge)
-                                                }
-                                            },
+                                            transitionSpec = navTransitionSpec,
+                                            popTransitionSpec = navPopTransitionSpec,
+                                            predictivePopTransitionSpec = navPredictivePopTransitionSpec,
                                             transitionEffects = remember(
                                                 navController.usesMiuixTransitionEffects,
                                             ) {
@@ -1680,16 +1786,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        val selectedIndex = navigationItems.firstOrNull { it.route == currentRoute }
-                            ?: navigationItems.firstOrNull { it.name == lastSelectedTab }
-                            ?: Index.Home
-                        val navigationTabs = navigationItems.map { item ->
-                            GlasmioTabItem(
-                                key = item,
-                                label = stringResource(item.labelRes),
-                                symbol = item.symbol,
-                            )
-                        }
                         AnimatedVisibility(
                             visible = !isLandscape && navigationPreferences != null && shouldAllowNavigationBar &&
                                 selectionToolbar.content.value == null,
@@ -1714,6 +1810,17 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                         ) {
+                            val bottomBarRoute = navController.currentRoute
+                            val selectedIndex = navigationItems.firstOrNull { it.route == bottomBarRoute }
+                                ?: navigationItems.firstOrNull { it.name == lastSelectedTab }
+                                ?: Index.Home
+                            val navigationTabs = navigationItems.map { item ->
+                                GlasmioTabItem(
+                                    key = item,
+                                    label = stringResource(item.labelRes),
+                                    symbol = item.symbol,
+                                )
+                            }
                             AnimatedBottomNavigationRow(
                                 compactProgress = compactNavigationProgress,
                                 hint = navigationHint,
@@ -1722,7 +1829,7 @@ class MainActivity : ComponentActivity() {
                                 onExpand = navigationScroll::expand,
                                 onSelected = { screen ->
                                     setLastSelectedTab(screen.name)
-                                    if (currentRoute == screen.route) {
+                                    if (navController.currentRoute == screen.route) {
                                         navController.currentBackStackEntry?.savedStateHandle?.set(
                                             "scrollToTop",
                                             true,
@@ -1733,7 +1840,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onSearchClick = {
                                     focusSearchOnEntry = true
-                                    if (currentRoute != Screen.Search.route) {
+                                    if (navController.currentRoute != Screen.Search.route) {
                                         navController.navigate(Screen.Search.route)
                                     }
                                 },
@@ -1912,6 +2019,22 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+}
+
+/** Ignore volatile persistence keys so tab taps and playback snapshots do not recompose app chrome. */
+private fun sameObservedAppPreferences(old: Preferences, new: Preferences): Boolean {
+    if (old === new) return true
+    val oldMap = old.asMap()
+    val newMap = new.asMap()
+    for ((key, value) in oldMap) {
+        if (key == LastSelectedTabKey || key == PlaybackSnapshotKey) continue
+        if (newMap[key] != value) return false
+    }
+    for (key in newMap.keys) {
+        if (key == LastSelectedTabKey || key == PlaybackSnapshotKey) continue
+        if (key !in oldMap) return false
+    }
+    return true
 }
 
 private fun Preferences.glassHdrOutputEnabled(): Boolean =

@@ -20,6 +20,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.PI
 import kotlin.math.floor
 
@@ -138,13 +139,26 @@ internal class MeiloXNavigationScrollState internal constructor(initialCompact: 
         activeDistancePx: Float,
         viewport: BottomNavigationViewport?,
     ) {
-        this.enabled = enabled && viewport != null
+        bind(enabled, activeDistancePx) { viewport }
+    }
+
+    internal fun bind(
+        enabled: Boolean,
+        activeDistancePx: Float,
+        viewportProvider: () -> BottomNavigationViewport?,
+    ) {
+        this.enabled = enabled && viewportProvider() != null
         this.activeDistancePx = activeDistancePx
         minimumRangePx = activeDistancePx * 1.5f
-        scrollableRangePx = { viewport?.rangePx ?: 0f }
-        distanceToStartPx = { viewport?.distanceToStartPx ?: Float.POSITIVE_INFINITY }
-        atStart = { viewport?.atStart ?: true }
-        atEnd = { viewport?.atEnd ?: true }
+        scrollableRangePx = { viewportProvider()?.rangePx ?: 0f }
+        distanceToStartPx = { viewportProvider()?.distanceToStartPx ?: Float.POSITIVE_INFINITY }
+        atStart = { viewportProvider()?.atStart ?: true }
+        atEnd = { viewportProvider()?.atEnd ?: true }
+        if (!this.enabled) finishGesture()
+    }
+
+    internal fun updateEnabled(enabled: Boolean, hasViewport: Boolean) {
+        this.enabled = enabled && hasViewport
         if (!this.enabled) finishGesture()
     }
 
@@ -229,18 +243,23 @@ internal class MeiloXNavigationScrollState internal constructor(initialCompact: 
 /** Preserve one native driver while route-owned lists and grids come and go. */
 @Composable
 internal fun rememberMeiloXNavigationScrollState(
-    viewport: BottomNavigationViewport?,
+    viewportProvider: () -> BottomNavigationViewport?,
     enabled: Boolean = true,
 ): MeiloXNavigationScrollState {
     val state = rememberSaveable(saver = MeiloXNavigationScrollState.Saver) {
         MeiloXNavigationScrollState(initialCompact = false)
     }
     val activeDistancePx = with(LocalDensity.current) { 64.dp.toPx() }
-    SideEffect { state.bind(enabled, activeDistancePx, viewport) }
-    LaunchedEffect(state, viewport, enabled) {
-        state.finishGesture()
-        snapshotFlow { viewport?.isScrolling == true }.collect { scrolling ->
-            if (!scrolling) state.finishGesture()
+    SideEffect { state.bind(enabled, activeDistancePx, viewportProvider) }
+    LaunchedEffect(state, viewportProvider, enabled) {
+        snapshotFlow { viewportProvider() }.collectLatest { viewport ->
+            state.updateEnabled(enabled, viewport != null)
+            state.finishGesture()
+            if (viewport != null) {
+                snapshotFlow { viewport.isScrolling }.collect { scrolling ->
+                    if (!scrolling) state.finishGesture()
+                }
+            }
         }
     }
     state.compactAnimation = animateFloatAsState(

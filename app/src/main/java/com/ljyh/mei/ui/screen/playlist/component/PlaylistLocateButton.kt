@@ -18,8 +18,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -74,22 +74,30 @@ internal class PlaylistLocateRegistration(
 }
 
 internal class PlaylistLocateHostState {
-    private val registrations = mutableStateMapOf<Any, PlaylistLocateRegistration>()
+    // Isolate each route's registration in its own MutableState slot so mounting or
+    // updating a locator on one tab never invalidates retained sibling tabs.
+    private val slots = mutableMapOf<Any, MutableState<PlaylistLocateRegistration?>>()
     var activeEntryKey by mutableStateOf<Any?>(null)
     var navigationVisible by mutableStateOf(true)
+
+    private fun slot(entryKey: Any): MutableState<PlaylistLocateRegistration?> =
+        slots.getOrPut(entryKey) { mutableStateOf(null) }
 
     val registration: PlaylistLocateRegistration?
         get() = registrationFor(activeEntryKey)
 
     fun registrationFor(entryKey: Any?): PlaylistLocateRegistration? =
-        entryKey?.let { registrations[it] }
+        entryKey?.let { slot(it).value }
 
     fun register(entryKey: Any?, value: PlaylistLocateRegistration) {
-        if (entryKey != null) registrations[entryKey] = value
+        if (entryKey != null) slot(entryKey).value = value
     }
 
     fun unregister(entryKey: Any?, value: PlaylistLocateRegistration) {
-        if (entryKey != null && registrations[entryKey] === value) registrations.remove(entryKey)
+        if (entryKey != null) {
+            val state = slots[entryKey]
+            if (state != null && state.value === value) state.value = null
+        }
     }
 }
 

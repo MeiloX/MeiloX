@@ -52,6 +52,12 @@ private val AppShapes = GlasmioShapes(
 )
 
 
+private val DefaultMusicIconTint: @Composable () -> Color = {
+    LocalGroupedListIconColor.current
+        ?: LocalGlassContentColor.current
+        ?: LocalGlassColors.current.content
+}
+
 @Composable
 fun MusicTheme(
     seedColor: Color,
@@ -72,43 +78,47 @@ fun MusicTheme(
         if (dynamicAccent) ColorExtractionUtils.themeAccentColor(animatedSeed, isDark) else animatedSeed
     }
     val onAccent = if (dynamicAccent) ColorExtractionUtils.accentContentColor(accent) else Color.White
-    val colorScheme = if (isDark) {
-        darkColorScheme(
-            primary = accent,
-            onPrimary = onAccent,
-            primaryContainer = accent.copy(alpha = 0.26f),
-            background = Color.Black,
-            onBackground = Color.White,
-            surface = Color.Black,
-            onSurface = Color.White,
-            surfaceVariant = Color(0xFF1C1C1E),
-            onSurfaceVariant = Color(0xB2EBEBF5),
-            surfaceDim = Color.Black,
-            surfaceBright = Color(0xFF2C2C2E),
-            surfaceContainerLowest = Color.Black,
-            surfaceContainerLow = Color(0xFF1C1C1E),
-            surfaceContainer = Color(0xFF1C1C1E),
-            surfaceContainerHigh = Color(0xFF2C2C2E),
-            surfaceContainerHighest = Color(0xFF3A3A3C),
-            outline = Color(0xFF8E8E93),
-            outlineVariant = Color(0x2BFFFFFF),
-            error = Color(0xFFFF4245),
-        )
-    } else {
-        val groupedBackground = Color(0xFFF2F2F7)
-        lightColorScheme(
-            primary = accent,
-            onPrimary = onAccent,
-            primaryContainer = accent.copy(alpha = 0.16f),
-            background = groupedBackground,
-            onBackground = Color.Black,
-            surface = Color.White,
-            onSurface = Color.Black,
-            surfaceVariant = Color(0xFFF2F2F7),
-            onSurfaceVariant = Color(0x993C3C43),
-            outlineVariant = Color(0xFFE6E6E6),
-            error = Color(0xFFFF383C),
-        )
+    // Material3's ColorScheme uses reference equality and LocalColorScheme is staticCompositionLocalOf;
+    // allocating a fresh scheme on recomposition invalidates the entire app subtree.
+    val colorScheme = remember(isDark, accent, onAccent) {
+        if (isDark) {
+            darkColorScheme(
+                primary = accent,
+                onPrimary = onAccent,
+                primaryContainer = accent.copy(alpha = 0.26f),
+                background = Color.Black,
+                onBackground = Color.White,
+                surface = Color.Black,
+                onSurface = Color.White,
+                surfaceVariant = Color(0xFF1C1C1E),
+                onSurfaceVariant = Color(0xB2EBEBF5),
+                surfaceDim = Color.Black,
+                surfaceBright = Color(0xFF2C2C2E),
+                surfaceContainerLowest = Color.Black,
+                surfaceContainerLow = Color(0xFF1C1C1E),
+                surfaceContainer = Color(0xFF1C1C1E),
+                surfaceContainerHigh = Color(0xFF2C2C2E),
+                surfaceContainerHighest = Color(0xFF3A3A3C),
+                outline = Color(0xFF8E8E93),
+                outlineVariant = Color(0x2BFFFFFF),
+                error = Color(0xFFFF4245),
+            )
+        } else {
+            val groupedBackground = Color(0xFFF2F2F7)
+            lightColorScheme(
+                primary = accent,
+                onPrimary = onAccent,
+                primaryContainer = accent.copy(alpha = 0.16f),
+                background = groupedBackground,
+                onBackground = Color.Black,
+                surface = Color.White,
+                onSurface = Color.Black,
+                surfaceVariant = Color(0xFFF2F2F7),
+                onSurfaceVariant = Color(0x993C3C43),
+                outlineVariant = Color(0xFFE6E6E6),
+                error = Color(0xFFFF383C),
+            )
+        }
     }
     val context = LocalContext.current
     val symbolTypeface = remember(context) {
@@ -126,11 +136,7 @@ fun MusicTheme(
     ) {
         GlasmioIconProvider(
             symbolTypeface = symbolTypeface,
-            defaultTint = {
-                LocalGroupedListIconColor.current
-                    ?: LocalGlassContentColor.current
-                    ?: LocalGlassColors.current.content
-            },
+            defaultTint = DefaultMusicIconTint,
         ) {
             CompositionLocalProvider(
                 LocalOverscrollFactory provides (LocalPageOverscrollFactory.current ?: MiuixOverscrollFactory),
