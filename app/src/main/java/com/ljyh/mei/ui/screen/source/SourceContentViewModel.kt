@@ -318,13 +318,19 @@ class SourceContentViewModel internal constructor(
         pagination = viewModelScope.launch { load(requested, current.providerId, token, append = true, pageLimit = pageLimit) }
     }
 
-    internal suspend fun indexedTrackMembership(requested: SourceContentRequest, track: TrackRef): Boolean? {
-        val owner = displayedProvider ?: return false
-        if (requested != displayedRequest || requested != request.value || owner.id != track.providerId) return false
-        val catalog = owner as? CatalogIndexCapability ?: return null
+    internal sealed interface IndexedTrackSet {
+        data class Unsupported(val providerId: String) : IndexedTrackSet
+        data object Unavailable : IndexedTrackSet
+        data class Ids(val providerId: String, val ids: Set<TrackRef>) : IndexedTrackSet
+    }
+
+    internal suspend fun indexedTrackIds(requested: SourceContentRequest): IndexedTrackSet {
+        val owner = displayedProvider ?: return IndexedTrackSet.Unavailable
+        if (requested != displayedRequest || requested != request.value) return IndexedTrackSet.Unavailable
+        val catalog = owner as? CatalogIndexCapability ?: return IndexedTrackSet.Unsupported(owner.id)
         val playlistId = ((requested as? SourceContentRequest.Detail)?.ref as? PlaylistRef)?.playlistId
         val collection = (requested as? SourceContentRequest.Library)?.collection
-        if (playlistId == null && collection != LibraryCollection.LIKED_TRACKS) return false
+        if (playlistId == null && collection != LibraryCollection.LIKED_TRACKS) return IndexedTrackSet.Unavailable
         val token = generation
         val revision = contentRevision.value
         val index = try {
@@ -332,12 +338,21 @@ class SourceContentViewModel internal constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            return false
+            return IndexedTrackSet.Unavailable
         }
         if (token != generation || revision != contentRevision.value || requested != request.value ||
-            registry.provider(owner.id) !== owner) return false
-        return index?.let { (playlistId == null || it.playlistId == playlistId) && track in it.ids }
+            registry.provider(owner.id) !== owner) return IndexedTrackSet.Unavailable
+        if (index == null) return IndexedTrackSet.Unsupported(owner.id)
+        if (playlistId != null && index.playlistId != playlistId) return IndexedTrackSet.Unavailable
+        return IndexedTrackSet.Ids(owner.id, index.ids.toHashSet())
     }
+
+    internal suspend fun indexedTrackMembership(requested: SourceContentRequest, track: TrackRef): Boolean? =
+        when (val result = indexedTrackIds(requested)) {
+            is IndexedTrackSet.Unsupported -> if (track.providerId == result.providerId) null else false
+            IndexedTrackSet.Unavailable -> false
+            is IndexedTrackSet.Ids -> track.providerId == result.providerId && track in result.ids
+        }
 
     internal suspend fun locateTrack(requested: SourceContentRequest, track: TrackRef): Int? {
         val token = generation

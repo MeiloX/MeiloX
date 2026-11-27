@@ -19,7 +19,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Velocity
 import com.ljyh.mei.data.model.mediaId
-import com.ljyh.mei.data.model.supportsNeteaseSongActions
 import com.ljyh.mei.ui.screen.playlist.SongListDetailData
 import com.ljyh.mei.ui.screen.playlist.SongListDetailScreen
 import com.ljyh.mei.ui.screen.playlist.SongListLandscapeLayout
@@ -422,11 +421,9 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
         val displayedMetadata = remember(displayed) { displayed.map { it.value.toMediaMetadata() } }
         val favoriteIds = rememberFavoriteTrackIds(displayedMetadata)
         val listState = rememberLazyListState()
-        val locateTrack = if (ref is PlaylistRef && ref.providerId == ProviderIds.NETEASE &&
-            state.detail?.ref == ref && !searchActive && query.isBlank() && !selection.active) {
-            LocalPlayerConnection.current?.mediaMetadata?.collectAsState()?.value
-                ?.takeIf { it.supportsNeteaseSongActions }?.trackRef
-        } else null
+        val canLocateTrack = ref is PlaylistRef && ref.providerId == ProviderIds.NETEASE &&
+            state.detail?.ref == ref && !searchActive && query.isBlank() && !selection.active
+        val detailRequest = remember(ref) { SourceContentRequest.Detail(ref) }
         val bottomPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues().calculateBottomPadding()
         val declaredCount = playlist?.trackCount ?: album?.trackCount ?: 0
         val count = maxOf(declaredCount, tracks.size)
@@ -573,9 +570,9 @@ fun SourceContentScreen(ref: ContentRef, viewModel: SourceContentViewModel = hil
                 }
             },
             overlayContent = {
-                locateTrack?.let { track ->
+                if (canLocateTrack) {
                     SourceTrackLocateButton(
-                        viewModel, SourceContentRequest.Detail(ref), state, track, listState,
+                        viewModel, detailRequest, state, listState,
                         leadingItems = 1, // Both layouts reserve a slot for the playlist hero.
                         modifier = Modifier.align(Alignment.BottomEnd),
                     )

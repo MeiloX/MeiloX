@@ -879,7 +879,14 @@ class PlaylistContentTest {
                 assertEquals(true, model.indexedTrackMembership(request, target))
                 assertEquals(false, model.indexedTrackMembership(request, TrackRef("another-source", target.trackId)))
                 assertEquals(false, model.indexedTrackMembership(request, TrackRef(provider.id, "missing")))
+                val indexed = model.indexedTrackIds(request)
+                assertTrue(indexed is SourceContentViewModel.IndexedTrackSet.Ids)
+                indexed as SourceContentViewModel.IndexedTrackSet.Ids
+                assertEquals(provider.id, indexed.providerId)
+                assertTrue(target in indexed.ids)
+                assertFalse(TrackRef(provider.id, "missing") in indexed.ids)
                 provider.providesTrackIndex = false
+                assertEquals(SourceContentViewModel.IndexedTrackSet.Unsupported(provider.id), model.indexedTrackIds(request))
                 assertEquals(null, model.indexedTrackMembership(request, target))
                 assertEquals(listOf(0), provider.pageRequests.map { it.offset })
 

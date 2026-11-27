@@ -9,7 +9,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
@@ -19,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -26,9 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -55,18 +54,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.roundToInt
 
 private const val LocateButtonIdleMillis = 3_000L
 private const val LocateLayoutTimeoutMillis = 10_000L
 
 internal class PlaylistLocateRegistration(
     val listState: LazyListState,
-    val track: TrackRef,
-    val leadingItems: Int,
 ) {
+    var track by mutableStateOf<TrackRef?>(null)
+    var leadingItems by mutableIntStateOf(0)
     var modifier: Modifier = Modifier
-    var available by mutableStateOf(true)
+    var available by mutableStateOf(false)
     var visible by mutableStateOf(true)
     var locating by mutableStateOf(false)
     var resolveIndex: suspend () -> Int? = { null }
@@ -90,7 +88,10 @@ internal class PlaylistLocateHostState {
         entryKey?.let { slot(it).value }
 
     fun register(entryKey: Any?, value: PlaylistLocateRegistration) {
-        if (entryKey != null) slot(entryKey).value = value
+        if (entryKey != null) {
+            val state = slot(entryKey)
+            if (state.value !== value) state.value = value
+        }
     }
 
     fun unregister(entryKey: Any?, value: PlaylistLocateRegistration) {
@@ -111,24 +112,37 @@ internal val LocalPlaylistLocateOwner =
 @Composable
 internal fun PlaylistLocateButton(
     listState: LazyListState,
-    track: TrackRef,
+    track: TrackRef?,
     leadingItems: Int,
     modifier: Modifier = Modifier,
-    available: Boolean = true,
+    available: Boolean = track != null,
     findTrackIndex: suspend () -> Int?,
 ) {
     val context = LocalContext.current
     val host = LocalPlaylistLocateHost.current
     val owner = LocalPlaylistLocateOwner.current
-    val registration = remember(owner, listState, track, leadingItems) {
-        PlaylistLocateRegistration(listState, track, leadingItems)
+    // Keep one stable registration across track switches so changing songs never tears down
+    // the chrome layer, resets idle visibility, or causes a one-frame layout jump.
+    val registration = remember(owner, listState) {
+        PlaylistLocateRegistration(listState).apply {
+            this.track = track
+            this.leadingItems = leadingItems
+            this.modifier = modifier
+            this.available = available
+        }
     }
     val resolveIndex by rememberUpdatedState(findTrackIndex)
 
     SideEffect {
+        val trackChanged = registration.track != track
+        registration.track = track
+        registration.leadingItems = leadingItems
         registration.modifier = modifier
         registration.available = available
         registration.resolveIndex = resolveIndex
+        if (trackChanged && registration.locating) {
+            registration.locating = false
+        }
         host?.register(owner, registration)
     }
     DisposableEffect(host, owner, registration) {
@@ -148,7 +162,7 @@ internal fun PlaylistLocateButton(
         }
     }
 
-    LaunchedEffect(registration.locating, listState, track, leadingItems) {
+    LaunchedEffect(registration.locating, registration.track, listState, leadingItems) {
         if (!registration.locating) return@LaunchedEffect
         try {
             val index = registration.resolveIndex()?.plus(leadingItems)
@@ -201,25 +215,29 @@ private fun PlaylistLocateButtonChrome(
 ) {
     val miniPlayerVerticalOffset = LocalMiniPlayerVerticalOffset.current
     val searchBoundsState = LocalMiniPlayerSearchBounds.current
-    var buttonBounds by remember(registration) { mutableStateOf<Rect?>(null) }
 
     AnimatedVisibility(
         visible = navigationVisible && registration.shouldShow,
         enter = EnterTransition.None,
         exit = ExitTransition.None,
         modifier = modifier
-            .onGloballyPositioned { buttonBounds = it.boundsInWindow() }
-            .offset {
-                val searchBounds = searchBoundsState?.value
-                val x = searchBounds?.right?.minus(buttonBounds?.right ?: searchBounds.right) ?: 0f
-                androidx.compose.ui.unit.IntOffset(
-                    x.roundToInt(),
-                    (miniPlayerVerticalOffset() - bottomPadding()).toPx().roundToInt(),
-                )
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                layout(placeable.width, placeable.height) {
+                    val searchBounds = searchBoundsState?.value
+                    val rightInWindow = coordinates?.localToWindow(Offset(placeable.width.toFloat(), 0f))?.x
+                    val x = if (searchBounds != null && rightInWindow != null) {
+                        (searchBounds.right - rightInWindow).roundToInt()
+                    } else {
+                        0
+                    }
+                    val y = (miniPlayerVerticalOffset() - bottomPadding()).toPx().roundToInt()
+                    placeable.place(x, y)
+                }
             }
             .zIndex(0f),
     ) {
-        val actionProgress by transition.animateFloat(
+        val actionProgress = transition.animateFloat(
             transitionSpec = { spring(dampingRatio = 0.75f, stiffness = 228.1251f) },
             label = "PlaylistLocateToolbarAction",
         ) { state ->
@@ -234,14 +252,14 @@ private fun PlaylistLocateButtonChrome(
             Modifier
                 .graphicsLayer {
                     // Match GlasmioNavigationScaffold's group/member toolbar motion.
-                    val p = actionProgress.coerceIn(0f, 1f)
+                    val p = actionProgress.value.coerceIn(0f, 1f)
                     val scale = .24f + .92f * p - .16f * p * p
                     alpha = p * p
                     scaleX = scale
                     scaleY = scale
                 }
                 .drawWithContent {
-                    val p = actionProgress.coerceIn(0f, 1f)
+                    val p = actionProgress.value.coerceIn(0f, 1f)
                     val blur = 10.dp.toPx() * (1f - p)
                     if (blur <= .01f) {
                         drawContent()

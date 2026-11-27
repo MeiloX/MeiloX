@@ -30,7 +30,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
 import androidx.media3.common.util.UnstableApi
 import com.ljyh.mei.data.model.toMediaItem
-import com.ljyh.mei.data.model.supportsNeteaseSongActions
 import com.ljyh.mei.playback.queue.ListQueue
 import com.ljyh.mei.source.api.SourceFeedCard
 import com.ljyh.mei.source.api.SourceFeedTarget
@@ -39,6 +38,9 @@ import com.ljyh.mei.ui.local.LocalPlayerConnection
 import com.ljyh.mei.ui.screen.NavigationBuilder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import androidx.compose.foundation.layout.Arrangement
@@ -862,10 +864,8 @@ fun SourceLibraryScreen(
     val historyState = historyViewModel?.state?.collectAsState()?.value ?: HistoryUiState()
     val ownState = if (!hasCoreCollection) SourceContentState(providerId = selectedId)
         else state.takeIf { it.providerId == selectedId } ?: SourceContentState(providerId = selectedId, loading = true)
-    val playingLikedTrack = if (selectedId == ProviderIds.NETEASE && hasCoreCollection &&
-        page == LibraryPage.Songs && !showArtists) {
-        player?.mediaMetadata?.collectAsState()?.value?.takeIf { it.supportsNeteaseSongActions }?.trackRef
-    } else null
+    val canLocateLikedTrack = selectedId == ProviderIds.NETEASE && hasCoreCollection &&
+        page == LibraryPage.Songs && !showArtists
     val extra = createdState?.takeIf { needsCreated && it.providerId == selectedId }
     val displayed = remember(page, showArtists, playlistFilter, collection, ownState.items, extra?.items) {
         if (page == LibraryPage.Playlists && !showArtists) when (playlistFilter) {
@@ -1078,11 +1078,17 @@ fun SourceLibraryScreen(
                                 val onTrackMore = remember(item.track, selection) {
                                     { rect: Rect -> selection.value = item.track to rect }
                                 }
+                                val isCurrentTrack by remember(player, item.ref) {
+                                    player?.mediaMetadata
+                                        ?.map { it?.trackRef == item.ref }
+                                        ?.distinctUntilChanged()
+                                        ?: flowOf(false)
+                                }.collectAsState(initial = player?.mediaMetadata?.value?.trackRef == item.ref)
                                 CompositionLocalProvider(LocalLibraryShareArtwork provides artwork) {
                                     LandscapeMediaRow(modifier = rowPaddingModifier, landscape = landscape,
                                         image = item.artworkUrl, title = item.title, artist = artistText,
                                         detail = detailText, album = item.track.album.title,
-                                        isCurrentTrack = item.ref == playingLikedTrack, fullWidthTrackPress = true,
+                                        isCurrentTrack = isCurrentTrack, fullWidthTrackPress = true,
                                         favorite = true, showDivider = item.ref != lastFilteredRef,
                                         copyNamesOnLongPress = true,
                                         onClick = onTrackClick,
@@ -1114,9 +1120,9 @@ fun SourceLibraryScreen(
 
                 }
             }
-            if (playingLikedTrack != null && !searchActive && query.text.isBlank() && filtered.isNotEmpty()) {
+            if (canLocateLikedTrack && !searchActive && query.text.isBlank() && filtered.isNotEmpty()) {
                 SourceTrackLocateButton(
-                    viewModel, libraryRequest, ownState, playingLikedTrack, listState,
+                    viewModel, libraryRequest, ownState, listState,
                     // Search, play actions, divider, and the optional title and page tabs.
                     leadingItems = 3 + (if (landscape) 0 else 1) + (if (category == null) 1 else 0),
                     modifier = Modifier.align(Alignment.BottomEnd),
