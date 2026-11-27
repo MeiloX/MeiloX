@@ -1,8 +1,13 @@
 package com.ljyh.mei.playback
 
-import android.os.Bundle
-import android.net.Uri
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.media.session.PlaybackState
+import android.net.Uri
+import android.os.Bundle
+import android.os.IBinder
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -14,14 +19,18 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.session.MediaSession
 import androidx.media3.session.PlatformLyricsSessionAccess
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.ljyh.mei.MainActivity
 import com.ljyh.mei.data.model.Tracks
 import com.ljyh.mei.data.model.createPlaceholder
+import com.ljyh.mei.data.model.room.Song
+import com.ljyh.mei.data.model.room.SourceType
 import com.ljyh.mei.data.model.toMediaItem
 import com.ljyh.mei.data.model.toMediaMetadata
 import com.ljyh.mei.playback.queue.ListQueue
@@ -30,6 +39,7 @@ import com.ljyh.mei.playback.queue.SourceContentQueue
 import com.ljyh.mei.source.api.*
 import com.ljyh.mei.source.core.ProviderRegistry
 import com.ljyh.mei.source.core.SourceRouter
+import com.ljyh.mei.widget.MusicWidgets
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -52,11 +62,83 @@ import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PlaybackQueueIntegrationTest {
+    @Test
+    fun widgetTransportStartsPreviousAndNextTracksFromPausedPlayback() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue(context.packageName == "com.neoruaa.meilox.test")
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val connected = CountDownLatch(1)
+            val serviceReference = AtomicReference<MusicService>()
+            val connection = object : ServiceConnection {
+                override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+                    serviceReference.set((binder as? MusicService.MusicBinder)?.service)
+                    connected.countDown()
+                }
+
+                override fun onServiceDisconnected(name: ComponentName) = Unit
+            }
+            assertTrue(context.bindService(Intent(context, MusicService::class.java), connection, Context.BIND_AUTO_CREATE))
+            try {
+                assertTrue("The playback service must bind", connected.await(10, TimeUnit.SECONDS))
+                val service = checkNotNull(serviceReference.get())
+                runBlocking { withTimeout(10_000) { service.awaitPlaybackRestore() } }
+                val silence = File.createTempFile("widget-regression-", ".wav", context.cacheDir)
+                val songs = (1..3).map { index ->
+                    Song(
+                        id = "local_12700$index", title = "Widget fixture $index", artist = emptyList(),
+                        album = "", cover = "", duration = 30_000, path = silence.absolutePath,
+                        sourceType = SourceType.LOCAL,
+                    )
+                }
+                val items = songs.map { it.toMediaMetadata().toMediaItem() }
+                val player = service.player
+                try {
+                    writeSilence(silence, durationSeconds = 30)
+                    runBlocking(Dispatchers.IO) { service.songRepository.insertSongs(songs) }
+                    onMain {
+                        player.pause()
+                        player.repeatMode = Player.REPEAT_MODE_OFF
+                        player.shuffleModeEnabled = false
+                        player.setMediaItems(items, 1, 0L)
+                        player.prepare()
+                    }
+                    for ((action, target) in listOf(MusicWidgets.ACTION_PREVIOUS to 0, MusicWidgets.ACTION_NEXT to 2)) {
+                        await("a paused widget queue") {
+                            player.currentMediaItem?.mediaId == items[1].mediaId &&
+                                player.playbackState == Player.STATE_READY && !player.playWhenReady
+                        }
+                        checkNotNull(MusicWidgets.transport(context, action)).send()
+                        await("widget action $action to select the expected song") {
+                            player.currentMediaItem?.mediaId == items[target].mediaId
+                        }
+                        await("widget action $action to start playback") { player.isPlaying }
+                        onMain {
+                            player.pause()
+                            player.seekToDefaultPosition(1)
+                        }
+                    }
+                } finally {
+                    onMain {
+                        player.pause()
+                        player.clearMediaItems()
+                    }
+                    runBlocking(Dispatchers.IO) {
+                        songs.forEach { service.songRepository.deleteById(it.id) }
+                    }
+                    silence.delete()
+                }
+            } finally {
+                context.unbindService(connection)
+            }
+        }
+    }
+
     @Test
     fun legacyMediaControlsCanSkipSelectPauseAndSeekWithoutReplacingTheQueue() {
         Fixture().use { fixture ->
@@ -1746,11 +1828,7 @@ class PlaybackQueueIntegrationTest {
         private val context = InstrumentationRegistry.getInstrumentation().targetContext
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         private val silence = File.createTempFile("queue-regression-", ".wav", context.cacheDir).apply {
-            val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-                .put("RIFF".toByteArray()).putInt(16_036).put("WAVEfmt ".toByteArray())
-                .putInt(16).putShort(1).putShort(1).putInt(8_000).putInt(16_000)
-                .putShort(2).putShort(16).put("data".toByteArray()).putInt(16_000).array()
-            writeBytes(header + ByteArray(16_000))
+            writeSilence(this, durationSeconds = 1)
         }
         val requests = CopyOnWriteArrayList<List<String>>()
         val sourceCreations = CopyOnWriteArrayList<String>()
@@ -1822,6 +1900,15 @@ class PlaybackQueueIntegrationTest {
     }
 
     companion object {
+        private fun writeSilence(file: File, durationSeconds: Int) {
+            val dataSize = durationSeconds * 16_000
+            val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+                .put("RIFF".toByteArray()).putInt(dataSize + 36).put("WAVEfmt ".toByteArray())
+                .putInt(16).putShort(1).putShort(1).putInt(8_000).putInt(16_000)
+                .putShort(2).putShort(16).put("data".toByteArray()).putInt(dataSize).array()
+            file.writeBytes(header + ByteArray(dataSize))
+        }
+
         private fun await(stage: String = "queue state", matches: () -> Boolean) = runBlocking {
             try {
                 withTimeout(5_000) { while (!onMain(matches)) delay(10) }

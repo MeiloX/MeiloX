@@ -628,9 +628,13 @@ class MusicService : MediaLibraryService(),
             }
             MusicWidgets.ACTION_PREVIOUS -> if (player.currentMediaItem != null) {
                 player.seekToPrevious()
+                if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                player.play()
             }
             MusicWidgets.ACTION_NEXT -> if (player.hasNextMediaItem()) {
                 player.seekToNextMediaItem()
+                if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                player.play()
             }
             MusicWidgets.ACTION_LIKE -> if (mediaId == null || player.currentMediaItem?.mediaId == mediaId) {
                 toggleCurrentFavorite()
