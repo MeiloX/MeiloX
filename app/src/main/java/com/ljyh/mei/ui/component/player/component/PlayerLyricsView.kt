@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.layout.layout
@@ -264,32 +265,40 @@ internal fun PlayerLyricsView(
                             } else Modifier,
                         )
                         .drawWithCache {
+                            val edgeBrush = if ((topFadeHeight > 0.dp || bottomFadeHeight > 0.dp) && size.height > 0f) {
+                                val topFade = (topFadeHeight.toPx() / size.height).coerceIn(0f, 1f)
+                                val bottomFade = (bottomFadeHeight.toPx() / size.height).coerceIn(0f, 1f - topFade)
+                                Brush.verticalGradient(
+                                    0f to if (topFade > 0f) Color.Transparent else Color.Black,
+                                    topFade to Color.Black,
+                                    1f - bottomFade to Color.Black,
+                                    1f to if (bottomFade > 0f) Color.Transparent else Color.Black,
+                                )
+                            } else null
                             onDrawWithContent {
-                                drawContent()
-                                if (topFadeHeight > 0.dp || bottomFadeHeight > 0.dp) {
-                                    val topFade = topFadeHeight.toPx() / size.height
-                                    val bottomFade = bottomFadeHeight.toPx() / size.height
-                                    drawRect(
-                                        brush = Brush.verticalGradient(
-                                            0f to if (topFade > 0f) Color.Transparent else Color.Black,
-                                            topFade to Color.Black,
-                                            1f - bottomFade to Color.Black,
-                                            1f to if (bottomFade > 0f) Color.Transparent else Color.Black,
-                                        ),
-                                        blendMode = BlendMode.DstIn
-                                    )
-                                }
-                                controlsFadeRange(size.height)?.let { range ->
-                                    if (range.start < size.height && range.endInclusive > range.start) {
-                                        // Fade lyric pixels while preserving the live player background.
+                                if (size.width <= 0f || size.height <= 0f) return@onDrawWithContent
+                                // Bound keep-alive rows to the fade rect even when reusing an ancestor
+                                // offscreen layer so contentModifier translations cannot expose unmasked rows.
+                                clipRect {
+                                    this@onDrawWithContent.drawContent()
+                                    if (edgeBrush != null) {
                                         drawRect(
-                                            brush = Brush.verticalGradient(
-                                                colors = listOf(Color.Black, Color.Transparent),
-                                                startY = range.start,
-                                                endY = range.endInclusive,
-                                            ),
-                                            blendMode = BlendMode.DstIn,
+                                            brush = edgeBrush,
+                                            blendMode = BlendMode.DstIn
                                         )
+                                    }
+                                    controlsFadeRange(size.height)?.let { range ->
+                                        if (range.start < size.height && range.endInclusive > range.start) {
+                                            // Fade lyric pixels while preserving the live player background.
+                                            drawRect(
+                                                brush = Brush.verticalGradient(
+                                                    colors = listOf(Color.Black, Color.Transparent),
+                                                    startY = range.start,
+                                                    endY = range.endInclusive,
+                                                ),
+                                                blendMode = BlendMode.DstIn,
+                                            )
+                                        }
                                     }
                                 }
                             }
