@@ -210,8 +210,15 @@ class NeteaseFingerprintGenerator(context: Context) {
         webView = WebView(applicationContext).apply {
             settings.javaScriptEnabled = true
             settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.blockNetworkLoads = true
             addJavascriptInterface(bridge, BRIDGE_NAME)
             webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: android.webkit.WebResourceRequest?,
+                ): Boolean = true
+
                 override fun onPageFinished(view: WebView?, url: String?) {
                     if (!deferred.isCompleted) deferred.complete(Unit)
                 }

@@ -20,11 +20,15 @@ interface SourceUpdateTransport {
 }
 
 @Singleton
-class SourceMarketTransport internal constructor(private val policy: ScriptNetworkPolicy) : SourceUpdateTransport {
+class SourceMarketTransport internal constructor(
+    private val policy: ScriptNetworkPolicy,
+    private val client: okhttp3.OkHttpClient = policy.client.newBuilder().dns(okhttp3.Dns.SYSTEM).build(),
+) : SourceUpdateTransport {
     @Inject constructor() : this(ScriptNetworkPolicy(listOf("raw.githubusercontent.com", "api.github.com")))
 
-    // Pin each package download to the commit that the GitHub API reports for its path.
-    private val client = policy.client.newBuilder().dns(okhttp3.Dns.SYSTEM).build()
+    // Pin each package download to the commit that the GitHub API reports for its path;
+    // fall back to raw HEAD only when public GitHub API rate limits (403/429) apply,
+    // while keeping strict SHA-256 verification on download.
 
     override suspend fun index(etag: String?): SourceIndexResponse {
         val builder = Request.Builder().url(SourceMarketIndex.URL)
@@ -54,6 +58,7 @@ class SourceMarketTransport internal constructor(private val policy: ScriptNetwo
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "MeiloX-Source-Market")
             .build()), {}) { response, guard ->
+            if (response.code == 403 || response.code == 429) return@exchange null
             if (!response.isSuccessful) unavailable()
             val body = response.body
             if (body.contentLength() > MAX_METADATA_BYTES) invalidResponse()
@@ -66,7 +71,8 @@ class SourceMarketTransport internal constructor(private val policy: ScriptNetwo
             first.asJsonObject.get("sha")?.takeIf { it.isJsonPrimitive }?.asString
                 ?.takeIf { SHA1.matches(it) } ?: invalidResponse()
         }
-        val url = "https://raw.githubusercontent.com/$owner/$repository/$commit/${listing.packagePath}"
+        val ref = commit ?: "HEAD"
+        val url = "https://raw.githubusercontent.com/$owner/$repository/$ref/${listing.packagePath}"
         val archive = File.createTempFile("source-market-resolve-", ".meisource")
         try {
             val digest = downloadBytes(url, archive)

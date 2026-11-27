@@ -1,13 +1,22 @@
 package com.ljyh.mei.source.update
 
+import com.ljyh.mei.source.api.SourceErrorCode
 import com.ljyh.mei.source.api.SourceException
 import com.ljyh.mei.source.script.PluginConfigField
 import com.ljyh.mei.source.script.PluginManifest
 import com.ljyh.mei.source.script.PluginPermissions
 import com.ljyh.mei.source.script.PluginInstallJournal
 import com.ljyh.mei.source.script.PluginInstallTransaction
+import com.ljyh.mei.source.script.ScriptNetworkPolicy
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.cancelAndJoin
@@ -177,5 +186,97 @@ class SourceUpdatesTest {
         advanceUntilIdle()
         waiting!!.join()
         assertEquals("Waiting never replays an operation", 1, calls)
+    }
+
+    @Test
+    fun marketTransportPinsCommitFallsBackOnlyOnRateLimitsAndVerifiesChecksum() = runTest {
+        fun archiveBytes(version: String): ByteArray {
+            val out = ByteArrayOutputStream()
+            ZipOutputStream(out).use { zip ->
+                zip.putNextEntry(ZipEntry("manifest.json"))
+                zip.write(
+                    """{"id":"${listing.packageId}","providerId":"${listing.providerId}","version":"$version","apiVersion":${listing.apiVersion}}"""
+                        .toByteArray(Charsets.UTF_8),
+                )
+                zip.closeEntry()
+            }
+            return out.toByteArray()
+        }
+
+        val sha = "a".repeat(40)
+        val packageV1 = archiveBytes("1.2.3")
+        val packageV2 = archiveBytes("1.2.4")
+        var apiCode = 200
+        var apiBody = """[{"sha":"$sha"}]"""
+        var rawBytes = packageV1
+        val seenRawUrls = mutableListOf<String>()
+        val policy = ScriptNetworkPolicy(listOf("raw.githubusercontent.com", "api.github.com"))
+        val client = policy.client.newBuilder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val url = request.url.toString()
+                when (request.url.host) {
+                    "api.github.com" -> Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(apiCode)
+                        .message(if (apiCode == 200) "OK" else "Error")
+                        .body(apiBody.toResponseBody("application/json".toMediaType()))
+                        .build()
+                    "raw.githubusercontent.com" -> {
+                        seenRawUrls += url
+                        Response.Builder()
+                            .request(request)
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(200)
+                            .message("OK")
+                            .body(rawBytes.toResponseBody("application/octet-stream".toMediaType()))
+                            .build()
+                    }
+                    else -> error("Unexpected host: ${request.url.host}")
+                }
+            }
+            .build()
+        val transport = SourceMarketTransport(policy, client)
+
+        val pinned = transport.resolve(listing)
+        assertEquals("https://raw.githubusercontent.com/Owner/Fixture/$sha/${listing.packagePath}", pinned.packageUrl)
+        assertEquals("1.2.3", pinned.version)
+
+        for (rateLimited in listOf(403, 429)) {
+            apiCode = rateLimited
+            apiBody = """{"message":"rate limit exceeded"}"""
+            val fallback = transport.resolve(listing)
+            assertEquals("https://raw.githubusercontent.com/Owner/Fixture/HEAD/${listing.packagePath}", fallback.packageUrl)
+            val destination = File.createTempFile("source-market-test-", ".meisource")
+            try {
+                rawBytes = packageV2
+                try {
+                    transport.download(fallback, destination)
+                    fail("HEAD payload drift must fail checksum verification")
+                } catch (error: SourceException) {
+                    assertEquals(SourceErrorCode.INVALID_RESPONSE, error.code)
+                    assertFalse(destination.exists())
+                }
+                rawBytes = packageV1
+                transport.download(fallback, destination)
+                assertTrue(packageV1.contentEquals(destination.readBytes()))
+            } finally {
+                destination.delete()
+            }
+        }
+
+        for (failureCode in listOf(400, 404, 500)) {
+            apiCode = failureCode
+            apiBody = """{"message":"error"}"""
+            val rawCountBefore = seenRawUrls.size
+            try {
+                transport.resolve(listing)
+                fail("HTTP $failureCode must fail closed without falling back to HEAD")
+            } catch (error: SourceException) {
+                assertEquals(SourceErrorCode.NETWORK, error.code)
+                assertEquals(rawCountBefore, seenRawUrls.size)
+            }
+        }
     }
 }

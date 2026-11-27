@@ -759,7 +759,8 @@ class MediaUriProviderQualityTest {
 
     private suspend fun withLocalWave(useContentUri: Boolean, block: suspend (Uri) -> Unit) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val file = context.filesDir.resolve("quality-regression-${UUID.randomUUID()}.wav")
+        val directory = if (useContentUri) context.filesDir.resolve("app_logs").apply { mkdirs() } else context.filesDir
+        val file = directory.resolve("quality-regression-${UUID.randomUUID()}.wav")
         val pcmBytes = 4_410 * 4
         val wave = ByteBuffer.allocate(44 + pcmBytes).order(ByteOrder.LITTLE_ENDIAN)
             .put("RIFF".toByteArray()).putInt(36 + pcmBytes).put("WAVEfmt ".toByteArray())

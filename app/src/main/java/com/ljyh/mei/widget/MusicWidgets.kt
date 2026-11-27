@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Looper
+import java.security.MessageDigest
 import androidx.activity.ComponentActivity
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -322,15 +324,28 @@ internal object MusicWidgets {
         var value = prefs.getString(TOKEN, null)
         if (value == null && create) {
             value = UUID.randomUUID().toString()
-            if (!prefs.edit().putString(TOKEN, value).commit()) return null
+            val editor = prefs.edit().putString(TOKEN, value)
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                editor.apply()
+            } else if (!editor.commit()) {
+                return null
+            }
         }
         commandToken = value
         return value
     }
 
     fun isWidgetCommand(context: Context, intent: Intent?): Boolean {
-        val provided = intent?.getStringExtra(EXTRA_TOKEN) ?: return false
-        return provided == token(context, create = false)
+        val provided = try {
+            intent?.getStringExtra(EXTRA_TOKEN)
+        } catch (_: RuntimeException) {
+            null
+        } ?: return false
+        val expected = token(context, create = false) ?: return false
+        return MessageDigest.isEqual(
+            provided.toByteArray(Charsets.UTF_8),
+            expected.toByteArray(Charsets.UTF_8),
+        )
     }
 
     fun authorize(context: Context, intent: Intent): Intent {
