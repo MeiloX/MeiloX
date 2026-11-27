@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.ljyh.mei.MainActivity
 import com.ljyh.mei.R
+import com.ljyh.mei.widget.MusicWidgets
 import java.util.Date
 
 class SleepTimerNotification(private val context: Context) {
@@ -53,7 +54,7 @@ class SleepTimerNotification(private val context: Context) {
         val cancel = PendingIntent.getService(
             context,
             NOTIFICATION_ID,
-            Intent(context, MusicService::class.java).setAction(MusicService.ACTION_CANCEL_SLEEP_TIMER),
+            MusicWidgets.authorize(context, Intent(context, MusicService::class.java).setAction(MusicService.ACTION_CANCEL_SLEEP_TIMER)),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)

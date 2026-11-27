@@ -209,7 +209,7 @@ class NeteaseFingerprintGenerator(context: Context) {
         prepared = deferred
         webView = WebView(applicationContext).apply {
             settings.javaScriptEnabled = true
-            settings.allowFileAccess = true
+            settings.allowFileAccess = false
             addJavascriptInterface(bridge, BRIDGE_NAME)
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {

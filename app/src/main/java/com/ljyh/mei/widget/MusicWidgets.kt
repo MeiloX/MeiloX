@@ -333,6 +333,11 @@ internal object MusicWidgets {
         return provided == token(context, create = false)
     }
 
+    fun authorize(context: Context, intent: Intent): Intent {
+        token(context, create = true)?.let { intent.putExtra(EXTRA_TOKEN, it) }
+        return intent
+    }
+
     fun transport(
         context: Context,
         action: String,
