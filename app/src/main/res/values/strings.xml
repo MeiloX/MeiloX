@@ -601,6 +601,14 @@
     <string name="netease_logout_confirm_message">Sign out of the current account on this app? You will need to sign in again to use account features.</string>
     <string name="netease_logout_confirm">Sign Out</string>
     <string name="netease_web_login">Web Cookie Sign-In</string>
+    <string name="source_login_qq">Sign In with QQ</string>
+    <string name="source_login_qr">Scan to Sign In</string>
+    <string name="qq_music_login_qr_connecting">Connecting to QQ Music…</string>
+    <string name="qq_music_login_qr_scan">Scan with QQ, WeChat, or QQ Music</string>
+    <string name="qq_music_login_qr_confirm">Confirm sign-in on your scanning device</string>
+    <string name="qq_music_login_qr_image">QQ Music sign-in QR code</string>
+    <string name="qq_music_login_qr_failed">Could not sign in. Try again.</string>
+    <string name="source_login_wechat">Sign In with WeChat</string>
     <string name="pc_qr_login_mobile_only">Requires mobile sign-in</string>
     <string name="netease_web_session_notice_title">Mobile Sign-In Is Now Available</string>
     <string name="netease_web_session_notice_message">Your existing web session may not support all features. MeiloX now supports official NetEase mobile account sessions, including Web / PC QR authorization. Sign in with your phone to switch. Your current session stays signed in until the new sign-in succeeds.</string>

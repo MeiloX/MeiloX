@@ -596,6 +596,14 @@
   <string name="netease_logout_confirm_message">このアプリで現在のアカウントからサインアウトしますか？アカウント機能を使うには再度サインインが必要です。</string>
   <string name="netease_logout_confirm">サインアウト</string>
   <string name="netease_web_login">Web Cookie でサインイン</string>
+  <string name="source_login_qq">QQ でログイン</string>
+  <string name="source_login_qr">QR コードでログイン</string>
+  <string name="qq_music_login_qr_connecting">QQ Music に接続中…</string>
+  <string name="qq_music_login_qr_scan">QQ、WeChat、QQ Music でスキャンできます</string>
+  <string name="qq_music_login_qr_confirm">スキャンした端末でログインを確認してください</string>
+  <string name="qq_music_login_qr_image">QQ Music ログイン用 QR コード</string>
+  <string name="qq_music_login_qr_failed">ログインできませんでした。もう一度お試しください。</string>
+  <string name="source_login_wechat">WeChat でログイン</string>
   <string name="pc_qr_login_mobile_only">モバイルサインインが必要です</string>
   <string name="netease_web_session_notice_title">モバイルサインインが利用可能になりました</string>
   <string name="netease_web_session_notice_message">既存の Web セッションでは一部の機能に対応していない場合があります。MeiloX は Web / PC の QR 認証を含む、NetEase 公式のモバイルアカウントセッションに対応しました。電話番号でサインインして切り替えてください。新しいサインインが成功するまで、現在のセッションはサインインしたままになります。</string>

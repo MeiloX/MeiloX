@@ -601,6 +601,14 @@
     <string name="netease_logout_confirm_message">确定退出本应用中的当前账号吗？退出后需重新登录才能使用账号相关功能。</string>
     <string name="netease_logout_confirm">确认退出</string>
     <string name="netease_web_login">网页端 Cookie 登录</string>
+    <string name="source_login_qq">QQ 登录</string>
+    <string name="source_login_qr">扫码登录</string>
+    <string name="qq_music_login_qr_connecting">正在连接 QQ 音乐…</string>
+    <string name="qq_music_login_qr_scan">使用 QQ、微信或 QQ 音乐扫码</string>
+    <string name="qq_music_login_qr_confirm">请在扫码设备上确认登录</string>
+    <string name="qq_music_login_qr_image">QQ 音乐登录二维码</string>
+    <string name="qq_music_login_qr_failed">扫码登录失败，请重试。</string>
+    <string name="source_login_wechat">微信登录</string>
     <string name="pc_qr_login_mobile_only">仅限移动端会话</string>
     <string name="netease_web_session_notice_title">现已支持移动端登录</string>
     <string name="netease_web_session_notice_message">你原有的网页端会话可能无法使用完整功能。MeiloX 现已支持使用网易云官方移动端会话登录，包括网页 / PC 扫码授权。建议通过手机号登录切换；新登录成功前会保留当前会话。</string>

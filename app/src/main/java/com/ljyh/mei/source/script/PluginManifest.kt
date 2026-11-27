@@ -164,7 +164,12 @@ data class PluginManifest(
                     }
                 })
                 require(manifest.permissions.nativeSdks.all { it in setOf("netease.transport", "netease.urs",
-                    "netease.securityHeaders", "netease.ursPuzzle", "netease.ursCaptcha", "netease.history") })
+                    "netease.securityHeaders", "netease.ursPuzzle", "netease.ursCaptcha", "netease.history", "qqmusic.qrLogin") })
+                if ("qqmusic.qrLogin" in manifest.permissions.nativeSdks) {
+                    require(manifest.id == "org.meilox.qqmusic" && manifest.providerId == "qqmusic" &&
+                        "appQrLogin" in manifest.features["login"].orEmpty() && "sdk.call" in manifest.permissions.effects &&
+                        ScriptNetworkPolicy.isHostAllowed("mu.y.qq.com", manifest.permissions.network))
+                }
                 require(manifest.permissions.effects.all { it in com.ljyh.mei.source.api.SourceHostEffect.supportedTypes && it != "source.continue" })
                 require(manifest.linkHosts.size <= 20 && manifest.linkHosts.all {
                     ScriptNetworkPolicy.isHostAllowed(it, manifest.permissions.network)

@@ -62,7 +62,11 @@ class SourcePlatformEffects @Inject constructor(
             "sdk.call" -> {
                 val name = effect.parameters.text("name")
                 if (name !in source.manifest.permissions.nativeSdks) platformDenied()
-                if (name == "netease.ursCaptcha") request(effect, scope)
+                if (name == "qqmusic.qrLogin") {
+                    if (source.manifest.id != "org.meilox.qqmusic" || scope.providerId != "qqmusic" ||
+                        scope.feature != "login" || scope.action != "appQrLogin") platformDenied()
+                    request(effect, scope)
+                } else if (name == "netease.ursCaptcha") request(effect, scope)
                 else SourceHostEffectResult.Success(SourceNativeSdk.call(context, name,
                     effect.parameters.getAsJsonObject("arguments") ?: JsonObject(), source.platformConfiguration(), { scope.isActive }).also { scope.ensureCurrent() })
             }

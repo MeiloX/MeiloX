@@ -69,8 +69,8 @@ class BoundSourceFeatures internal constructor(
     fun supports(feature: String, action: String): Boolean =
         action in (owner as? SourceFeatureCapability)?.features?.get(feature).orEmpty()
 
-    suspend fun webLogin() {
-        val result = invoke("login", "webLogin", allowSessionChange = true)
+    suspend fun login(action: String) {
+        val result = invoke("login", action, allowSessionChange = true)
         val authenticated = result.takeIf { it.isJsonObject }?.asJsonObject?.get("authenticated")
         if (authenticated == null || !authenticated.isJsonPrimitive ||
             !authenticated.asJsonPrimitive.isBoolean || !authenticated.asBoolean) {

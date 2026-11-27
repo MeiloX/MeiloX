@@ -601,6 +601,14 @@
     <string name="netease_logout_confirm_message">確定登出本應用程式中的目前帳號嗎？登出後需重新登入才能使用帳號相關功能。</string>
     <string name="netease_logout_confirm">確認登出</string>
     <string name="netease_web_login">網頁端 Cookie 登入</string>
+    <string name="source_login_qq">使用 QQ 登入</string>
+    <string name="source_login_qr">掃碼登入</string>
+    <string name="qq_music_login_qr_connecting">正在連線至 QQ 音樂…</string>
+    <string name="qq_music_login_qr_scan">使用 QQ、微信或 QQ 音樂掃描 QR 碼</string>
+    <string name="qq_music_login_qr_confirm">請在掃碼裝置上確認登入</string>
+    <string name="qq_music_login_qr_image">QQ 音樂登入 QR 碼</string>
+    <string name="qq_music_login_qr_failed">QR 碼登入失敗，請再試一次。</string>
+    <string name="source_login_wechat">使用微信登入</string>
     <string name="pc_qr_login_mobile_only">僅限行動端工作階段</string>
     <string name="netease_web_session_notice_title">現已支援行動端登入</string>
     <string name="netease_web_session_notice_message">你原有的網頁端工作階段可能無法使用完整功能。MeiloX 現已支援使用網易雲官方行動端工作階段登入，包括網頁 / PC 掃碼授權。建議透過手機號碼登入切換；新登入成功前會保留目前工作階段。</string>

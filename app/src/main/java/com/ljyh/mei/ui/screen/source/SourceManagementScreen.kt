@@ -139,9 +139,23 @@ fun SourceManagementScreen(
                             GlasmioListRow(title = "启用", showDisclosure = false, trailing = {
                                 MeiloXSwitch(plugin.enabled, { viewModel.enabled(plugin, it) }, enabled = !working)
                             })
-                            if ("webLogin" in plugin.manifest.features["login"].orEmpty()) {
-                                GlasmioListRow(title = "网页登录", systemName = "globe", enabled = !working && plugin.status == SourceStatus.READY,
-                                    onClick = { viewModel.webLogin(plugin.manifest.providerId) })
+                            val loginActions = plugin.manifest.features["login"].orEmpty()
+                            val wechat = "wechatWebLogin" in loginActions
+                            val loginEnabled = !working && plugin.status == SourceStatus.READY
+                            if ("appQrLogin" in loginActions) {
+                                val failureMessage = stringResource(R.string.qq_music_login_qr_failed)
+                                GlasmioListRow(title = stringResource(R.string.source_login_qr), systemName = "qrcode", enabled = loginEnabled,
+                                    onClick = { viewModel.login(plugin.manifest.providerId, "appQrLogin", failureMessage) })
+                            }
+                            if ("webLogin" in loginActions) {
+                                GlasmioListRow(title = if (wechat) stringResource(R.string.source_login_qq) else "网页登录",
+                                    systemName = "globe", enabled = loginEnabled,
+                                    onClick = { viewModel.login(plugin.manifest.providerId, "webLogin") })
+                            }
+                            if (wechat) {
+                                GlasmioListRow(title = stringResource(R.string.source_login_wechat),
+                                    systemName = "qrcode", enabled = loginEnabled,
+                                    onClick = { viewModel.login(plugin.manifest.providerId, "wechatWebLogin") })
                             }
                             plugin.manifest.config.forEach { field ->
                                 GlasmioTextField(
@@ -333,6 +347,7 @@ private fun pluginReviewText(manifest: PluginManifest, reasons: List<SourceUpdat
         "netease.securityHeaders" -> "网易云设备安全"
         "netease.ursPuzzle", "netease.ursCaptcha" -> "网易云登录验证"
         "netease.history" -> "历史播放上报"
+        "qqmusic.qrLogin" -> "QQ 音乐扫码登录"
         else -> it
     } }.distinct().joinToString("、"))
     if (manifest.permissions.effects.isNotEmpty()) add("系统能力：" + manifest.permissions.effects.map { when (it) {

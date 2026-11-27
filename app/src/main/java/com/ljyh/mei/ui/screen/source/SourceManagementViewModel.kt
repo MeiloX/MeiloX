@@ -153,8 +153,14 @@ class SourceManagementViewModel @Inject constructor(
         resolver.invalidate()
         onSaved()
     }
-    fun webLogin(providerId: String) = action {
-        features.bind(providerId, "source-web-login:${java.util.UUID.randomUUID()}").webLogin()
+    fun login(providerId: String, method: String, unavailableMessage: String? = null) = action {
+        try {
+            features.bind(providerId, "source-login:${java.util.UUID.randomUUID()}").login(method)
+        } catch (error: SourceException) {
+            if (error.code != SourceErrorCode.UNAVAILABLE || unavailableMessage == null) throw error
+            message.value = unavailableMessage
+            return@action
+        }
         includePlayableFallbacks()
         resolver.invalidate()
     }

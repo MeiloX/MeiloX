@@ -1,7 +1,7 @@
 # QQ compatibility fixture
 
-Pinned from https://github.com/NEORUAA/MeiloX-QQMusic-Source, version 0.3.1.
-Package SHA-256: `ee3c5a6362e9c4015b47dcfde955b5f7708ec90bf85fa2781e589bcf34e063fa`.
+Pinned from https://github.com/MeiloX/MeiloX-QQMusic-Source, version 0.4.0.
+Package SHA-256: `23ec4be9d64b94ddfab62abac4b3908ada1d42d4ccb7cf2d5d61f6809848c6c8`.
 
 This is an Android-test-only package snapshot. The standalone repository owns the
 implementation, build, protocol tests and license notices. Captures contain public

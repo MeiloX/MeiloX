@@ -1230,7 +1230,7 @@ class SourceContentViewModel internal constructor(
         }
         mutate(ref.providerId, { _: Unit -> onReordered() }) { owner, revision -> router.reorderTracks(ref, tracks, revision, owner) }
     }
-    fun webLogin(providerId: String) {
+    fun login(providerId: String, action: String) {
         if (mutableBusy.value) return
         val requested = request.value
         val owner = registry.provider(providerId) ?: run { mutableMessage.value = SourceErrorCode.MISSING_PROVIDER; return }
@@ -1239,9 +1239,9 @@ class SourceContentViewModel internal constructor(
             try {
                 if (registry.provider(providerId) !== owner) throw CancellationException("Source changed before login")
                 val bound = (features ?: throw SourceException(SourceErrorCode.UNSUPPORTED))
-                    .bind(providerId, "source-web-login:${java.util.UUID.randomUUID()}")
+                    .bind(providerId, "source-login:${java.util.UUID.randomUUID()}")
                 if (registry.provider(providerId) !== owner) throw CancellationException("Source changed while opening login")
-                bound.webLogin()
+                bound.login(action)
                 preferences.update { settings ->
                     settings.copy(fallbackOrder = (settings.fallbackOrder + registry.playable().map { it.instanceId.value }).distinct())
                 }

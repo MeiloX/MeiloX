@@ -542,13 +542,13 @@ class SourceResolutionTest {
                 com.google.gson.JsonParser.parseString("""{"authenticated":true,"id":"opaque-user"}""")
             }
         }
-        bound.webLogin()
+        bound.login("webLogin")
         assertEquals(1, opened)
         assertEquals("logged-in", source.accountRevision.value)
         bound.ensureCurrent()
         for (invalid in listOf("{}", """{"authenticated":false}""", """{"authenticated":"true"}""", """{"status":"authenticated"}""")) {
             source.respond = { com.google.gson.JsonParser.parseString(invalid) }
-            try { bound.webLogin(); fail("Only explicit authentication may complete the generic login flow") }
+            try { bound.login("webLogin"); fail("Only explicit authentication may complete the generic login flow") }
             catch (error: SourceException) { assertEquals(SourceErrorCode.INVALID_RESPONSE, error.code) }
         }
         source.respond = {

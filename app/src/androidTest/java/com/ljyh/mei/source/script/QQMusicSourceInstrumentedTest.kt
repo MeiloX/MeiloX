@@ -63,7 +63,12 @@ class QQMusicSourceInstrumentedTest {
                 searchTypes = setOf("track"), collectionTypes = emptySet())
             expectRejectedContract { assertSameUpdateContract(legacy, inspected.manifest, reviewed = false) }
             assertSameUpdateContract(legacy, inspected.manifest, reviewed = true)
-            val previousApi2 = inspected.manifest.copy(version = "0.3.0", permissions = inspected.manifest.permissions.copy(network = API2_PREVIOUS_DOMAINS.toList()))
+            val previousApi2 = inspected.manifest.copy(
+                version = "0.3.6",
+                permissions = inspected.manifest.permissions.copy(nativeSdks = emptySet(), effects = setOf("web.auth")),
+                features = inspected.manifest.features + ("login" to (QQ_LOGIN_ACTIONS + "wechatWebLogin")),
+                sessionKeys = setOf("cookie", "manualCookieTag"),
+            )
             expectRejectedContract { assertSameUpdateContract(previousApi2, inspected.manifest, reviewed = false) }
             assertSameUpdateContract(previousApi2, inspected.manifest, reviewed = true)
             expectRejectedContract { assertSameUpdateContract(legacy, inspected.manifest.copy(
@@ -86,7 +91,9 @@ class QQMusicSourceInstrumentedTest {
             // This test covers metadata parsing; artwork has its own permission-enforced transport.
             val parser = ScriptContentParser(PROVIDER_ID, inspected.manifest.apiVersion,
                 PlaylistEditAction.entries.filter { it.operation in inspected.manifest.capabilities }.toSet()) { url ->
-                assertTrue("Captured artwork must use an explicitly reviewed QQ domain", Uri.parse(url).host in inspected.manifest.permissions.network)
+                assertTrue("Captured artwork must use a reviewed QQ domain", ScriptNetworkPolicy.isHostAllowed(
+                    Uri.parse(url).host.orEmpty(), inspected.manifest.permissions.network,
+                ))
                 ""
             }
             suspend fun invoke(operation: String, params: JsonObject = JsonObject()): JsonObject = runtime.invoke(
@@ -300,8 +307,9 @@ class QQMusicSourceInstrumentedTest {
         progress("playback.resolve")
         var resource: AudioResource? = null
         var expectedDurationMs = 0L
+        val quality = arguments.getString("qqMusicQuality") ?: "standard"
         for (track in tracks.take(5)) {
-            try { resource = (provider as PlaybackCapability).resolve(track.ref, "standard"); expectedDurationMs = track.durationMs; break }
+            try { resource = (provider as PlaybackCapability).resolve(track.ref, quality); expectedDurationMs = track.durationMs; break }
             catch (error: SourceException) {
                 if (error.code !in setOf(SourceErrorCode.UNAVAILABLE, SourceErrorCode.NOT_FOUND)) throw error
             }
@@ -310,7 +318,7 @@ class QQMusicSourceInstrumentedTest {
         assertTrue("Script audio must use the permission-enforcing host transport", audio.uri.startsWith("mei-source://"))
         assertTrue(audio.headers.isEmpty())
         assertEquals(CachePolicy.NO_STORE, audio.cachePolicy)
-        assertTrue(audio.quality.isNotBlank())
+        assertEquals(quality, audio.quality)
         assertTrue("Playback candidates must provide their full track duration", expectedDurationMs > 0)
         verifyIndependentPlayback(audio, expectedDurationMs)
     }
@@ -558,10 +566,30 @@ class QQMusicSourceInstrumentedTest {
         if (same) return
         assertTrue("Contract changes require explicit qqMusicReviewedUpdate=true", reviewed)
         if (previous.apiVersion == 2) {
-            assertEquals("Only the reviewed API2 package can add its observed CDN", "0.3.0", previous.version)
             assertEquals("index.js", previous.entry)
-            assertEquals(API2_CAPABILITIES, previous.capabilities)
-            assertEquals(API2_PREVIOUS_DOMAINS, previous.permissions.network.toSet())
+            when (previous.version) {
+                "0.3.0", "0.3.1" -> {
+                    assertEquals(API2_CAPABILITIES, previous.capabilities)
+                    val domains = if (previous.version == "0.3.0") API2_PREVIOUS_DOMAINS
+                        else API2_PREVIOUS_DOMAINS + "sjy6.stream.qqmusic.qq.com"
+                    assertEquals(domains, previous.permissions.network.toSet())
+                }
+                "0.3.2", "0.3.3" -> {
+                    assertEquals(API2_CAPABILITIES + "feature.invoke", previous.capabilities)
+                    assertEquals(API2_DOMAINS, previous.permissions.network.toSet())
+                    assertEquals(mapOf("login" to QQ_LOGIN_ACTIONS), previous.features)
+                }
+                "0.3.4", "0.3.5", "0.3.6" -> {
+                    assertEquals(API2_CAPABILITIES + setOf("playback.qualities", "feature.invoke"), previous.capabilities)
+                    assertEquals(API2_DOMAINS, previous.permissions.network.toSet())
+                    assertEquals(mapOf("login" to (QQ_LOGIN_ACTIONS + "wechatWebLogin"),
+                        "discovery" to setOf("searchSuggestions")), previous.features)
+                    assertTrue(previous.permissions.nativeSdks.isEmpty())
+                    assertEquals(setOf("web.auth"), previous.permissions.effects)
+                    assertEquals(setOf("cookie", "manualCookieTag"), previous.sessionKeys)
+                }
+                else -> fail("Unreviewed QQ API2 version")
+            }
             assertTrue(previous.permissions.storage)
             assertEquals(proposed.searchTypes, previous.searchTypes)
             assertEquals(proposed.collectionTypes, previous.collectionTypes)
@@ -583,18 +611,24 @@ class QQMusicSourceInstrumentedTest {
     private fun assertReviewedApi2Contract(manifest: PluginManifest) {
         assertEquals(PLUGIN_ID, manifest.id)
         assertEquals(PROVIDER_ID, manifest.providerId)
-        assertEquals("0.3.1", manifest.version)
+        assertEquals("0.4.0", manifest.version)
         assertEquals(2, manifest.apiVersion)
         assertEquals("index.js", manifest.entry)
-        assertEquals(API2_CAPABILITIES, manifest.capabilities)
+        assertEquals(API2_CAPABILITIES + setOf("playback.qualities", "feature.invoke"), manifest.capabilities)
         assertEquals(API2_DOMAINS, manifest.permissions.network.toSet())
         assertTrue(manifest.permissions.storage)
-        assertTrue(manifest.permissions.nativeSdks.isEmpty())
-        assertTrue(manifest.features.isEmpty())
-        assertTrue(manifest.featureRoutes.isEmpty())
-        assertTrue(manifest.permissions.effects.isEmpty())
-        assertTrue(manifest.sessionKeys.isEmpty())
-        assertTrue(manifest.sessionCookieNames.isEmpty())
+        assertEquals(setOf("qqmusic.qrLogin"), manifest.permissions.nativeSdks)
+        assertEquals(mapOf("login" to setOf("appQrLogin", "sessionState", "logout"),
+            "discovery" to setOf("searchSuggestions")), manifest.features)
+        assertEquals(mapOf("login" to setOf("sessionState"), "discovery" to setOf("searchSuggestions")),
+            manifest.concurrentReadFeatures)
+        assertEquals(setOf("account/login"), manifest.featureRoutes)
+        assertEquals(setOf("sdk.call"), manifest.permissions.effects)
+        assertEquals(setOf("cookie", "manualCookieTag", "appSession"), manifest.sessionKeys)
+        assertEquals(mapOf("cookie" to setOf(
+            "uin", "p_uin", "wxuin", "wxopenid", "qqmusic_uin", "qqmusic_key", "qm_keyst",
+            "p_skey", "skey", "p_lskey", "lskey", "login_type", "qqmusic_guid",
+        )), manifest.sessionCookieNames)
         assertTrue(manifest.linkHosts.isEmpty())
         assertEquals(setOf("track", "playlist", "album", "artist"), manifest.searchTypes)
         assertEquals(setOf("playlist", "album", "artist"), manifest.collectionTypes)
@@ -743,6 +777,8 @@ class QQMusicSourceInstrumentedTest {
         )
         private val API2_PREVIOUS_DOMAINS = API1_DOMAINS + setOf("c.y.qq.com", "music-file.y.qq.com", "p.qpic.cn",
             "qpic.y.qq.com", "pic6.y.qq.com", "thirdqq.qlogo.cn", "q.qlogo.cn")
-        private val API2_DOMAINS = API2_PREVIOUS_DOMAINS + "sjy6.stream.qqmusic.qq.com"
+        private val API2_DOMAINS = setOf("*.qq.com", "*.gtimg.com", "*.gtimg.cn", "*.cdn-go.cn", "*.qpic.cn",
+            "*.idqqimg.cn", "*.stream.qqmusic.qq.com")
+        private val QQ_LOGIN_ACTIONS = setOf("webLogin", "sessionState", "logout")
     }
 }

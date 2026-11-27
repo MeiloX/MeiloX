@@ -95,6 +95,9 @@ fun SourcePlatformEffectHost(effects: SourcePlatformEffects) {
     pending?.takeIf { it.effect.type == "sms.compose" }?.let { request ->
         key(request) { SourceSmsComposer(request) }
     }
+    pending?.takeIf { it.effect.type == "sdk.call" && it.effect.parameters.get("name")?.asString == "qqmusic.qrLogin" }?.let { request ->
+        key(request) { QQMusicQrLogin(request) }
+    }
     if (page != null) Dialog(
         onDismissRequest = { page?.fail(SourceErrorCode.CANCELLED) },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
