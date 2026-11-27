@@ -888,7 +888,10 @@ fun SourceLibraryScreen(
         filtered.mapNotNull { (it as? SourceItem.TrackItem)?.track }
     }
     val currentFilteredTracks = rememberUpdatedState(filteredTracks)
-    val currentPlayVisible = rememberUpdatedState<((List<Track>, Int, Boolean) -> Unit)>(::playVisible)
+    // Local function references can compare equal even when their captured source queue changes.
+    val currentPlayVisible = rememberUpdatedState<(List<Track>, Int, Boolean) -> Unit> { tracks, index, randomStart ->
+        playVisible(tracks, index, randomStart)
+    }
     val rowPaddingModifier = remember(landscape) { Modifier.padding(horizontal = if (landscape) 0.dp else 4.dp) }
     val lastFilteredRef = filtered.lastOrNull()?.ref
     val combined = ownState.copy(items = displayed, loading = ownState.loading || extra?.loading == true,
@@ -1068,10 +1071,11 @@ fun SourceLibraryScreen(
                                 val detailText = remember(landscape, item.track.durationMs) {
                                     if (landscape) formatDuration(item.track.durationMs) else ""
                                 }
-                                val onTrackClick = remember(item.track) {
+                                val trackRef = item.ref
+                                val onTrackClick = remember(trackRef) {
                                     {
                                         val tracks = currentFilteredTracks.value
-                                        val idx = tracks.indexOf(item.track)
+                                        val idx = tracks.indexOfFirst { it.ref == trackRef }
                                         if (idx >= 0) currentPlayVisible.value(tracks, idx, false)
                                     }
                                 }
