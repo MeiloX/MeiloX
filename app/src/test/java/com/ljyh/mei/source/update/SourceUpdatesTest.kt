@@ -69,6 +69,58 @@ class SourceUpdatesTest {
     }
 
     @Test
+    fun compatibilityListingsPinBytesAndKeepIdentityOnlyWithinTheSameScriptOrigin() {
+        val listing = CompatibilityMarketEntry(
+            "musicfree.fixture", "Fixture", "1.2.3", "musicfree", "https://github.com/Owner/Fixture",
+            "a".repeat(40), "dist/fixture.js", "b".repeat(64),
+        )
+        fun index(vararg items: CompatibilityMarketEntry): String = """{"schemaVersion":1,"scripts":${
+            com.google.gson.Gson().toJson(items)
+        }}"""
+
+        assertEquals(listOf(listing), CompatibilityMarketIndex.parse(index(listing)))
+        assertEquals("https://raw.githubusercontent.com/Owner/Fixture/${listing.revision}/dist/fixture.js", listing.url)
+        assertTrue(listing.packageId.matches(Regex("compat\\.musicfree\\.[a-f0-9]{40}")))
+        val updated = listing.copy(version = "2.0.0", revision = "c".repeat(40), sha256 = "d".repeat(64))
+        assertEquals(listing.packageId, updated.packageId)
+        assertEquals(listing.packageId, listing.copy(repository = "https://github.com/owner/fixture").packageId)
+        assertNotEquals(listing.packageId, listing.copy(repository = "https://github.com/Other/Fixture").packageId)
+        assertNotEquals(listing.packageId, listing.copy(path = "dist/other.js").packageId)
+
+        val invalid = listOf(
+            index(listing.copy(revision = "main")),
+            index(listing.copy(sha256 = "0".repeat(64))),
+            index(listing.copy(repository = "https://github.com.evil.test/Owner/Fixture")),
+            index(listing.copy(path = "dist/../fixture.js")),
+            index(listing.copy(path = "dist/fixture.js?trusted=true")),
+            index(listing.copy(format = "lx")),
+            index(listing, updated),
+            index(listing, updated.copy(id = "musicfree.other", repository = "https://github.com/owner/fixture")),
+            index(listing).replace("\"id\":", "\"id\":\"musicfree.extra\",\"id\":"),
+        )
+        invalid.forEach { json ->
+            val failure = runCatching { CompatibilityMarketIndex.parse(json) }.exceptionOrNull()
+            assertEquals(SourceErrorCode.INVALID_RESPONSE, (failure as? SourceException)?.code)
+        }
+    }
+
+    @Test
+    fun onlyTheCanonicalPublisherAndPackagePathCanBeOfficial() {
+        val qq = SourceMarketEntry(
+            "org.meilox.qqmusic", "qqmusic", "QQ Music", "0.4.0",
+            "https://github.com/NEORUAA/MeiloX-QQMusic-Source",
+            "https://raw.githubusercontent.com/NEORUAA/MeiloX-QQMusic-Source/${"a".repeat(40)}/qq-music.meisource",
+            "b".repeat(64), 2,
+        )
+        SourceMarketIndex.validate(qq)
+        assertTrue(qq.isOfficial)
+        assertFalse(qq.copy(repository = "https://github.com/Another/MeiloX-QQMusic-Source").isOfficial)
+        assertFalse(qq.copy(providerId = "qqmusic.other").isOfficial)
+        assertFalse(qq.copy(packagePath = "dist/qq-music.meisource").isOfficial)
+        assertFalse(qq.copy(packageId = "org.meilox.qqmusic.fork").isOfficial)
+    }
+
+    @Test
     fun semanticVersionsNeverDowngradeAndOrderPrereleaseWithoutNumericOverflow() {
         val versions = listOf("1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0", "1.0.1", "1.10.0", "2.0.0")
         versions.zipWithNext().forEach { (old, next) -> assertTrue("$next after $old", isNewer(next, old)); assertFalse(isNewer(old, next)) }

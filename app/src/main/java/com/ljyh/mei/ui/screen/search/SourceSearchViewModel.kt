@@ -21,6 +21,7 @@ import com.ljyh.mei.source.core.ProviderRegistry
 import com.ljyh.mei.source.core.SourcePreferences
 import com.ljyh.mei.source.core.SourceRouter
 import com.ljyh.mei.source.core.SourceSettings
+import com.ljyh.mei.source.script.ScriptMusicProvider
 import com.ljyh.mei.ui.screen.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -63,7 +64,7 @@ internal fun browsableProviders(providers: List<MusicProvider>): List<MusicProvi
     it.status == SourceStatus.READY && (
         SourceCapability.FEED in it.capabilities && it is FeedCapability && it.feedKinds.isNotEmpty() ||
         SourceCapability.LIBRARY in it.capabilities && it is LibraryCapability && it.collections.isNotEmpty() ||
-        it in searchableProviders(listOf(it)))
+        (it as? ScriptMusicProvider)?.manifest?.compatibility != "musicfree" && it in searchableProviders(listOf(it)))
 }
 
 internal fun libraryProviders(providers: List<MusicProvider>): List<MusicProvider> = providers.filter {

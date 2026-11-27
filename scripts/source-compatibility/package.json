@@ -1,0 +1,19 @@
+{
+  "name": "meilox-source-compatibility",
+  "private": true,
+  "scripts": {
+    "build": "node build.cjs"
+  },
+  "dependencies": {
+    "big-integer": "1.6.52",
+    "cheerio": "1.2.0",
+    "crypto-js": "4.2.0",
+    "dayjs": "1.11.23",
+    "he": "1.2.0",
+    "qs": "6.17.1",
+    "whatwg-url": "17.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

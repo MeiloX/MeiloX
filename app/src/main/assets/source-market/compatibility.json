@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "scripts": [
+    {
+      "id": "musicfree.navidrome",
+      "name": "Navidrome",
+      "version": "0.0.0",
+      "format": "musicfree",
+      "repository": "https://github.com/maotoumao/MusicFreePlugins",
+      "revision": "3fa57cf37c100f32ca96e9199c6b008e79db28c1",
+      "path": "dist/navidrome/index.js",
+      "sha256": "2f1e930e417a72e2a0c870bde45359c442ad139bcf37bfe444df5141fd0cdeb3"
+    },
+    {
+      "id": "musicfree.audiomack",
+      "name": "Audiomack",
+      "version": "0.0.2",
+      "format": "musicfree",
+      "repository": "https://github.com/maotoumao/MusicFreePlugins",
+      "revision": "3fa57cf37c100f32ca96e9199c6b008e79db28c1",
+      "path": "dist/audiomack/index.js",
+      "sha256": "1b1f49fc1e0aa5933c3b45ce999d975e4f7fc5f69df2a487dd87830555cf01d5"
+    }
+  ]
+}

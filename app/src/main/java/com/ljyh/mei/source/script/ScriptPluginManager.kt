@@ -4,13 +4,19 @@ import android.content.Context
 import android.net.Uri
 import androidx.annotation.Keep
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.ljyh.mei.source.api.ProviderInstanceId
 import com.ljyh.mei.source.api.SourceErrorCode
 import com.ljyh.mei.source.api.SourceException
 import com.ljyh.mei.source.api.SourceStatus
 import com.ljyh.mei.source.core.ProviderRegistry
+import com.ljyh.mei.source.update.CompatibilityMarketEntry
+import com.ljyh.mei.source.update.isNewer
+import com.ljyh.mei.source.update.manualPackageId
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.io.BufferedInputStream
+import java.io.InputStream
 import java.security.MessageDigest
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
@@ -19,16 +25,32 @@ import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Request
+import okio.buffer
+import okio.source
 
 data class InstalledPlugin(val manifest: PluginManifest, val enabled: Boolean, val status: SourceStatus, val diagnostic: String? = null)
-class PreparedPlugin internal constructor(val manifest: PluginManifest, internal val directory: File, internal val fingerprint: String)
+class PreparedPlugin internal constructor(
+    val manifest: PluginManifest,
+    internal val directory: File,
+    internal val fingerprint: String,
+    internal val compatibilityReview: CompatibilityInstallReview? = null,
+) {
+    val marketRepository: String? get() = compatibilityReview?.repository
+}
 
 internal data class PluginUpdateSnapshot(val manifest: PluginManifest, val fingerprint: String, val repository: String?, val enabled: Boolean)
+internal data class CompatibilityInstallReview(val expected: PluginUpdateSnapshot?, val repository: String?)
 @Keep
 private data class PluginMarketOrigin(val repository: String, val fingerprint: String)
 
@@ -101,20 +123,70 @@ class ScriptPluginManager @Inject constructor(
     } }
 
     suspend fun inspect(uri: Uri): PreparedPlugin {
+        return prepareImport {
+            val input = context.contentResolver.openInputStream(uri) ?: invalid("Unable to open source package")
+            input.use(::inspectPackage)
+        }
+    }
+
+    suspend fun inspectFile(uri: Uri, replacingId: String? = null): PreparedPlugin = prepareImport {
+        val input = context.contentResolver.openInputStream(uri)
+            ?: invalid("Unable to open source script")
+        BufferedInputStream(input).use { inspectSourceInput(it, replacingId) }
+    }
+
+    suspend fun inspectLink(
+        url: String,
+        replacingId: String? = null,
+    ): PreparedPlugin = prepareImport {
+        val file = File.createTempFile("source-link-", ".download", context.cacheDir)
+        try {
+            try { withTimeout(20_000) { downloadSourceLink(url.trim(), file) } }
+            catch (_: TimeoutCancellationException) {
+                currentCoroutineContext().ensureActive()
+                throw SourceException(SourceErrorCode.TIMEOUT)
+            }
+            BufferedInputStream(file.inputStream()).use { inspectSourceInput(it, replacingId) }
+        } finally { file.delete() }
+    }
+
+    private suspend fun inspectSourceInput(input: BufferedInputStream, replacingId: String?): PreparedPlugin {
+        input.mark(4)
+        val archive = hasZipHeader(input)
+        input.reset()
+        if (!archive) return inspectCompatibilityScript(readCompatibilityScript(input), replacingId)
+        val prepared = inspectPackage(input)
+        if (replacingId != null && prepared.manifest.id != replacingId) {
+            prepared.directory.deleteRecursively()
+            invalid("The source package belongs to a different installation")
+        }
+        return prepared
+    }
+
+    suspend fun withCompatibilityDomains(prepared: PreparedPlugin, domains: List<String>): PreparedPlugin = prepareImport {
+        val manifest = prepared.manifest
+        if (manifest.compatibility == null || prepared.fingerprint != fingerprint(prepared.directory)) {
+            invalid("Source package changed after review")
+        }
+        val grants = approvedCompatibilityDomains(domains)
+        if (grants == manifest.permissions.network) return@prepareImport prepared
+        val updated = manifest.copy(permissions = manifest.permissions.copy(network = grants))
+        writeCompatibilityImport(updated, File(prepared.directory, "index.js").readText(), prepared.compatibilityReview)
+    }
+
+    private suspend fun prepareImport(prepare: suspend () -> PreparedPlugin): PreparedPlugin {
         var completed: PreparedPlugin? = null
         try {
-            return withContext(Dispatchers.IO) { inspectPackage(uri).also { completed = it } }
+            return withContext(Dispatchers.IO) { prepare().also { completed = it } }
         } catch (error: Exception) {
-            // A cancelled return dispatcher can discard an already prepared result.
             completed?.directory?.deleteRecursively()
             throw error
         }
     }
 
-    private fun inspectPackage(uri: Uri): PreparedPlugin {
+    private fun inspectPackage(input: InputStream): PreparedPlugin {
         val directory = File(context.cacheDir, "source-import/${UUID.randomUUID()}").apply { mkdirs() }
         try {
-            val input = context.contentResolver.openInputStream(uri) ?: invalid("Unable to open source package")
             input.use { raw ->
                 ZipInputStream(raw).use { zip ->
                     var total = 0L
@@ -148,6 +220,7 @@ class ScriptPluginManager @Inject constructor(
             val manifestFile = File(directory, "manifest.json")
             if (!manifestFile.isFile || !File(directory, "index.js").isFile) invalid("Source package needs manifest.json and index.js")
             val manifest = PluginManifest.parse(manifestFile.readText())
+            if (manifest.compatibility != null) invalid("Import the original compatibility script")
             return PreparedPlugin(manifest, directory, fingerprint(directory))
         } catch (error: Exception) {
             directory.deleteRecursively()
@@ -156,8 +229,163 @@ class ScriptPluginManager @Inject constructor(
         }
     }
 
+    internal suspend fun inspectMarketScript(
+        entry: CompatibilityMarketEntry,
+        download: suspend (File) -> Unit,
+    ): PreparedPlugin = prepareImport {
+        val file = File.createTempFile("source-market-", ".js", context.cacheDir)
+        try {
+            download(file)
+            val source = file.inputStream().use(::readCompatibilityScriptBytes)
+            if (MessageDigest.getInstance("SHA-256").digest(source).joinToString("") { "%02x".format(it) } != entry.sha256) {
+                throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Source script checksum did not match")
+            }
+            inspectCompatibilityScript(decodeCompatibilityScript(source), replacingId = null, market = entry)
+        } finally { file.delete() }
+    }
+
+    private suspend fun inspectCompatibilityScript(
+        script: String, replacingId: String?, market: CompatibilityMarketEntry? = null,
+    ): PreparedPlugin {
+        val review = mutex.withLock {
+            val selected = when {
+                replacingId != null -> providers[replacingId]?.manifest?.takeIf { it.compatibility != null }
+                    ?: invalid("Select an installed compatibility source")
+                market != null -> (providers[market.packageId] ?: providers[market.manualPackageId])?.manifest
+                    ?: matchingCompatibilityScriptLocked(script, market.format)
+                else -> matchingCompatibilityScriptLocked(script)
+            }
+            CompatibilityInstallReview(selected?.let { snapshotLocked(it.id) }, market?.repository)
+        }
+        val previous = review.expected?.manifest
+        if (market != null && previous != null && !isNewer(market.version, previous.version)) {
+            throw SourceException(SourceErrorCode.INVALID_RESPONSE, "The source is already up to date")
+        }
+        val format = market?.format ?: previous?.compatibility ?: if (LX_MARKERS.containsMatchIn(script)) "lx" else "musicfree"
+        val info = runtime.invokeCompatibility(script, format, "inspect", JsonObject(), emptyMap())
+            .takeIf { it.isJsonObject }?.asJsonObject ?: invalid("Invalid compatibility script")
+        val lx = format == "lx"
+        val platforms = if (lx) {
+            val known = info.get("platforms")?.takeIf { it.isJsonArray }?.asJsonArray
+            if (known?.any { it.isJsonPrimitive && it.asString == "wy" } != true) {
+                throw SourceException(SourceErrorCode.UNSUPPORTED, "The script must support the LX wy platform")
+            }
+            setOf("wy")
+        } else {
+            if (info.get("search")?.asBoolean != true || info.get("playback")?.asBoolean != true) {
+                throw SourceException(SourceErrorCode.UNSUPPORTED, "The MusicFree plugin must support song search and playback")
+            }
+            null
+        }
+        val key = previous?.id ?: market?.packageId ?: "compat.$format.${scriptDigest(script)}"
+        val config = info.get("config")?.takeIf { it.isJsonArray }?.asJsonArray?.map { field ->
+            Gson().fromJson(field, PluginConfigField::class.java)
+        }.orEmpty()
+        val grants = if (previous != null && market == null && replacingId == null) previous.permissions.network
+            else (previous?.permissions?.network.orEmpty() + inferredCompatibilityDomains(script)).distinct().take(32)
+        val manifest = PluginManifest(
+            id = key,
+            name = info.get("name")?.asString?.trim()?.takeIf(String::isNotBlank)?.take(100)
+                ?: if (lx) "LX Music" else "MusicFree",
+            author = info.get("author")?.asString?.trim()?.takeIf(String::isNotBlank)?.take(100) ?: "—",
+            version = info.get("version")?.asString?.trim()?.takeIf(String::isNotBlank)?.take(50) ?: "1.0.0",
+            apiVersion = 2,
+            capabilities = if (lx) setOf("playback.resolve") else setOf("catalog.search", "catalog.track", "playback.resolve"),
+            permissions = PluginPermissions(network = grants),
+            config = config,
+            compatibility = format,
+            compatibilityPlatforms = platforms,
+        )
+        if (previous != null && (previous.name != manifest.name || previous.author != manifest.author)) {
+            throw SourceException(SourceErrorCode.INVALID_RESPONSE, "The script belongs to a different source")
+        }
+        if (market != null && (market.name != manifest.name || market.version != manifest.version)) {
+            throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Source script metadata did not match its market entry")
+        }
+        return writeCompatibilityImport(manifest, script, review)
+    }
+
+    private fun matchingCompatibilityScriptLocked(script: String, format: String? = null): PluginManifest? {
+        val length = script.toByteArray(Charsets.UTF_8).size.toLong()
+        return providers.values.asSequence().map { it.manifest }.filter {
+            it.compatibility != null && (format == null || it.compatibility == format)
+        }.firstOrNull { manifest ->
+            val installed = File(root, "${manifest.id}/${manifest.entry}")
+            installed.length() == length && runCatching { installed.inputStream().use(::readCompatibilityScript) == script }.getOrDefault(false)
+        }
+    }
+
+    private fun writeCompatibilityImport(
+        manifest: PluginManifest, script: String, review: CompatibilityInstallReview? = null,
+    ): PreparedPlugin {
+        val json = Gson().toJson(manifest)
+        PluginManifest.parse(json)
+        val directory = File(context.cacheDir, "source-import/${UUID.randomUUID()}").apply { mkdirs() }
+        try {
+            File(directory, "manifest.json").writeText(json)
+            File(directory, "index.js").writeText(script)
+            return PreparedPlugin(manifest, directory, fingerprint(directory), review)
+        } catch (error: Exception) {
+            directory.deleteRecursively()
+            throw error
+        }
+    }
+
+    private suspend fun downloadSourceLink(value: String, file: File) {
+        var url = value.toHttpUrlOrNull()?.takeIf { value.length <= 8192 && it.isHttps }
+            ?: throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Use an HTTPS source link")
+        repeat(5) { index ->
+            val policy = ScriptNetworkPolicy(listOf(url.host))
+            policy.validateUrl(url.toString())
+            val client = policy.client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+            val next = policy.exchange(client.newCall(Request.Builder().url(url).build()), {}) { response, guard ->
+                if (response.isRedirect) {
+                    if (index == 4) throw SourceException(SourceErrorCode.NETWORK)
+                    return@exchange response.header("Location")?.let(url::resolve)?.takeIf { it.isHttps }
+                        ?: throw SourceException(SourceErrorCode.NETWORK)
+                }
+                if (!response.isSuccessful) throw SourceException(SourceErrorCode.NETWORK)
+                val body = response.body
+                val limit = 8 * 1024 * 1024
+                if (body.contentLength() > limit) invalid("Source download exceeds size limit")
+                body.byteStream().use { input ->
+                    file.outputStream().use { output ->
+                        val buffer = ByteArray(8192)
+                        var total = 0
+                        while (true) {
+                            guard()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            if (total > limit) invalid("Source download exceeds size limit")
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+                null
+            }
+            if (next == null) return
+            url = next
+        }
+    }
+
     suspend fun install(prepared: PreparedPlugin, approved: Boolean): InstalledPlugin = withContext(Dispatchers.IO) { mutex.withLock {
         if (!approved) invalid("Source permissions were not approved")
+        prepared.compatibilityReview?.let { review ->
+            val manifest = prepared.manifest
+            val current = snapshotLocked(manifest.id)
+            val expected = review.expected
+            if (current == null && expected != null || current != null && expected == null ||
+                current != null && expected != null && !samePayload(current, expected)) {
+                invalid("Source changed after review")
+            }
+            if (current == null) {
+                val script = File(prepared.directory, manifest.entry).inputStream().use(::readCompatibilityScript)
+                if (matchingCompatibilityScriptLocked(script, manifest.compatibility) != null) {
+                    invalid("The script was installed while preparing its review")
+                }
+            }
+        }
         installLocked(prepared, repository = null)
     } }
 
@@ -229,7 +457,8 @@ class ScriptPluginManager @Inject constructor(
         val destination = File(root, manifest.id)
         val previous = providers[manifest.id]
         if (previous != null && previous.id != manifest.providerId) invalid("Updates cannot change provider identity")
-        val previousState = if (destination.exists()) readState(destination) else PluginInstallState()
+        val previousState = if (destination.exists()) readState(destination) else
+            PluginInstallState(enabled = manifest.compatibility != "lx")
         val hadDestination = destination.exists()
         val backup = File(root, ".${manifest.id}-${UUID.randomUUID()}")
         val stage = File(root, ".source-stage-${manifest.id}-${UUID.randomUUID()}")
@@ -306,6 +535,9 @@ class ScriptPluginManager @Inject constructor(
                 secrets.write(id, "storage", emptyMap())
                 stores[id] = emptyMap()
                 secrets.write(id, "config", values)
+                if (previous.manifest.compatibility == "musicfree" && values != configurations[id].orEmpty()) {
+                    compatibilityTrackDirectory(id).deleteRecursively()
+                }
                 configurations[id] = values.toMap()
                 writeState(directory, state)
                 register(previous.manifest, directory, state, gate, revision)
@@ -317,6 +549,20 @@ class ScriptPluginManager @Inject constructor(
             } finally { publish() }
         }
     } }
+
+    suspend fun configureCompatibilityDomains(id: String, domains: List<String>): InstalledPlugin = withContext(Dispatchers.IO) {
+        val grants = approvedCompatibilityDomains(domains)
+        mutex.withLock {
+            val current = providers[id]?.manifest?.takeIf { it.compatibility != null }
+                ?: invalid("Select an installed compatibility source")
+            if (grants == current.permissions.network) return@withLock installed.value.first { it.manifest.id == id }
+            val updated = current.copy(permissions = current.permissions.copy(network = grants))
+            val source = File(root, "$id/${current.entry}").inputStream().use(::readCompatibilityScript)
+            val prepared = writeCompatibilityImport(updated, source)
+            try { installLocked(prepared, repository = null) }
+            finally { prepared.directory.deleteRecursively() }
+        }
+    }
 
     fun configuration(id: String): Map<String, String> = configurations[id].orEmpty().toMap()
 
@@ -335,6 +581,7 @@ class ScriptPluginManager @Inject constructor(
                 stores.remove(id)
                 diagnostics.remove(id)
                 secrets.delete(id)
+                if (provider.manifest.compatibility == "musicfree") compatibilityTrackDirectory(id).deleteRecursively()
                 // Room, playlists, cached audio and downloaded files are intentionally independent.
             } finally { publish() }
         }
@@ -367,10 +614,17 @@ class ScriptPluginManager @Inject constructor(
             coreExecutor = featureExecutor,
             coreHandler = platformEffects,
             artworkStore = artworkStore,
+            compatibilityTracks = if (manifest.compatibility == "musicfree") {
+                val configuration = configurations[manifest.id].orEmpty().toSortedMap()
+                CompatibilityTrackStore(File(compatibilityTrackDirectory(manifest.id), scriptDigest(Gson().toJson(configuration))))
+            } else null,
+            commitCompatibilityTracks = { action -> gate.read(revision, action) },
         )
         providers[manifest.id] = provider
         registry.register(provider)
     }
+
+    private fun compatibilityTrackDirectory(id: String) = File(context.noBackupFilesDir, "source-compatibility-tracks/$id")
 
     private fun <T> changeSource(id: String, action: (PluginRevisionGate, PluginRevisionGate.Revision) -> T): T {
         val gate = revisions.getOrPut(id) { PluginRevisionGate() }
@@ -412,6 +666,50 @@ class ScriptPluginManager @Inject constructor(
 
     companion object {
         private val installationMutex = Mutex()
+        private val LX_MARKERS = Regex("""\b(?:globalThis|window)\s*\.\s*lx\b|\blx\s*\.\s*(?:on|send|EVENT_NAMES)\b""")
+        private val HTTPS_LITERAL = Regex("""(?i)https://([a-z0-9][a-z0-9.-]{2,252})(?=[:/\s`"'?&#]|$)""")
+        private const val MAX_COMPATIBILITY_BYTES = 1024 * 1024
+
+        internal fun inferredCompatibilityDomains(script: String): List<String> = HTTPS_LITERAL.findAll(script)
+            .map { it.groupValues[1].lowercase(java.util.Locale.ROOT) }.distinct()
+            .filter { runCatching { ScriptNetworkPolicy.validateDomain(it) }.isSuccess }.take(32).toList()
+
+        private fun compatibilityDomains(domains: List<String>): List<String> =
+            domains.map { it.trim().lowercase(java.util.Locale.ROOT) }.filter(String::isNotBlank).distinct().also { grants ->
+                if (grants.size > 32) throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Too many source domains")
+                grants.forEach(ScriptNetworkPolicy::validateDomain)
+            }
+
+        private fun approvedCompatibilityDomains(domains: List<String>): List<String> =
+            try { compatibilityDomains(domains) }
+            catch (_: SourceException) { throw SourceException(SourceErrorCode.PERMISSION_DENIED) }
+
+        private fun readCompatibilityScript(input: InputStream): String =
+            decodeCompatibilityScript(readCompatibilityScriptBytes(input))
+
+        private fun readCompatibilityScriptBytes(input: InputStream): ByteArray {
+            val bytes = input.source().buffer().use {
+                if (it.request(MAX_COMPATIBILITY_BYTES + 1L)) throw SourceException(SourceErrorCode.INVALID_RESPONSE)
+                it.readByteArray()
+            }
+            if (bytes.isEmpty()) throw SourceException(SourceErrorCode.INVALID_RESPONSE)
+            return bytes
+        }
+
+        private fun decodeCompatibilityScript(bytes: ByteArray): String {
+            return try {
+                Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString().removePrefix("\uFEFF")
+            } catch (_: java.nio.charset.CharacterCodingException) {
+                throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Source script must use UTF-8")
+            }
+        }
+
+        private fun hasZipHeader(input: InputStream): Boolean =
+            input.read() == 'P'.code && input.read() == 'K'.code && input.read() == 3 && input.read() == 4
+
+        private fun scriptDigest(script: String): String = MessageDigest.getInstance("SHA-256")
+            .digest(script.toByteArray(Charsets.UTF_8)).take(20).joinToString("") { "%02x".format(it) }
         internal fun packageFileLimit(name: String): Int = when {
             name in setOf("manifest.json", "LICENSE", "NOTICE") -> 64 * 1024
             name == "index.js" -> 256 * 1024

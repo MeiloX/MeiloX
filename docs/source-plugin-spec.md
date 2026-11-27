@@ -57,6 +57,8 @@ Changing an exact network grant to a wildcard still requires permission review. 
 
 Updates preserve private configuration and enabled state. Removed sources are not reinstalled. Download, digest, index or update failures retain the installed version and do not fail the source's other operations. A directory-replacement journal recovers an interrupted installation. Automatic replacement defers while the source owns the current paused/playing track or queue restoration; it does not interrupt already opened audio.
 
+The market also reads an independent `compatibility.json` with `schemaVersion: 1` and a `scripts` array. Each record specifies `id`, `name`, `version`, `format` (`musicfree` or `lx`), `repository`, a full Git commit `revision`, a repository-relative JavaScript `path`, and `sha256`. See the [bundled entries](../app/src/main/assets/source-market/compatibility.json) for the record shape. The host verifies the bytes before isolated inspection and requires review for installation and updates. The logical entry, dialect, repository and path identify an installation across reviewed revisions. All compatible scripts appear in the third-party section.
+
 ## Core content
 
 | Operations | Result |

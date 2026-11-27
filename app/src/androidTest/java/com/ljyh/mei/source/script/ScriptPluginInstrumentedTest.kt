@@ -11,6 +11,7 @@ import com.ljyh.mei.source.api.*
 import com.ljyh.mei.source.core.PlaybackResolver
 import com.ljyh.mei.source.core.ProviderRegistry
 import com.ljyh.mei.source.core.SourceSettings
+import com.ljyh.mei.source.update.CompatibilityMarketEntry
 import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -42,6 +43,230 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class ScriptPluginInstrumentedTest {
+    @Test
+    fun lxCompatibilityBridgesPromisesTimersAndHttpWithoutNativeBindings() = runBlocking {
+        val runtime = ScriptRuntime(InstrumentationRegistry.getInstrumentation().targetContext)
+        val fixture = """
+            /**
+             * @name LX fixture
+             * @author MeiloX
+             * @version 1.2.3
+             */
+            lx.on(lx.EVENT_NAMES.request, ({source, action, info}) => new Promise((resolve, reject) => {
+                if (source !== 'wy' || action !== 'musicUrl' || info.type !== '320k' || info.musicInfo.id !== '007') {
+                    reject(new Error('Invalid music identity'));
+                    return;
+                }
+                if (!Object.hasOwn(info.musicInfo, '__proto__') || info.musicInfo.inherited) {
+                    reject(new Error('Host input was interpreted as an object literal'));
+                    return;
+                }
+                if (lx.utils.crypto.md5('abc') !== '900150983cd24fb0d6963f7d28e17f72') {
+                    reject(new Error('Invalid digest'));
+                    return;
+                }
+                const discarded = setTimeout(() => reject(new Error('Cancelled timer fired')), 0);
+                clearTimeout(discarded);
+                setTimeout(() => lx.request('https://api.example.com/song', {method: 'POST', form: {id: info.musicInfo.id}},
+                    (error, response, body) => error ? reject(error) : resolve(response.statusCode === 200 ? body.url : null)), 2);
+            }));
+            lx.send(lx.EVENT_NAMES.inited, {sources: {wy: {actions: ['musicUrl'], qualitys: ['128k','320k']}}});
+        """.trimIndent()
+        val inspected = runtime.invokeCompatibility(fixture, "lx", "inspect", JsonObject(), emptyMap()).asJsonObject
+        assertEquals("LX fixture", inspected.get("name").asString)
+        assertEquals("wy", inspected.getAsJsonArray("platforms").single().asString)
+        assertEquals(listOf("128k", "320k"), inspected.getAsJsonObject("qualities").getAsJsonArray("wy").map { it.asString })
+
+        val params = JsonObject().apply {
+            addProperty("platform", "wy")
+            add("qualities", com.google.gson.JsonArray().apply { add("flac"); add("320k"); add("128k") })
+            add("musicInfo", JsonObject().apply {
+                addProperty("id", "007")
+                add("__proto__", JsonObject().apply { addProperty("inherited", true) })
+            })
+        }
+        val resolved = runtime.invokeCompatibility(fixture, "lx", "playback.resolve", params, emptyMap(), request = { frame ->
+            assertEquals("https://api.example.com/song", frame.get("url").asString)
+            assertEquals("POST", frame.get("method").asString)
+            assertEquals("id=007", frame.get("body").asString)
+            JsonObject().apply {
+                addProperty("status", 200)
+                add("headers", JsonObject().apply { addProperty("content-type", "application/json") })
+                addProperty("body", """{"url":"https://audio.example.com/song.mp3"}""")
+            }
+        }).asJsonObject
+        assertEquals("https://audio.example.com/song.mp3", resolved.get("uri").asString)
+        assertEquals("320k", resolved.get("requestedQuality").asString)
+    }
+
+    @Test
+    fun compatibilityInspectionDiscardsNetworkAndPlaybackDiscardsNativeRequestFields() = runBlocking {
+        val runtime = ScriptRuntime(InstrumentationRegistry.getInstrumentation().targetContext)
+        val fixture = """
+            const lxHost = globalThis.__meiloxCompat;
+            lx.on(lx.EVENT_NAMES.request, () => lxHost.request({url: 'https://api.example.com/song',
+                sdk: 'netease.ursCaptcha', sdkConfig: {key: 'value'}}).promise.then(response => response.body));
+            lxHost.request({url: 'https://api.example.com/inspect'}).promise.catch(() => null);
+            lx.send(lx.EVENT_NAMES.inited, {sources: {wy: {actions: ['musicUrl'], qualitys: ['128k']}}});
+        """.trimIndent()
+        val inspected = runtime.invokeCompatibility(fixture, "lx", "inspect", JsonObject(), emptyMap(), request = {
+            error("Inspection must never start an HTTP request")
+        }).asJsonObject
+        assertTrue(inspected.has("platforms"))
+
+        val params = JsonObject().apply { addProperty("platform", "wy"); addProperty("quality", "128k") }
+        val resolved = runtime.invokeCompatibility(fixture, "lx", "playback.resolve", params, emptyMap(), request = { frame ->
+            assertEquals(setOf("url"), frame.keySet())
+            JsonObject().apply { addProperty("body", "https://audio.example.com/song.mp3") }
+        }).asJsonObject
+        assertEquals("https://audio.example.com/song.mp3", resolved.get("uri").asString)
+        assertEquals("128k", resolved.get("requestedQuality").asString)
+    }
+
+    @Test
+    fun musicFreeImportRestoresOriginalSearchInputsAndKeepsIdentityWhenUpdated() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val registry = ProviderRegistry(emptyList())
+        val manager = ScriptPluginManager(context, registry, ScriptRuntime(context))
+        val file = File.createTempFile("musicfree-fixture-", ".js", context.cacheDir)
+        val script = """
+            module.exports = {
+                platform: 'Compatibility fixture', author: 'MeiloX',
+                version: 'VERSION',
+                supportedSearchType: ['music'],
+                async search(query, page, type) {
+                    return {isEnd: true, data: [
+                        {id: '001/曲', title: query, artist: 'Fixture', duration: 98, key: 'required'},
+                        {id: '002', title: 'Second track', artist: 'Fixture'}
+                    ]};
+                },
+                async getMediaSource(track, quality) {
+                    return track.key === 'required' && quality === 'standard' ? {url: 'https://audio.example.com/song.mp3',
+                        headers: {'X-Fixture': encodeURIComponent(track.id)}} : null;
+                }
+            };
+        """.trimIndent()
+        var installedId: String? = null
+        try {
+            file.writeText(script.replace("VERSION", "1.0.0"))
+            val staged = manager.inspectFile(Uri.fromFile(file))
+            assertEquals("musicfree", staged.manifest.compatibility)
+            assertEquals(listOf("audio.example.com"), staged.manifest.permissions.network)
+            val installed = manager.install(staged, approved = true)
+            installedId = installed.manifest.id
+            val provider = registry.provider(installed.manifest.providerId) as ScriptMusicProvider
+            val page = provider.search("Fixture track", PageRequest(limit = 1))
+            assertEquals("Fixture track", page.items.single().title)
+            assertEquals(98_000L, page.items.single().durationMs)
+            assertEquals("002", provider.search("Fixture track", PageRequest(limit = 1, cursor = page.nextCursor))
+                .items.single().ref.trackId)
+            val ref = page.items.single().ref
+
+            file.writeText(script.replace("VERSION", "1.0.1"))
+            val updated = manager.inspectFile(Uri.fromFile(file), installedId)
+            assertEquals(installedId, updated.manifest.id)
+            manager.install(updated, approved = true)
+            val reopenedRegistry = ProviderRegistry(emptyList())
+            ScriptPluginManager(context, reopenedRegistry, ScriptRuntime(context)).loadInstalled()
+            val reopened = reopenedRegistry.provider(ref.providerId) as ScriptMusicProvider
+            assertEquals("Fixture track", reopened.getTrack(ref)?.title)
+            val first = reopened.resolve(ref, "standard")
+            val second = reopened.resolve(ref, "standard")
+            assertNotEquals(first.uri, second.uri)
+            assertNotNull(first.contentId)
+            assertEquals(first.contentId, second.contentId)
+            val resource = ScriptAudioResources.entry(first.uri).resource
+            assertEquals("https://audio.example.com/song.mp3", resource.uri)
+            assertEquals("001%2F%E6%9B%B2", resource.headers["X-Fixture"])
+        } finally {
+            installedId?.let { manager.uninstall(it) }
+            file.delete()
+        }
+    }
+
+    @Test
+    fun marketScriptReviewPinsBytesAndPermissionEditsKeepConfiguration() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val registry = ProviderRegistry(emptyList())
+        val manager = ScriptPluginManager(context, registry, ScriptRuntime(context))
+        val script = """
+            const defaultEndpoint = 'https://suggested.example.com/api';
+            module.exports = {
+                platform: 'Market fixture', author: 'MeiloX', version: '1.0.0',
+                userVariables: [{key: 'token', name: 'Token', required: true}],
+                async search() { return {isEnd: true, data: [{id: 'one', title: env.getUserVariables().token}]}; }
+            };
+        """.trimIndent().toByteArray()
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(script).joinToString("") { "%02x".format(it) }
+        val entry = CompatibilityMarketEntry("musicfree.market-fixture", "Market fixture", "1.0.0", "musicfree",
+            "https://github.com/meilox/fixture", "1".repeat(40), "dist/index.js", digest)
+        val imports = mutableListOf<PreparedPlugin>()
+        val manualScript = File.createTempFile("musicfree-market-fixture-", ".js", context.cacheDir)
+        try {
+            try {
+                manager.inspectMarketScript(entry) { it.writeText("unaudited bytes") }
+                fail("Market import must verify the captured script")
+            } catch (error: SourceException) {
+                assertEquals(SourceErrorCode.INVALID_RESPONSE, error.code)
+            }
+
+            val staged = manager.inspectMarketScript(entry) { it.writeBytes(script) }.also { imports += it }
+            val lateInstall = manager.inspectMarketScript(entry) { it.writeBytes(script) }.also { imports += it }
+            val installed = manager.install(staged, approved = true)
+            assertEquals(entry.packageId, installed.manifest.id)
+            assertEquals(SourceStatus.NEEDS_CONFIGURATION, installed.status)
+            try {
+                manager.install(lateInstall, approved = true)
+                fail("A review for an absent installation must not overwrite an existing source")
+            } catch (error: SourceException) {
+                assertEquals(SourceErrorCode.PLUGIN, error.code)
+            }
+            manager.configure(entry.packageId, mapOf("token" to "Configured title"))
+            val configured = manager.configureCompatibilityDomains(entry.packageId, listOf("audio.example.com"))
+            assertEquals(SourceStatus.READY, configured.status)
+            assertEquals(entry.packageId, configured.manifest.id)
+            assertEquals(listOf("audio.example.com"), configured.manifest.permissions.network)
+
+            manualScript.writeBytes("\uFEFF".toByteArray() + script)
+            val reimport = manager.inspectFile(Uri.fromFile(manualScript)).also { imports += it }
+            assertEquals(entry.packageId, reimport.manifest.id)
+            assertEquals(listOf("audio.example.com"), reimport.manifest.permissions.network)
+            assertEquals(SourceStatus.READY, manager.install(reimport, approved = true).status)
+            assertEquals(listOf(entry.packageId), manager.installed.value.map { it.manifest.id })
+
+            val newerScript = script.toString(Charsets.UTF_8).replace("1.0.0", "1.0.1").toByteArray()
+            val newerDigest = java.security.MessageDigest.getInstance("SHA-256").digest(newerScript).joinToString("") { "%02x".format(it) }
+            val update = manager.inspectMarketScript(entry.copy(version = "1.0.1", sha256 = newerDigest)) {
+                it.writeBytes(newerScript)
+            }.also { imports += it }
+            val editedReview = manager.withCompatibilityDomains(update, listOf("updated.example.com")).also { imports += it }
+            manager.configureCompatibilityDomains(entry.packageId, listOf("metadata.example.com"))
+            try {
+                manager.install(editedReview, approved = true)
+                fail("Editing a review must retain its original installed fingerprint")
+            } catch (error: SourceException) {
+                assertEquals(SourceErrorCode.PLUGIN, error.code)
+            }
+
+            try {
+                manager.configureCompatibilityDomains(entry.packageId, listOf("*.example.com"))
+                fail("Compatibility configuration must preserve exact host grants")
+            } catch (error: SourceException) {
+                assertEquals(SourceErrorCode.PERMISSION_DENIED, error.code)
+            }
+            val reopened = ProviderRegistry(emptyList())
+            ScriptPluginManager(context, reopened, ScriptRuntime(context)).loadInstalled()
+            val provider = reopened.provider(entry.packageId) as ScriptMusicProvider
+            assertEquals("1.0.0", provider.manifest.version)
+            assertEquals(listOf("metadata.example.com"), provider.manifest.permissions.network)
+            assertEquals("Configured title", provider.search("a song").items.single().title)
+        } finally {
+            imports.forEach { manager.discardPrepared(it) }
+            if (manager.installed.value.any { it.manifest.id == entry.packageId }) manager.uninstall(entry.packageId)
+            manualScript.delete()
+        }
+    }
+
     @Test
     fun overlappingReadIndexesAreDiscardedAfterSuccessfulOrUncertainCatalogMutations() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

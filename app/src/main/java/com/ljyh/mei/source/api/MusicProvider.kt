@@ -62,6 +62,7 @@ interface MusicProvider {
     val capabilities: Set<SourceCapability>
     val status: SourceStatus get() = SourceStatus.READY
     val isBuiltIn: Boolean get() = false
+    val canSupplyFallback: Boolean get() = true
 }
 interface CatalogCapability {
     suspend fun search(query: String, page: PageRequest = PageRequest()): SourcePage<Track>
@@ -69,6 +70,12 @@ interface CatalogCapability {
 }
 interface PlaybackCapability {
     suspend fun resolve(ref: TrackRef, requestedQuality: String): AudioResource
+}
+/** Playback-only sources can resolve a known original recording without a searchable catalog. */
+interface OriginalTrackPlaybackCapability {
+    val originalTrackPlaybackOnly: Boolean get() = true
+    fun supportsOriginalTrack(ref: TrackRef): Boolean
+    suspend fun resolveOriginalTrack(track: Track, requestedQuality: String): AudioResource
 }
 interface LyricsCapability { suspend fun getLyrics(ref: TrackRef): SourceLyrics? }
 interface QualityCapability { suspend fun availableQualities(ref: TrackRef): List<String> }

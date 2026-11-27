@@ -19,18 +19,48 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import timber.log.Timber
 
 /** Only a host-created opaque handle reaches Media3; scripts never receive file paths. */
 object ScriptAudioResources {
-    internal data class Entry(val pluginId: String, val resource: AudioResource, val policy: ScriptNetworkPolicy, val file: File?)
+    internal class Entry(
+        val pluginId: String,
+        val resource: AudioResource,
+        private val policy: ScriptNetworkPolicy,
+        val file: File?,
+        private val isCurrent: (() -> Boolean)?,
+    ) {
+        val current: Boolean get() = isCurrent?.invoke() != false
+
+        fun requireCurrent() {
+            if (!current) throw SourceException(SourceErrorCode.CANCELLED, "Source audio permissions changed")
+        }
+
+        fun audioClient(): OkHttpClient {
+            val client = policy.audioClient
+            if (isCurrent == null) return client
+            // Check at dispatch as well as open so a queued request cannot use retired grants.
+            return client.newBuilder()
+                .addInterceptor { chain -> requireCurrent(); chain.proceed(chain.request()) }
+                .addNetworkInterceptor { chain -> requireCurrent(); chain.proceed(chain.request()) }
+                .build()
+        }
+    }
+
     private val entries = ConcurrentHashMap<String, Entry>()
 
-    fun isRegistered(uri: String): Boolean = entries.containsKey(uri)
+    fun isRegistered(uri: String): Boolean = entries[uri]?.current == true
 
-    internal fun register(pluginId: String, resource: AudioResource, policy: ScriptNetworkPolicy, directory: File): AudioResource {
+    internal fun register(
+        pluginId: String,
+        resource: AudioResource,
+        policy: ScriptNetworkPolicy,
+        directory: File,
+        isCurrent: (() -> Boolean)? = null,
+    ): AudioResource {
         val file = if (resource.uri.startsWith("asset://")) {
             val name = resource.uri.removePrefix("asset://")
             if (!Regex("[A-Za-z0-9._-]+\\.(wav|mp3|flac|m4a|ogg)").matches(name)) invalid()
@@ -43,16 +73,16 @@ object ScriptAudioResources {
         }
         policy.validateHeaders(resource.headers)
         val handle = "mei-source://resource/${UUID.randomUUID()}"
-        entries[handle] = Entry(pluginId, resource, policy, file)
+        entries[handle] = Entry(pluginId, resource, policy, file, isCurrent)
         if (entries.size > 512) {
             val now = System.currentTimeMillis()
-            entries.entries.removeIf { it.value.resource.expiresAtMs?.let { expires -> expires < now } == true }
+            entries.entries.removeIf { !it.value.current || it.value.resource.expiresAtMs?.let { expires -> expires < now } == true }
         }
         if (entries.size > 1024) entries.keys.take(entries.size - 1024).forEach(entries::remove)
         return resource.copy(uri = handle, headers = emptyMap(), contentLength = file?.length() ?: resource.contentLength)
     }
 
-    internal fun entry(uri: String): Entry = entries[uri] ?: invalid()
+    internal fun entry(uri: String): Entry = (entries[uri] ?: invalid()).also(Entry::requireCurrent)
     internal fun remove(pluginId: String) { entries.entries.removeIf { it.value.pluginId == pluginId } }
     private fun invalid(): Nothing = throw SourceException(SourceErrorCode.PLUGIN, "Source audio resource is unavailable")
 }
@@ -80,7 +110,7 @@ class ScriptAudioDataSource : DataSource {
         val current = synchronized(monitor) {
             check(transfer == null)
             if (cancelled) throw SourceException(SourceErrorCode.CANCELLED)
-            val calls = if (entry.file == null) AudioCalls(entry.policy.audioClient) else null
+            val calls = if (entry.file == null) AudioCalls(entry.audioClient()) else null
             val source = if (calls == null) FileDataSource() else OkHttpDataSource.Factory(calls).createDataSource()
             listeners.forEach(source::addTransferListener)
             Transfer(source, calls, entry).also { transfer = it; opaqueUri = dataSpec.uri }
@@ -103,7 +133,7 @@ class ScriptAudioDataSource : DataSource {
                 current.closed
             }
             val wrapped = SourceException(
-                if (closed) SourceErrorCode.CANCELLED else SourceErrorCode.NETWORK,
+                if (closed || !entry.current) SourceErrorCode.CANCELLED else SourceErrorCode.NETWORK,
                 "Source audio request failed",
             )
             runCatching { wrapped.initCause(error) }

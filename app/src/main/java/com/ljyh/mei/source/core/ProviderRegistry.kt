@@ -57,5 +57,7 @@ class ProviderRegistry(providers: List<MusicProvider>, startupPending: Boolean =
     )
     fun supportsFeatureRoute(providerId: String, route: String): Boolean =
         (provider(providerId) as? FeatureContribution)?.featureRoutes?.contains(route) == true
-    fun playable(): List<MusicProvider> = providers.value.filter { it.status == SourceStatus.READY && SourceCapability.PLAYBACK in it.capabilities && it is PlaybackCapability }
+    fun playable(): List<MusicProvider> = providers.value.filter {
+        it.status == SourceStatus.READY && it.canSupplyFallback && SourceCapability.PLAYBACK in it.capabilities && it is PlaybackCapability
+    }
 }

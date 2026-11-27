@@ -1595,6 +1595,29 @@ class SourceResolutionTest {
             return AudioResource("https://audio.example/$id", "standard", contentId = "bytes")
         }
     }
+
+    private class PlaybackOnlyProvider(
+        override val id: String,
+        private val supportedProvider: String = "original",
+        private val failure: SourceErrorCode? = null,
+        override val status: SourceStatus = SourceStatus.READY,
+    ) : MusicProvider, PlaybackCapability, OriginalTrackPlaybackCapability {
+        override val displayName = id
+        override val capabilities = setOf(SourceCapability.PLAYBACK)
+        val calls = mutableListOf<Pair<Track, String>>()
+
+        override fun supportsOriginalTrack(ref: TrackRef) = ref.providerId == supportedProvider
+
+        override suspend fun resolve(ref: TrackRef, requestedQuality: String): AudioResource =
+            error("Playback-only sources must receive the original recording metadata")
+
+        override suspend fun resolveOriginalTrack(track: Track, requestedQuality: String): AudioResource {
+            calls += track to requestedQuality
+            failure?.let { throw SourceException(it) }
+            return AudioResource("https://audio.example/$id", requestedQuality)
+        }
+    }
+
     private fun resolver(providers: List<MusicProvider>, settings: SourceSettings = SourceSettings(autoFallbackEnabled = true, fallbackOrder = listOf("a", "b", "c"))) = PlaybackResolver(ProviderRegistry(providers), { settings })
 
     @Test fun originalSuccessStopsFallbackAndPreservesIdentity() = runTest {
@@ -1623,6 +1646,71 @@ class SourceResolutionTest {
         catch (error: PlaybackResolutionException) { assertEquals(SourceErrorCode.AUTH_EXPIRED, error.attempts.single().error) }
         assertEquals(0, a.calls)
     }
+
+    @Test fun playbackOnlySourcesRequireFallbackOptInAndAnEnabledSource() = runTest {
+        val origin = Provider("original", original, SourceErrorCode.UNAVAILABLE)
+        val lx = PlaybackOnlyProvider("lx")
+        val disabled = PlaybackOnlyProvider("disabled-lx", status = SourceStatus.DISABLED)
+        val enabledSettings = SourceSettings(autoFallbackEnabled = true, fallbackOrder = listOf(lx.id))
+        val settings = listOf(
+            SourceSettings(),
+            enabledSettings.copy(autoFallbackEnabled = false),
+            enabledSettings.copy(fallbackOrder = listOf(disabled.id)),
+            enabledSettings.copy(disabledTrackFallbacks = setOf(TrackRefCodec.encode(original.ref))),
+        )
+        for (policy in settings) {
+            assertFailsWithUnavailable { resolver(listOf(origin, lx, disabled), policy).resolve(original, "standard") }
+        }
+        assertTrue(lx.calls.isEmpty())
+        assertTrue(disabled.calls.isEmpty())
+    }
+
+    @Test fun originalPlaybackStillPrecedesPlaybackOnlySourcesWhenCatalogsArePreferred() = runTest {
+        val origin = Provider("original", original)
+        val lx = PlaybackOnlyProvider("lx")
+        val settings = SourceSettings(autoFallbackEnabled = true, preferOriginalProvider = false, fallbackOrder = listOf(lx.id))
+        val result = resolver(listOf(origin, lx), settings).resolve(original, "standard")
+
+        assertEquals(listOf(origin.instanceId), result.attempts.map { it.instanceId })
+        assertEquals(1, origin.calls)
+        assertTrue(lx.calls.isEmpty())
+    }
+
+    @Test fun playbackOnlyResolutionUsesHydratedOriginalAndKeepsStreamingProvenance() = runTest {
+        val origin = Provider("original", original, SourceErrorCode.UNAVAILABLE)
+        val lx = PlaybackOnlyProvider("lx")
+        val settings = SourceSettings(autoFallbackEnabled = true, fallbackOrder = listOf(lx.id))
+        val playback = resolver(listOf(origin, lx), settings)
+        val restored = Track(original.ref, "", emptyList())
+        val result = playback.resolve(restored, "lossless")
+
+        assertEquals(listOf(original to "lossless"), lx.calls)
+        assertEquals(listOf(SourceErrorCode.UNAVAILABLE, null), result.attempts.map { it.error })
+        assertEquals(original.ref, result.originTrackRef)
+        assertEquals(TrackRef(lx.id, TrackRefCodec.encode(original.ref)), result.resolvedTrackRef)
+        assertEquals(lx.id, result.actualAudioProviderId)
+        assertEquals(lx.instanceId, result.instanceId)
+        assertEquals(CachePolicy.NO_STORE, result.resource.cachePolicy)
+        assertFailsWithUnavailable { playback.resolve(restored, "lossless", allowPlaybackOnlyFallback = false) }
+        assertEquals(1, lx.calls.size)
+    }
+
+    @Test fun unsupportedAndFailedPlaybackOnlySourcesAllowCatalogFallback() = runTest {
+        val origin = Provider("original", original, SourceErrorCode.UNAVAILABLE)
+        val unsupported = PlaybackOnlyProvider("unsupported-lx", supportedProvider = "other")
+        val failed = PlaybackOnlyProvider("failed-lx", failure = SourceErrorCode.NETWORK)
+        val catalog = Provider("catalog", track("catalog"))
+        val settings = SourceSettings(autoFallbackEnabled = true, fallbackOrder = listOf(unsupported.id, failed.id, catalog.id))
+        val result = resolver(listOf(origin, unsupported, failed, catalog), settings).resolve(original, "standard")
+
+        assertTrue(unsupported.calls.isEmpty())
+        assertEquals(listOf(original to "standard"), failed.calls)
+        assertEquals(listOf(origin.instanceId, failed.instanceId, catalog.instanceId), result.attempts.map { it.instanceId })
+        assertEquals(SourceErrorCode.NETWORK, result.attempts[1].error)
+        assertEquals(catalog.candidate.ref, result.resolvedTrackRef)
+        assertEquals(CachePolicy.ALLOW, result.resource.cachePolicy)
+    }
+
     @Test fun duplicateSourcesAreAttemptedOnce() = runTest {
         val a = Provider("a", track("a"), SourceErrorCode.UNAVAILABLE)
         try { resolver(listOf(a), SourceSettings(true, true, listOf("a", "a", "a"))).resolve(original, "standard"); fail() }

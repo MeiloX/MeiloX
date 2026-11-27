@@ -3,9 +3,11 @@ package com.ljyh.mei.source.script
 import android.content.Context
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.ljyh.mei.BuildConfig
 import com.ljyh.mei.source.api.SourceErrorCode
 import com.ljyh.mei.source.api.SourceException
 import com.ljyh.mei.source.api.SourceResponseSizeException
@@ -29,9 +31,11 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -41,6 +45,7 @@ import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -58,6 +63,11 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
     internal val concurrentExecutionSupported: Boolean get() = true
     internal val independentIsolateTerminationSupported: Boolean get() = true
     private val keepWarmState = MutableStateFlow(false)
+    private val compatibilityRuntime by lazy { compatibilityAsset("runtime.js") + compatibilityAsset("crypto.js") }
+    private val lxRuntime by lazy { compatibilityRuntime + compatibilityAsset("lx.js") }
+    private val musicFreeRuntime by lazy {
+        compatibilityRuntime + compatibilityAsset("musicfree-modules.js") + compatibilityAsset("musicfree.js")
+    }
 
     init {
         sandboxScope.launch {
@@ -340,6 +350,165 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
         } finally { pending.cancel() }
     }
 
+    /** Uses the same isolated worker and transport boundary as a native source operation. */
+    internal suspend fun invokeCompatibility(
+        script: String,
+        format: String,
+        operation: String,
+        params: JsonObject,
+        configuration: Map<String, String>,
+        request: (suspend (JsonObject) -> JsonObject)? = null,
+        ensureCurrent: () -> Unit = {},
+    ): JsonElement {
+        ensureCurrent()
+        if (!supported || operation !in compatibilityOperations) throw SourceException(SourceErrorCode.UNSUPPORTED)
+        val inspection = operation == "inspect"
+        val resultLimit = if (operation == "catalog.search") MAX_CATALOG_RESULT_BYTES else MAX_RESULT_BYTES
+        val memoryLimited = java.util.concurrent.atomic.AtomicBoolean(false)
+        val terminated = CompletableDeferred<Unit>()
+        var phase = ScriptRuntimePhase.INITIALIZATION
+        var requestSent = false
+        return try {
+            withTimeout(if (inspection) 6_000L else 20_000L) {
+                val bootstrap = withContext(Dispatchers.IO) {
+                    when (format) {
+                        "lx" -> lxRuntime
+                        "musicfree" -> musicFreeRuntime
+                        else -> throw SourceException(SourceErrorCode.UNSUPPORTED)
+                    }
+                }
+                val input = JsonObject().apply {
+                    addProperty("source", script)
+                    addProperty("operation", operation)
+                    add("params", params)
+                    add("configuration", Gson().toJsonTree(configuration))
+                    params.get("scriptName")?.let { add("scriptName", it) }
+                    addProperty("appVersion", BuildConfig.VERSION_NAME)
+                    addProperty("entropy", Base64.getEncoder().encodeToString(
+                        ByteArray(4_096).also(SecureRandom()::nextBytes)))
+                }
+                invocationSlots.withPermit {
+                    phase = ScriptRuntimePhase.CONNECTION
+                    sandboxes.withSandbox(
+                        create = { QuickJsSandbox.createConnectedInstanceAsync(context.applicationContext) },
+                        isClosed = { it.isClosed },
+                    ) { sandbox, lease ->
+                        val job = currentCoroutineContext()[Job]
+                        val guard = {
+                            job?.ensureActive()
+                            ensureCurrent()
+                            if (terminated.isCompleted || lease.retired.isCompleted == true) {
+                                throw SourceRuntimeUnavailableException(outcomeUnknown = requestSent)
+                            }
+                        }
+                        guard()
+                        phase = ScriptRuntimePhase.INITIALIZATION
+                        val settings = QuickJsIsolateParameters().apply {
+                            maxHeapSizeBytes = MAX_HEAP_BYTES
+                            maxStackSizeBytes = MAX_STACK_BYTES
+                            maxEvaluationReturnSizeBytes = resultLimit
+                        }
+                        sandbox.createIsolate(settings).use { isolate ->
+                            isolate.addOnTerminatedCallback(java.util.concurrent.Executor { it.run() }) {
+                                if (it.status == QuickJsTerminationInfo.STATUS_MEMORY_LIMIT_EXCEEDED) memoryLimited.set(true)
+                                terminated.complete(Unit)
+                                if (it.status == QuickJsTerminationInfo.STATUS_SANDBOX_DEAD) sandboxes.invalidate(lease)
+                            }
+                            suspend fun evaluate(code: String): String {
+                                guard()
+                                return withTimeout(3_000) { isolate.evaluateJavaScriptAsync(code).await() }.also { guard() }
+                            }
+                            phase = ScriptRuntimePhase.SCRIPT
+                            evaluate(bootstrap + "\n;'loaded';")
+                            phase = ScriptRuntimePhase.OPERATION
+                            evaluate("globalThis.__meiloxCompat.start(${compatibilityJsonString(input)}); 'started';")
+                            phase = ScriptRuntimePhase.RESULT
+                            pumpCompatibility(lease, terminated, ::evaluate, request.takeUnless { inspection }, resultLimit) {
+                                requestSent = true
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            ensureCurrent()
+            throw SourceException(SourceErrorCode.TIMEOUT, "Compatibility source timed out during $format $operation $phase")
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            ensureCurrent()
+            if (memoryLimited.get()) throw SourceException(SourceErrorCode.PLUGIN, outcomeUnknown = requestSent)
+            throw scriptRuntimeFailure(error, phase, requestSent = requestSent)
+        }
+    }
+
+    private fun compatibilityAsset(name: String): String =
+        context.assets.open("source-compatibility/$name").bufferedReader().use { "\n" + it.readText() + "\n" }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun pumpCompatibility(
+        lease: ScriptSandboxPool.Lease<QuickJsSandbox>,
+        terminated: Deferred<Unit>,
+        evaluate: suspend (String) -> String,
+        request: (suspend (JsonObject) -> JsonObject)?,
+        resultLimit: Int,
+        onRequest: () -> Unit,
+    ): JsonElement = coroutineScope {
+        val pending = mutableMapOf<Int, Deferred<JsonObject>>()
+        var requests = 0
+        try {
+            repeat(96) {
+                val call = parseScriptResult(evaluate("globalThis.__meiloxCompat.step()"), resultLimit)
+                    .takeIf(JsonElement::isJsonObject)?.asJsonObject ?: invalidCompatibilityResult()
+                call.get("result")?.let { return@coroutineScope boundedCompatibilityResult(it) }
+                call.get("error")?.let { raw ->
+                    val code = runCatching { SourceErrorCode.valueOf(raw.asString) }.getOrDefault(SourceErrorCode.PLUGIN)
+                    throw SourceException(code)
+                }
+
+                val cancelled = call.getAsJsonArray("cancelled") ?: invalidCompatibilityResult()
+                val network = call.getAsJsonArray("network") ?: invalidCompatibilityResult()
+                if (network.size() > 4 || cancelled.size() > 4) invalidCompatibilityResult()
+                cancelled.forEach { id -> pending.remove(id.asInt)?.cancel() }
+                if (network.size() > 0 && request == null) throw SourceException(SourceErrorCode.PERMISSION_DENIED)
+                network.forEach { task ->
+                    if (++requests > 16 || pending.size >= 4) throw SourceException(SourceErrorCode.PLUGIN)
+                    val item = task.asJsonObject
+                    val id = item.get("id").asInt
+                    if (id <= 0 || id in pending) invalidCompatibilityResult()
+                    val options = item.getAsJsonObject("options") ?: invalidCompatibilityResult()
+                    val timeout = options.get("timeout")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
+                        ?.asLong?.takeIf { it > 0 }?.coerceAtMost(15_000) ?: 15_000L
+                    val frame = compatibilityRequest(options)
+                    onRequest()
+                    pending[id] = async {
+                        try {
+                            withTimeoutOrNull(timeout) { checkNotNull(request).invoke(frame) }
+                                ?: JsonObject().apply { addProperty("error", SourceErrorCode.TIMEOUT.name) }
+                        } catch (error: SourceException) {
+                            scriptErrorResponse(error, allowed = true) ?: throw error
+                        }
+                    }
+                }
+
+                val delay = call.get("delay")?.takeUnless { it.isJsonNull }?.asLong?.coerceIn(0, 20_000)
+                if (delay == null && pending.isEmpty()) throw SourceException(SourceErrorCode.PLUGIN)
+                val next = select<Pair<Int, JsonObject>?> {
+                    terminated.onAwait { throw SourceRuntimeUnavailableException(outcomeUnknown = requests > 0) }
+                    lease.retired.onAwait { throw SourceRuntimeUnavailableException(outcomeUnknown = requests > 0) }
+                    if (delay != null) onTimeout(delay) { null }
+                    pending.forEach { (id, job) -> job.onAwait { id to it } }
+                }
+                if (next != null) {
+                    val (id, response) = next
+                    pending.remove(id)
+                    evaluate("globalThis.__meiloxCompat.resume($id,${compatibilityJsonString(response)}); 'resumed';")
+                } else evaluate("globalThis.__meiloxCompat.tick(); 'elapsed';")
+            }
+            throw SourceException(SourceErrorCode.PLUGIN)
+        } finally { pending.values.forEach { it.cancel() } }
+    }
+
     companion object {
         const val MAX_HEAP_BYTES = 32L * 1024 * 1024
         internal const val MAX_STACK_BYTES = 1024L * 1024
@@ -371,6 +540,43 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                 ByteArray(SECURE_RANDOM_BYTES).also(entropy::nextBytes)))
         }
     }
+}
+
+private val compatibilityOperations = setOf("inspect", "catalog.search", "catalog.track", "playback.resolve")
+private val compatibilityJson = GsonBuilder().disableHtmlEscaping().create()
+
+// Keep arbitrary JSON keys as data when delivering host input to an isolate.
+private fun compatibilityJsonString(value: JsonObject): String = compatibilityJson.toJson(value.toString())
+
+private fun invalidCompatibilityResult(): Nothing = throw SourceException(SourceErrorCode.INVALID_RESPONSE)
+
+/** Foreign code can request ordinary HTTP but cannot submit native SDK or host-effect fields. */
+private fun compatibilityRequest(options: JsonObject): JsonObject = JsonObject().apply {
+    for (key in listOf("url", "method", "body", "bodyEncoding", "responseEncoding")) {
+        val value = options.get(key)?.takeUnless { it.isJsonNull }
+        if (value == null && key != "url") continue
+        if (value == null || !value.isJsonPrimitive || !value.asJsonPrimitive.isString) invalidCompatibilityResult()
+        add(key, value)
+    }
+    options.get("headers")?.takeUnless { it.isJsonNull }?.let { headers ->
+        if (!headers.isJsonObject || headers.asJsonObject.entrySet().any { (_, value) ->
+                !value.isJsonPrimitive || !value.asJsonPrimitive.isString
+            }) invalidCompatibilityResult()
+        add("headers", headers)
+    }
+}
+
+private fun boundedCompatibilityResult(value: JsonElement): JsonElement {
+    val pending = ArrayDeque<Pair<JsonElement, Int>>()
+    pending.add(value to 0)
+    var nodes = 0
+    while (pending.isNotEmpty()) {
+        val (item, depth) = pending.removeLast()
+        if (depth > 64 || ++nodes > 65_536) invalidCompatibilityResult()
+        if (item.isJsonObject) item.asJsonObject.entrySet().forEach { pending.add(it.value to depth + 1) }
+        else if (item.isJsonArray) item.asJsonArray.forEach { pending.add(it to depth + 1) }
+    }
+    return value
 }
 
 private val libraryTraceOperations = setOf(

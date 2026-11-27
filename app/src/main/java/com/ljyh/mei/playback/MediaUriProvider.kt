@@ -250,7 +250,7 @@ class MediaUriProvider @Inject constructor(
         router.registry.awaitInitialized()
         return sourceUpdatePlaybackGuard.withResolution({ resolutionUpdateSources(track.ref.providerId) }) {
             val stateVersion = synchronized(qualityStateLock) { accountStateVersion.get() }
-            val resolution = playbackResolver.resolve(track, quality, allowAlternateVersion = false, originalResolver = {
+            val resolution = playbackResolver.resolve(track, quality, allowAlternateVersion = false, allowPlaybackOnlyFallback = false, originalResolver = {
                 resolveOriginResource(TrackRefCodec.mediaId(track.ref), track.ref, quality, stateVersion, forDownload = true)
             })
             synchronized(qualityStateLock) { ensureCurrentState(stateVersion, forDownload = true) }

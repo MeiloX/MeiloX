@@ -4,6 +4,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.ljyh.mei.source.api.*
 import java.io.File
+import java.security.MessageDigest
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -41,16 +43,21 @@ internal class ScriptMusicProvider(
     private val coreExecutor: com.ljyh.mei.source.core.SourceFeatureExecutor? = null,
     private val coreHandler: SourceHostEffectHandler = SourceHostEffectHandler.Unsupported,
     private val artworkStore: SourceArtworkStore? = null,
+    private val compatibilityTracks: CompatibilityTrackStore? = null,
+    private val commitCompatibilityTracks: ((() -> Unit) -> Unit) = { it() },
 ) : MusicProvider, CatalogCapability, PlaybackCapability, LyricsCapability, ResourceValidationCapability,
     FeedCapability, TypedSearchCapability, AlbumCapability, ArtistCapability, PlaylistCapability,
     AccountCapability, LibraryCapability, LikeCapability, CollectionCapability, PlaylistEditCapability,
     SourceFeatureCapability, FeatureContribution, QualityCapability, AccountRevisionCapability, SourceLinkCapability, SourceFeatureContentCapability,
-    AccountScopedLikeCapability, AccountScopedFeatureCapability, SourceCoreEffectCapability, BatchLikeCapability, BatchCatalogCapability, CatalogIndexCapability {
+    AccountScopedLikeCapability, AccountScopedFeatureCapability, SourceCoreEffectCapability, BatchLikeCapability, BatchCatalogCapability,
+    CatalogIndexCapability, OriginalTrackPlaybackCapability {
     override val id = manifest.providerId
     override val instanceId = ProviderInstanceId("script:${manifest.id}:default")
     override val displayName = manifest.name
     override val version = "${manifest.version}+$configurationVersion"
     override val capabilities = manifest.sourceCapabilities
+    override val canSupplyFallback: Boolean = manifest.compatibility != "musicfree"
+    override val originalTrackPlaybackOnly: Boolean = manifest.compatibility == "lx"
     override val supportsBatchTrackRequests: Boolean get() = "catalog.tracks" in manifest.capabilities
     override val featureRoutes = manifest.featureRoutes
     override val features = manifest.features
@@ -86,7 +93,10 @@ internal class ScriptMusicProvider(
             it in setOf("cookie", "sessionType", "ursAppId", "deviceId", "sDeviceId", "musicA", "csrf")
         } + ("sdkInstance" to instanceId.value) + if (verified == null) emptyMap() else mapOf("userId" to verified)
     }
-    private val network = ScriptNetworkPolicy(manifest.permissions.network, manifest.permissions.nativeSdks, ::platformConfiguration)
+    private val network = ScriptNetworkPolicy(
+        manifest.permissions.network, manifest.permissions.nativeSdks, strictRedirects = manifest.compatibility != null,
+        configuration = ::platformConfiguration,
+    )
     private val operations = Mutex()
     private val gson = Gson()
     private val parser = ScriptContentParser(id, manifest.apiVersion, playlistEditActions, features, featureRoutes) { featureArtwork(it) }
@@ -272,6 +282,7 @@ internal class ScriptMusicProvider(
 
     override suspend fun search(query: String, type: ContentType, page: PageRequest): SourcePage<SourceItem> = validated {
         if (type !in searchTypes) throw SourceException(SourceErrorCode.UNSUPPORTED)
+        if (manifest.compatibility == "musicfree") return@validated searchMusicFree(query, page)
         if (manifest.apiVersion == 1) {
             val result = search(query, page)
             return@validated SourcePage<SourceItem>(result.items.map { SourceItem.TrackItem(it) }, result.hasMore, result.nextCursor)
@@ -281,6 +292,46 @@ internal class ScriptMusicProvider(
             addProperty("type", type.wireName)
         }).asJsonObject
         parsePage(result, page) { parseItem(it, type) }
+    }
+
+    private suspend fun searchMusicFree(query: String, page: PageRequest): SourcePage<SourceItem> = catalogRead { read ->
+        val store = compatibilityTracks ?: invalid()
+        val start = page.cursor?.let { cursor ->
+            val parts = cursor.split(':', limit = 2)
+            val pageNumber = parts.getOrNull(0)?.toIntOrNull()?.takeIf { it in 1..10_000 } ?: invalid()
+            val offset = parts.getOrNull(1)?.toIntOrNull()?.takeIf { it in 0..499 } ?: invalid()
+            pageNumber to offset
+        } ?: ((page.offset / page.limit + 1).coerceAtMost(10_000) to 0)
+        val result = compatibilityCall("catalog.search", JsonObject().apply {
+            addProperty("query", query.take(1_000))
+            addProperty("page", start.first)
+            addProperty("itemOffset", start.second)
+            addProperty("limit", page.limit)
+        }).takeIf { it.isJsonObject }?.asJsonObject ?: invalid()
+        val rows = result.get("items")?.takeIf { it.isJsonArray }?.asJsonArray ?: invalid()
+        if (rows.size() > page.limit) invalid()
+        val originals = LinkedHashMap<String, CompatibilityTrackStore.Stored>()
+        val items = rows.mapNotNull { row ->
+            val item = row.takeIf { it.isJsonObject }?.asJsonObject ?: invalid()
+            val data = item.get("track")?.takeIf { it.isJsonObject }?.asJsonObject ?: invalid()
+            val media = item.get("media")?.takeIf { it.isJsonObject }?.asJsonObject ?: invalid()
+            val track = parseCatalogTrack(data)
+            val stored = CompatibilityTrackStore.Stored(track.ref.trackId, data, media)
+            if (originals.putIfAbsent(stored.trackId, stored) != null) return@mapNotNull null
+            SourceItem.TrackItem(track)
+        }
+        withContext(Dispatchers.IO) {
+            commitCompatibilityTracks { store.put(originals.values.toList()) { ensureCatalog(read) } }
+        }
+        catalog.putTracks(read.owner, items.map { it.track }) { ensureCatalog(read) }
+        val next = if (result.get("hasMore")?.asBoolean == true) {
+            val number = result.get("nextPage")?.asInt ?: invalid()
+            val offset = result.get("nextItemOffset")?.asInt ?: invalid()
+            val advances = number == start.first && offset > start.second || number == start.first + 1 && offset == 0
+            if (!advances || offset !in 0..499 || number !in 1..10_000) invalid()
+            "$number:$offset"
+        } else null
+        SourcePage(items, next != null, next)
     }
 
     override suspend fun getFeed(kind: FeedKind, categoryId: String?, page: PageRequest): SourceFeedPage = validated {
@@ -640,7 +691,9 @@ internal class ScriptMusicProvider(
     }
 
     private suspend fun fetchTrack(ref: TrackRef, read: CatalogRead): Track? {
-        val result = invoke("catalog.track", JsonObject().apply { addProperty("trackId", ref.trackId) })
+        val result = if (manifest.compatibility == "musicfree") {
+            withContext(Dispatchers.IO) { compatibilityTracks?.get(ref.trackId)?.track } ?: return null
+        } else invoke("catalog.track", JsonObject().apply { addProperty("trackId", ref.trackId) })
         if (result.isJsonNull) return null
         return parseCatalogTrack(result.asJsonObject).also {
             if (it.ref != ref) invalid()
@@ -673,7 +726,16 @@ internal class ScriptMusicProvider(
 
     override suspend fun resolve(ref: TrackRef, requestedQuality: String): AudioResource = validated {
         requireRef(ref)
-        val result = playbackResponse(ref, requestedQuality)
+        val result = if (manifest.compatibility == "musicfree") {
+            val media = withContext(Dispatchers.IO) { compatibilityTracks?.get(ref.trackId)?.media }
+                ?: throw SourceException(SourceErrorCode.NOT_FOUND)
+            val value = compatibilityCall("playback.resolve", JsonObject().apply {
+                add("media", media)
+                addProperty("quality", requestedQuality)
+            })
+            if (value.isJsonNull) throw SourceException(SourceErrorCode.UNAVAILABLE)
+            value.takeIf { it.isJsonObject }?.asJsonObject ?: invalid()
+        } else playbackResponse(ref, requestedQuality)
         val quality = result.get("quality")?.asString?.takeIf { it.isNotBlank() && it.length <= 50 } ?: invalid()
         val headers = result.getAsJsonObject("headers")?.entrySet()?.associate { it.key to it.value.asString }.orEmpty()
         val resource = AudioResource(
@@ -687,8 +749,69 @@ internal class ScriptMusicProvider(
             cachePolicy = if (result.get("cachePolicy")?.asString == "NO_STORE") CachePolicy.NO_STORE else CachePolicy.ALLOW,
         )
         if (resource.expiresAtMs?.let { it <= System.currentTimeMillis() } == true || resource.contentLength?.let { it <= 0 } == true) invalid()
+        registerAudio(resource)
+    }
+
+    override fun supportsOriginalTrack(ref: TrackRef): Boolean =
+        originalTrackPlaybackOnly && "wy" in manifest.compatibilityPlatforms.orEmpty() &&
+            ref.providerId == ProviderIds.NETEASE && ref.trackId.toLongOrNull()?.let { it > 0 } == true
+
+    override suspend fun resolveOriginalTrack(track: Track, requestedQuality: String): AudioResource = validated {
+        if (!supportsOriginalTrack(track.ref) || track.durationMs <= 0) throw SourceException(SourceErrorCode.UNSUPPORTED)
+        val levels = when (requestedQuality) {
+            "standard", "higher" -> listOf("128k")
+            "exhigh" -> listOf("320k", "128k")
+            "lossless" -> listOf("flac", "320k", "128k")
+            else -> listOf("flac24bit", "flac", "320k", "128k")
+        }
+        val result = compatibilityCall("playback.resolve", JsonObject().apply {
+            addProperty("platform", "wy")
+            addProperty("quality", levels.first())
+            add("qualities", gson.toJsonTree(levels))
+            add("musicInfo", JsonObject().apply {
+                addProperty("source", "wy")
+                addProperty("songmid", track.ref.trackId)
+                addProperty("songId", track.ref.trackId.toLong())
+                addProperty("name", track.title)
+                addProperty("singer", track.artists.joinToString("、") { it.name })
+                addProperty("albumName", track.album.title)
+                addProperty("albumId", track.album.ref?.albumId.orEmpty())
+                val seconds = track.durationMs / 1_000
+                addProperty("interval", String.format(java.util.Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60))
+                addProperty("_interval", seconds)
+            })
+        }).takeIf { it.isJsonObject }?.asJsonObject ?: throw SourceException(SourceErrorCode.UNAVAILABLE)
+        val url = result.get("uri")?.asString ?: invalid()
+        network.validateUrl(url)
+        val info = probeCompatibilityAudio(url, network, ::ensureCurrent)?.takeIf { it.matches(track.durationMs) }
+            ?: throw SourceException(SourceErrorCode.UNAVAILABLE)
+        registerAudio(AudioResource(url, info.quality, contentLength = info.length,
+            mimeType = info.format.sampleMimeType, cachePolicy = CachePolicy.NO_STORE))
+    }
+
+    private suspend fun compatibilityCall(operation: String, parameters: JsonObject): com.google.gson.JsonElement =
+        withContext(Dispatchers.IO) {
+            ensureCurrent()
+            if (status == SourceStatus.NEEDS_CONFIGURATION) throw SourceException(SourceErrorCode.AUTH_REQUIRED)
+            if (status != SourceStatus.READY) throw SourceException(SourceErrorCode.UNAVAILABLE)
+            val format = manifest.compatibility ?: throw SourceException(SourceErrorCode.UNSUPPORTED)
+            val read = currentCoroutineContext()[CatalogRead]?.takeIf { it.provider === this@ScriptMusicProvider }
+            val job = currentCoroutineContext()[kotlinx.coroutines.Job]
+            val check = { job?.ensureActive(); ensureCurrent(); read?.let(::ensureCatalog); Unit }
+            val fields = manifest.config.mapTo(hashSetOf()) { it.key }
+            val variables = config().filterKeys { it in fields }
+            runtime.invokeCompatibility(File(directory, manifest.entry).readText(), format, operation, parameters, variables,
+                request = { network.request(it, check) }, ensureCurrent = check).also { check() }
+        }
+
+    private fun registerAudio(resource: AudioResource): AudioResource {
         ensureCurrent()
-        try { ScriptAudioResources.register(manifest.id, resource, network, directory) }
+        val compatible = manifest.compatibility != null
+        val identified = if (compatible) resource.copy(contentId = compatibilityContentId(resource)) else resource
+        return try {
+            ScriptAudioResources.register(manifest.id, identified, network, directory,
+                isCurrent = if (compatible) ({ enabled && isCurrent() }) else null)
+        }
         catch (error: SourceException) {
             // Rejected metadata never opens a connection. Keep other source operations usable;
             // a script that actively requests an undeclared host still fails at the network bridge.
@@ -697,6 +820,21 @@ internal class ScriptMusicProvider(
             }
             throw error
         }
+    }
+
+    private fun compatibilityContentId(resource: AudioResource): String {
+        val headers = resource.headers.entries.groupBy { it.key.lowercase(Locale.ROOT) }
+        if (headers.values.any { it.size != 1 }) invalid()
+        val fields = buildList {
+            add(resource.uri)
+            headers.toSortedMap().forEach { (key, entries) ->
+                add(key)
+                add(entries.single().value)
+            }
+        }
+        val framed = fields.joinToString("") { "${it.length}:$it" }
+        return MessageDigest.getInstance("SHA-256").digest(framed.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
     }
 
     private suspend fun playbackResponse(ref: TrackRef, quality: String): JsonObject {

@@ -34,6 +34,57 @@ import okhttp3.FormBody
 import okhttp3.RequestBody.Companion.toRequestBody
 
 class ScriptPluginPolicyTest {
+    @Test fun compatibilityAudioRevocationGuardsPreviouslyIssuedHandlesAndUnstartedCalls() {
+        val policy = ScriptNetworkPolicy(listOf("media.example.com"), strictRedirects = true)
+        val resource = AudioResource("https://media.example.com/track", "standard")
+        val directory = java.io.File(".")
+        var current = true
+        val handle = ScriptAudioResources.register("compatibility-audio-fixture", resource, policy, directory) { current }
+        val native = ScriptAudioResources.register("native-audio-fixture", resource, policy, directory)
+        try {
+            assertTrue(ScriptAudioResources.isRegistered(handle.uri))
+            val entry = ScriptAudioResources.entry(handle.uri)
+            val call = entry.audioClient().newCall(Request.Builder().url(resource.uri).build())
+
+            current = false
+            assertFalse(ScriptAudioResources.isRegistered(handle.uri))
+            assertEquals(SourceErrorCode.CANCELLED, assertThrows(SourceException::class.java) {
+                ScriptAudioResources.entry(handle.uri)
+            }.code)
+            assertEquals(SourceErrorCode.CANCELLED, assertThrows(SourceException::class.java) {
+                call.execute().close()
+            }.code)
+            assertTrue(ScriptAudioResources.isRegistered(native.uri))
+        } finally {
+            ScriptAudioResources.remove("compatibility-audio-fixture")
+            ScriptAudioResources.remove("native-audio-fixture")
+        }
+    }
+
+    @Test fun compatibilityTrackStoreRestoresOpaqueInputsAndKeepsLastCommittedRecord() {
+        val directory = java.nio.file.Files.createTempDirectory("compatibility-tracks").toFile()
+        try {
+            val trackId = "[\"007\",[\"edition\",\"live\"]]"
+            val track = com.google.gson.JsonObject().apply { addProperty("trackId", trackId) }
+            val input = json("""{"id":"007","edition":"live","opaque":{"streamId":"S/21"}}""")
+            val stored = CompatibilityTrackStore.Stored(trackId, track, input)
+            CompatibilityTrackStore(directory).put(listOf(stored)) {}
+            val reopened = CompatibilityTrackStore(directory)
+            assertEquals(stored, reopened.get(trackId))
+            assertNull(reopened.get("007"))
+
+            var checkpoints = 0
+            assertThrows(CancellationException::class.java) {
+                val replacement = stored.copy(media = json("""{"id":"007","edition":"live","opaque":null}"""))
+                reopened.put(listOf(replacement)) {
+                    if (++checkpoints == 3) throw CancellationException("Source revision changed")
+                }
+            }
+            assertEquals(stored, reopened.get(trackId))
+            assertEquals(1, directory.listFiles().orEmpty().size)
+        } finally { directory.deleteRecursively() }
+    }
+
     @Test fun concurrentReadDeclarationsCannotIncludeWritesOrUndeclaredCapabilities() {
         val base = json("""{"id":"org.meilox.concurrent","name":"Fixture","author":"Tests","version":"1","apiVersion":2,
             "capabilities":["catalog.track","track.like","feature.invoke"],
@@ -1351,7 +1402,10 @@ class ScriptPluginPolicyTest {
         ).forEach { value -> rejects { policy.validateUrl(value) } }
         rejects { policy.validateHeaders(mapOf("Host" to "localhost")) }
         rejects { policy.validateHeaders(mapOf("Authorization" to "Bearer abc\r\nInjected: yes")) }
+        rejects { policy.validateHeaders(mapOf("X-Audio" to "control\u007f")) }
+        rejects { policy.validateHeaders(mapOf("X-Audio" to "non-ASCII \u00e9")) }
         policy.validateHeaders(mapOf("Authorization" to "Bearer plugin-owned-secret"))
+        policy.validateHeaders(mapOf("X-Audio" to "value\tvalue"))
         assertTrue(policy.client.followRedirects)
         assertTrue(policy.client.followSslRedirects)
     }

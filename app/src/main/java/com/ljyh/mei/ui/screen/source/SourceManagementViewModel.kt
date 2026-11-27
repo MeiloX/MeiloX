@@ -6,12 +6,20 @@ import androidx.lifecycle.viewModelScope
 import com.ljyh.mei.source.api.*
 import com.ljyh.mei.source.core.*
 import com.ljyh.mei.source.script.*
+import com.ljyh.mei.source.update.CompatibilityMarket
+import com.ljyh.mei.source.update.CompatibilityMarketEntry
+import com.ljyh.mei.source.update.CompatibilityMarketItem
 import com.ljyh.mei.source.update.PreparedSourceUpdate
 import com.ljyh.mei.source.update.SourceUpdateManager
+import com.ljyh.mei.source.update.isNewer
+import com.ljyh.mei.source.update.manualPackageId
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +40,7 @@ class SourceManagementViewModel @Inject constructor(
     val resolver: PlaybackResolver,
     private val updates: SourceUpdateManager,
     private val features: SourceFeatureClient,
+    private val compatibleSources: CompatibilityMarket,
 ) : ViewModel() {
     val settings = preferences.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SourceSettings())
     val providers = registry.providers
@@ -42,8 +51,27 @@ class SourceManagementViewModel @Inject constructor(
     val updateState = updates.state
     val message = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
+    val linkImportFailed = MutableStateFlow(false)
+    val invalidImportDomains = MutableStateFlow(false)
+    val invalidCompatibilityDomains = MutableStateFlow(false)
     val editing = MutableStateFlow<InstalledPlugin?>(null)
     val configuration = MutableStateFlow<Map<String, String>>(emptyMap())
+    private val bundledCompatibility = MutableStateFlow<List<CompatibilityMarketEntry>>(emptyList())
+    private val remoteCompatibility = MutableStateFlow<List<CompatibilityMarketEntry>>(emptyList())
+    val compatibilityMarket = combine(bundledCompatibility, remoteCompatibility, plugins) { bundled, remote, installed ->
+        val matched = installed.associateBy { it.manifest.id }
+        val builtIn = bundled.associateBy { it.id }
+        val compatibleRemote = remote.filter { entry ->
+            val baseline = builtIn[entry.id]
+            baseline == null || (entry.packageId == baseline.packageId &&
+                (entry.sha256 == baseline.sha256 || isNewer(entry.version, baseline.version)))
+        }
+        (compatibleRemote + bundled).distinctBy { it.id }.map { entry ->
+            val plugin = matched[entry.packageId] ?: matched[entry.manualPackageId]
+            CompatibilityMarketItem(entry, plugin?.manifest?.id,
+                plugin?.let { isNewer(entry.version, it.manifest.version) } == true)
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private val mutableFallbackOrder = MutableStateFlow<List<String>?>(null)
     val fallbackOrder = mutableFallbackOrder.asStateFlow()
     private var savedFallbackOrder = emptyList<String>()
@@ -52,8 +80,14 @@ class SourceManagementViewModel @Inject constructor(
     private var fallbackOrderVersion = 0L
     private val fallbackOrderMutex = Mutex()
     private val actionMutex = Mutex()
+    private var linkInspection: Job? = null
 
     init {
+        viewModelScope.launch {
+            try { bundledCompatibility.value = withContext(Dispatchers.IO) { compatibleSources.bundled() } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* The native catalog remains available if the bundled catalog is unreadable. */ }
+        }
         viewModelScope.launch {
             try { awaitCancellation() }
             finally { withContext(NonCancellable) { runCatching { discardPending() } } }
@@ -71,22 +105,53 @@ class SourceManagementViewModel @Inject constructor(
         }
         action { manager.loadInstalled() }
     }
-    private fun action(block: suspend () -> Unit) { viewModelScope.launch {
+    private fun action(block: suspend () -> Unit) {
+        launchAction(::showSourceError, block)
+    }
+
+    private fun launchAction(onFailure: (Exception) -> Unit, block: suspend () -> Unit): Job = viewModelScope.launch {
         actionMutex.withLock {
             busy.value = true
             try { block() } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { message.value = sourceErrorMessage((error as? SourceException)?.code) }
+            catch (error: Exception) { onFailure(error) }
             finally { busy.value = false }
         }
-    } }
+    }
+    private fun showSourceError(error: Exception) {
+        message.value = sourceErrorMessage((error as? SourceException)?.code)
+    }
     fun reload() { action { manager.loadInstalled() } }
 
-    fun inspect(uri: Uri) = action {
+    fun inspect(uri: Uri, replacingId: String? = null) = action {
         discardPending()
-        pending.value = manager.inspect(uri)
+        showPreparedImport(manager.inspectFile(uri, replacingId), replacingId)
+    }
+    fun inspectLink(url: String, replacingId: String? = null) {
+        if (linkInspection?.isActive == true) return
+        linkInspection = launchAction(onFailure = { linkImportFailed.value = true }) {
+            discardPending()
+            linkImportFailed.value = false
+            showPreparedImport(manager.inspectLink(url, replacingId = replacingId), replacingId)
+        }
+    }
+    private suspend fun showPreparedImport(prepared: PreparedPlugin, replacingId: String?) {
+        val previous = replacingId?.let { id -> plugins.value.find { it.manifest.id == id } }
+        if (replacingId != null && (previous == null || prepared.manifest.id != replacingId ||
+                prepared.manifest.compatibility != previous.manifest.compatibility)) {
+            withContext(NonCancellable) { manager.discardPrepared(prepared) }
+            throw SourceException(SourceErrorCode.INVALID_RESPONSE)
+        }
+        pending.value = prepared
     }
     fun refreshMarket() = action {
-        updates.refreshMarket()
+        coroutineScope {
+            launch {
+                try { compatibleSources.refresh()?.let { remoteCompatibility.value = it } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Retain the last catalog while a registry request fails. */ }
+            }
+            updates.refreshMarket()
+        }
         message.value = updates.state.value.message
     }
     fun checkUpdates() = action {
@@ -106,22 +171,53 @@ class SourceManagementViewModel @Inject constructor(
         pendingUpdate.value = prepared
         pending.value = prepared.plugin
     }
-    fun cancelImport() { viewModelScope.launch { withContext(NonCancellable) { discardPending() } } }
+    fun prepareCompatibilityMarketInstall(id: String) = action {
+        discardPending()
+        val item = compatibilityMarket.value.firstOrNull { it.entry.id == id }
+            ?: throw SourceException(SourceErrorCode.UNAVAILABLE)
+        val entry = item.entry
+        showPreparedImport(manager.inspectMarketScript(entry) { compatibleSources.download(entry, it) }, item.installedPackageId)
+    }
+    fun cancelImport() {
+        linkInspection?.cancel()
+        linkInspection = null
+        viewModelScope.launch { withContext(NonCancellable) { discardPending() } }
+    }
     private suspend fun discardPending() {
         val prepared = pending.value
         val update = pendingUpdate.value
         pending.value = null
         pendingUpdate.value = null
+        invalidImportDomains.value = false
         if (update != null) updates.discardPrepared(update)
         else if (prepared != null) manager.discardPrepared(prepared)
     }
-    fun install(onInstalled: (InstalledPlugin) -> Unit = {}) = action {
-        val prepared = pending.value ?: return@action
+    fun install(compatibilityDomains: List<String>? = null, onInstalled: (InstalledPlugin) -> Unit = {}) = action {
+        var prepared = pending.value ?: return@action
+        if (compatibilityDomains != null) {
+            val reviewed = try {
+                manager.withCompatibilityDomains(prepared, compatibilityDomains)
+            } catch (error: SourceException) {
+                if (error.code != SourceErrorCode.PERMISSION_DENIED) throw error
+                invalidImportDomains.value = true
+                return@action
+            }
+            if (pending.value !== prepared) {
+                if (reviewed !== prepared) manager.discardPrepared(reviewed)
+                return@action
+            }
+            if (reviewed !== prepared) {
+                pending.value = reviewed
+                withContext(NonCancellable) { manager.discardPrepared(prepared) }
+                prepared = reviewed
+            }
+        }
         val installed = pendingUpdate.value?.let { updates.installReviewed(it) }
             ?: manager.install(prepared, approved = true)
         includePlayableFallbacks()
         pending.value = null
         pendingUpdate.value = null
+        invalidImportDomains.value = false
         editing.value?.takeIf { it.manifest.id == prepared.manifest.id }?.let {
             editing.value = manager.installed.value.find { installed -> installed.manifest.id == it.manifest.id }
         }
@@ -147,11 +243,33 @@ class SourceManagementViewModel @Inject constructor(
     }
     fun saveConfiguration(onSaved: () -> Unit = {}) = action {
         val plugin = editing.value ?: return@action
-        val values = configuration.value.toMap()
+        val values = if (plugin.manifest.compatibility == null) configuration.value.toMap() else {
+            val declaredKeys = plugin.manifest.config.map { it.key }.toSet()
+            configuration.value.filterKeys { it in declaredKeys }
+        }
         if (values != manager.configuration(plugin.manifest.id)) manager.configure(plugin.manifest.id, values)
         includePlayableFallbacks()
         resolver.invalidate()
         onSaved()
+    }
+    fun saveCompatibilityDomains(plugin: InstalledPlugin, domains: List<String>, onSaved: () -> Unit) = action {
+        invalidCompatibilityDomains.value = false
+        val configured = try { manager.configureCompatibilityDomains(plugin.manifest.id, domains) }
+        catch (error: SourceException) {
+            if (error.code != SourceErrorCode.PERMISSION_DENIED) throw error
+            invalidCompatibilityDomains.value = true
+            return@action
+        }
+        if (editing.value?.manifest?.id == configured.manifest.id) editing.value = configured
+        resolver.invalidate()
+        onSaved()
+    }
+    fun useMusicFreeForSearch(plugin: InstalledPlugin) = action {
+        val provider = registry.provider(plugin.manifest.providerId) as? ScriptMusicProvider
+        if (provider == null || provider.manifest.compatibility != "musicfree" || SourceCapability.SEARCH !in provider.capabilities) {
+            throw SourceException(SourceErrorCode.UNAVAILABLE)
+        }
+        preferences.update { it.copy(preferredSearchProvider = provider.id) }
     }
     fun login(providerId: String, method: String, unavailableMessage: String? = null) = action {
         try {

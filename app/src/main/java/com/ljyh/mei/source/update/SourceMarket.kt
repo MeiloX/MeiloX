@@ -28,6 +28,14 @@ data class SourceMarketEntry(
     val apiVersion: Int,
     val packagePath: String = inferPackagePath(packageUrl),
 ) {
+    val isOfficial: Boolean get() = when (packageId) {
+        "org.meilox.source.netease" -> providerId == "netease" && packagePath == "netease.meisource" &&
+            repository.equals("https://github.com/NEORUAA/MeiloX-Netease-Source", ignoreCase = true)
+        "org.meilox.qqmusic" -> providerId == "qqmusic" && packagePath == "qq-music.meisource" &&
+            repository.equals("https://github.com/NEORUAA/MeiloX-QQMusic-Source", ignoreCase = true)
+        else -> false
+    }
+
     internal fun matches(manifest: PluginManifest): Boolean = manifest.id == packageId &&
         manifest.providerId == providerId && manifest.version == version && manifest.apiVersion == apiVersion
 }
@@ -44,6 +52,15 @@ data class SourceMarketItem(
     val trustedOrigin: Boolean,
     val requiresReview: Boolean,
 )
+
+data class CompatibilityMarketItem(
+    val entry: CompatibilityMarketEntry,
+    val installedPackageId: String?,
+    val updateAvailable: Boolean,
+)
+
+internal val CompatibilityMarketEntry.manualPackageId: String
+    get() = "compat.$format.${sha256.take(40)}"
 
 data class SourceUpdateState(
     val checking: Boolean = false,

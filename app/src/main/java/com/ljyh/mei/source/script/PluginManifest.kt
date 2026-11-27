@@ -48,6 +48,8 @@ data class PluginManifest(
     val discardStorageKeys: Set<String> = emptySet(),
     val concurrentReadOperations: Set<String> = emptySet(),
     val concurrentReadFeatures: Map<String, Set<String>> = emptyMap(),
+    val compatibility: String? = null,
+    val compatibilityPlatforms: Set<String>? = null,
 ) {
     val supported: Boolean get() = apiVersion in 1..2
     val sourceCapabilities: Set<SourceCapability> get() = capabilities.mapNotNull(CAPABILITIES::get).toSet()
@@ -55,6 +57,7 @@ data class PluginManifest(
     companion object {
         private val ID = Regex("[a-z][a-z0-9._-]{2,79}")
         private val KEY = Regex("[A-Za-z][A-Za-z0-9._-]{0,63}")
+        private val COMPATIBILITY_ID = Regex("compat\\.(lx|musicfree)\\.[a-f0-9]{40}")
         internal val CONCURRENT_READ_OPERATIONS = setOf(
             "links.resolve", "catalog.search", "catalog.track", "catalog.tracks", "album.get", "album.tracks",
             "artist.get", "artist.tracks", "artist.albums", "playlist.get", "playlist.tracks", "feed.home", "feed.discover",
@@ -184,6 +187,19 @@ data class PluginManifest(
                 manifest.permissions.network.forEach(ScriptNetworkPolicy::validateGrant)
                 require(manifest.config.size <= 32 && manifest.config.map { it.key }.distinct().size == manifest.config.size)
                 manifest.config.forEach { require(KEY.matches(it.key) && it.label.isNotBlank() && it.label.length <= 100) }
+                if (manifest.compatibility != null) {
+                    val lx = manifest.compatibility == "lx"
+                    require(lx || manifest.compatibility == "musicfree")
+                    require(COMPATIBILITY_ID.matchEntire(manifest.id)?.groupValues?.get(1) == manifest.compatibility &&
+                        manifest.providerId == manifest.id)
+                    require(manifest.apiVersion == 2 && manifest.permissions.nativeSdks.isEmpty() &&
+                        manifest.permissions.effects.isEmpty() && !manifest.permissions.storage && manifest.linkHosts.isEmpty())
+                    require(manifest.permissions.network.none { it.startsWith("*") })
+                    require(manifest.capabilities == if (lx) setOf("playback.resolve") else
+                        setOf("catalog.search", "catalog.track", "playback.resolve"))
+                    require(if (lx) manifest.compatibilityPlatforms == setOf("wy") else manifest.compatibilityPlatforms == null)
+                } else require(manifest.compatibilityPlatforms == null &&
+                    !COMPATIBILITY_ID.matches(manifest.id) && !COMPATIBILITY_ID.matches(manifest.providerId))
                 return manifest
             } catch (error: SourceException) { throw error
             } catch (_: Exception) { invalid() }

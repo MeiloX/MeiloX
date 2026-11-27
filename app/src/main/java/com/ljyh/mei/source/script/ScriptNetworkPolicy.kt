@@ -39,6 +39,7 @@ class ScriptNetworkPolicy(
     private val domains: List<String>,
     private val nativeSdks: Set<String> = emptySet(),
     private val configuration: () -> Map<String, String> = { emptyMap() },
+    private val strictRedirects: Boolean = false,
 ) {
     init { domains.forEach(::validateGrant) }
 
@@ -53,6 +54,8 @@ class ScriptNetworkPolicy(
         maxRequests = AUDIO_CONCURRENCY
         maxRequestsPerHost = AUDIO_CONCURRENCY
     }
+    private data class InitialHost(val value: String)
+
     val client: OkHttpClient = OkHttpClient.Builder()
         .dispatcher(Dispatcher().apply {
             maxRequests = API_CONCURRENCY
@@ -60,14 +63,28 @@ class ScriptNetworkPolicy(
         })
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS).callTimeout(15, TimeUnit.SECONDS)
-        .followRedirects(true).followSslRedirects(true).retryOnConnectionFailure(false)
+        .followRedirects(true).followSslRedirects(!strictRedirects).retryOnConnectionFailure(false)
         .proxy(java.net.Proxy.NO_PROXY)
         .dns(Dns { host ->
+            if (strictRedirects) validateHost(host)
             Dns.SYSTEM.lookup(host).also(::validateResolvedAddresses)
         })
         .addInterceptor { chain ->
-            validateUrl(chain.request().url.toString())
-            chain.proceed(chain.request())
+            val request = chain.request()
+            validateUrl(request.url.toString())
+            chain.proceed(if (strictRedirects) request.newBuilder().tag(InitialHost::class.java, InitialHost(request.url.host)).build() else request)
+        }.apply {
+            if (strictRedirects) addNetworkInterceptor { chain ->
+                val request = chain.request()
+                validateUrl(request.url.toString())
+                if (request.tag(InitialHost::class.java)?.value != request.url.host) {
+                    if (request.method !in setOf("GET", "HEAD")) denied()
+                    val redirect = request.newBuilder()
+                    // Only transport headers belong to a cross-host redirect.
+                    request.headers.names().filterNot { it.lowercase() in REDIRECT_HEADERS }.forEach(redirect::removeHeader)
+                    chain.proceed(redirect.build())
+                } else chain.proceed(request)
+            }
         }.build()
 
     // Wrappers share the owning policy's connection pool, but contain no account or request state.
@@ -134,7 +151,7 @@ class ScriptNetworkPolicy(
     fun validateHeaders(headers: Map<String, String>) {
         if (headers.size > 32 || headers.entries.sumOf { it.key.length + it.value.length } > 16_384) denied()
         headers.forEach { (key, value) ->
-            if (!Regex("[A-Za-z0-9!#$%&'*+.^_`|~-]+").matches(key) || value.any { it == '\r' || it == '\n' || it == '\u0000' } ||
+            if (!Regex("[A-Za-z0-9!#$%&'*+.^_`|~-]+").matches(key) || value.any { it != '\t' && it !in ' '..'~' } ||
                 key.lowercase() in setOf("host", "connection", "content-length", "transfer-encoding", "proxy-authorization", "proxy-connection")) denied()
         }
     }
@@ -338,6 +355,7 @@ class ScriptNetworkPolicy(
         internal fun artworkUri(file: java.io.File): String = java.net.URI("file", "", file.absolutePath, null).toASCIIString()
 
         const val MAX_REQUEST_BYTES = 256 * 1024
+        private val REDIRECT_HEADERS = setOf("host", "connection", "range", "accept", "accept-encoding", "user-agent")
         const val MAX_RESPONSE_BYTES = 4 * 1024 * 1024
         internal const val MAX_ARTWORK_CACHE_BYTES = 128L * 1024 * 1024
         private const val MAX_ARTWORK_CACHE_FILES = 2048
