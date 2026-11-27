@@ -275,7 +275,8 @@ fun SourceFeedScreen(
     val greeting = remember { getGreeting() }
     val onOpenContent = remember(nav) { { ref: ContentRef -> navigateSourceContent(nav, ref) } }
     val onMoreTrack = remember(selection) { { track: Track, anchor: Rect -> selection.value = track to anchor } }
-    val currentOpenCard = rememberUpdatedState(::openCard)
+    // Local function references can compare equal even when their captured source or player changes.
+    val currentOpenCard = rememberUpdatedState<(SourceFeedCard) -> Unit> { card -> openCard(card) }
     val onActionCard = remember { { card: SourceFeedCard -> currentOpenCard.value(card) } }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val feedMaxWidth = maxWidth
@@ -362,7 +363,7 @@ fun SourceFeedScreen(
                     if (state.providerId == selectedId) {
                         if (kind == FeedKind.DISCOVER) {
                             sourceDiscoverItems(state.sections, discoverColumns, !device.isTablet, { navigateSourceContent(nav, it) }, play,
-                                { track, anchor -> selection.value = track to anchor }, ::openCard, loadingCard, trackMenuAnchor)
+                                { track, anchor -> selection.value = track to anchor }, onActionCard, loadingCard, trackMenuAnchor)
                         } else state.sections.forEachIndexed { index, section ->
                             item(key = "source-feed:${state.providerId}:${section.id}") {
                                 val resolvedSection = remember(section, index, greeting) {
@@ -732,7 +733,7 @@ fun SourceLibraryScreen(
     val createdState = resolvedCreatedViewModel?.state?.collectAsState()?.value
     val listState = rememberSaveable(selectedId, page, showArtists, saver = LazyListState.Saver) { LazyListState() }
     val nav = LocalNavController.current
-    fun openPage(value: LibraryPage) {
+    val openPage: (LibraryPage) -> Unit = { value ->
         if (style == LibraryStyle.Default && category == null) selectedPage = value
         else Screen.LibraryCategory.navigate(nav) { addPath(value.name) }
     }
@@ -796,7 +797,7 @@ fun SourceLibraryScreen(
         return
     }
     if (page == LibraryPage.Downloads && !showArtists) {
-        LibraryDownloadsPage(isNavigationTab, category != null, pages, ::openPage, listState, tabPosition)
+        LibraryDownloadsPage(isNavigationTab, category != null, pages, openPage, listState, tabPosition)
         return
     }
     val revisionFlow = (provider as? AccountRevisionCapability)?.accountRevision
@@ -1008,7 +1009,7 @@ fun SourceLibraryScreen(
                         placeholder = stringResource(R.string.search_bar_search), closeContentDescription = stringResource(R.string.cancel),
                         onSearch = { focus.clearFocus() }, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) }
                     if (category == null && !showArtists) item("source-library-pages") { GlasmioSegmentedControl(
-                        items = pages.map { it to stringResource(it.titleRes) }, selected = page, onSelected = ::openPage,
+                        items = pages.map { it to stringResource(it.titleRes) }, selected = page, onSelected = openPage,
                         positionAnimation = tabPosition, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) }
                     if (page == LibraryPage.Playlists && !showArtists) item("source-library-filter") { GlasmioSegmentedControl(
                         items = listOf("all" to stringResource(R.string.library_filter_all), "created" to stringResource(R.string.library_filter_created), "saved" to stringResource(R.string.library_filter_subscribed)),
