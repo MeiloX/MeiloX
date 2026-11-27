@@ -23,8 +23,7 @@ interface SourceUpdateTransport {
 class SourceMarketTransport internal constructor(private val policy: ScriptNetworkPolicy) : SourceUpdateTransport {
     @Inject constructor() : this(ScriptNetworkPolicy(listOf("raw.githubusercontent.com", "api.github.com")))
 
-    // Resolve the repository's current package commit when the GitHub API allows it;
-    // the raw HEAD fallback keeps latest-package checks working under public API limits.
+    // Pin each package download to the commit that the GitHub API reports for its path.
     private val client = policy.client.newBuilder().dns(okhttp3.Dns.SYSTEM).build()
 
     override suspend fun index(etag: String?): SourceIndexResponse {
@@ -55,7 +54,6 @@ class SourceMarketTransport internal constructor(private val policy: ScriptNetwo
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "MeiloX-Source-Market")
             .build()), {}) { response, guard ->
-            if (response.code in 400..499) return@exchange null
             if (!response.isSuccessful) unavailable()
             val body = response.body
             if (body.contentLength() > MAX_METADATA_BYTES) invalidResponse()
@@ -68,8 +66,7 @@ class SourceMarketTransport internal constructor(private val policy: ScriptNetwo
             first.asJsonObject.get("sha")?.takeIf { it.isJsonPrimitive }?.asString
                 ?.takeIf { SHA1.matches(it) } ?: invalidResponse()
         }
-        val ref = commit ?: "HEAD"
-        val url = "https://raw.githubusercontent.com/$owner/$repository/$ref/${listing.packagePath}"
+        val url = "https://raw.githubusercontent.com/$owner/$repository/$commit/${listing.packagePath}"
         val archive = File.createTempFile("source-market-resolve-", ".meisource")
         try {
             val digest = downloadBytes(url, archive)

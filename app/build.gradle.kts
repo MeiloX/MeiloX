@@ -87,7 +87,7 @@ val ciRunAttempt = if (isCanonicalCi) providers.gradleProperty("mei.ciRunAttempt
 android {
     namespace = "com.ljyh.mei"
     compileSdk = 37
-    ndkVersion = "27.1.12297006"
+    ndkVersion = "29.0.14206865"
     useLibrary("android.test.mock")
     testBuildType = providers.gradleProperty("mei.instrumentationBuildType").orElse("debug").get()
     sourceSets.named("main") {

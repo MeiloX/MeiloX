@@ -577,11 +577,17 @@ class MusicService : MediaLibraryService(),
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Any app can send these exported actions, so each one requires the widget command token.
+        val trusted = MusicWidgets.isWidgetCommand(this, intent)
         when (intent?.action) {
-            ACTION_CANCEL_SLEEP_TIMER -> sleepTimer.clear()
-            ACTION_TOGGLE_PLAYBACK -> if (player.isPlaying) player.pause() else player.play()
-            ACTION_PREVIOUS -> if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem() else player.seekTo(0L)
-            ACTION_NEXT -> if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+            ACTION_CANCEL_SLEEP_TIMER -> if (trusted) sleepTimer.clear()
+            ACTION_TOGGLE_PLAYBACK -> if (trusted) {
+                if (player.isPlaying) player.pause() else player.play()
+            }
+            ACTION_PREVIOUS -> if (trusted) {
+                if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem() else player.seekTo(0L)
+            }
+            ACTION_NEXT -> if (trusted && player.hasNextMediaItem()) player.seekToNextMediaItem()
         }
         return super.onStartCommand(intent, flags, startId)
     }

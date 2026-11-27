@@ -47,6 +47,7 @@ import com.ljyh.mei.playback.PlayerConnection
 import io.github.neoruaa.glasmio.ui.GlasmioCard
 import io.github.neoruaa.glasmio.core.LocalGlassColors
 import com.ljyh.mei.utils.rememberPreference
+import com.ljyh.mei.widget.MusicWidgets
 import com.mocharealm.accompanist.lyrics.core.model.ISyncedLine
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine
 import com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine
@@ -66,7 +67,7 @@ fun floatingLyricsPipParams(context: Context, isPlaying: Boolean): PictureInPict
         titleRes: Int,
     ): RemoteAction {
         val title = context.getString(titleRes)
-        val intent = Intent(context, MusicService::class.java).setAction(serviceAction)
+        val intent = MusicWidgets.authorize(context, Intent(context, MusicService::class.java).setAction(serviceAction))
         val pendingIntent = PendingIntent.getService(
             context,
             requestCode,
