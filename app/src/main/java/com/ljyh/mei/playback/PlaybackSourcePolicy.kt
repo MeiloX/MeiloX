@@ -201,6 +201,10 @@ internal fun resolvedCacheQuality(mediaId: String, cacheKey: String): String? {
 internal fun shouldRefreshPlaybackSource(errorCode: Int): Boolean =
     errorCode == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE
 
+/** A skip that lands on Media3's post-failure STATE_IDLE never resolves or plays without an explicit prepare(). */
+internal fun shouldPrepareAfterSkip(playbackState: Int): Boolean =
+    playbackState == Player.STATE_IDLE
+
 /** Resource transport failures get bounded refresh and source fallback before queue skipping. */
 internal fun shouldRetryOnlinePlaybackSource(errorCode: Int): Boolean = when (errorCode) {
     PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,

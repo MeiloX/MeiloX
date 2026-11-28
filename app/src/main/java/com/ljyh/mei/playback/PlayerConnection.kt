@@ -305,7 +305,8 @@ class PlayerConnection(
         // 原生 Shuffle 模式下，seekToNext 会自动跳到随机的下一首，不需要额外逻辑
         if (player.hasNextMediaItem()) {
             player.seekToNext()
-            // 通常不需要重新 prepare，除非出错
+            // STATE_IDLE（例如上一首播放失败后）必须重新 prepare，否则切歌后永远静默
+            if (shouldPrepareAfterSkip(player.playbackState)) player.prepare()
             if (!player.playWhenReady) player.playWhenReady = true
         }
     }
@@ -323,6 +324,8 @@ class PlayerConnection(
             } else {
                 player.seekToPrevious()
             }
+            // STATE_IDLE（例如上一首播放失败后）必须重新 prepare，否则切歌后永远静默
+            if (shouldPrepareAfterSkip(player.playbackState)) player.prepare()
             if (!player.playWhenReady) player.playWhenReady = true
         }
     }
