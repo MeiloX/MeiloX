@@ -8,6 +8,7 @@ import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
+import androidx.datastore.preferences.core.edit
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -27,6 +28,8 @@ import com.google.gson.JsonParser
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.ljyh.mei.MainActivity
+import com.ljyh.mei.constants.NoAudioSourceKey
+import com.ljyh.mei.di.AppDatabase
 import com.ljyh.mei.data.model.Tracks
 import com.ljyh.mei.data.model.createPlaceholder
 import com.ljyh.mei.data.model.room.Song
@@ -37,8 +40,11 @@ import com.ljyh.mei.playback.queue.ListQueue
 import com.ljyh.mei.playback.queue.PlaylistQueueSource
 import com.ljyh.mei.playback.queue.SourceContentQueue
 import com.ljyh.mei.source.api.*
+import com.ljyh.mei.source.core.PlaybackResolutionException
 import com.ljyh.mei.source.core.ProviderRegistry
+import com.ljyh.mei.source.core.SourcePreferences
 import com.ljyh.mei.source.core.SourceRouter
+import com.ljyh.mei.utils.dataStore
 import com.ljyh.mei.widget.MusicWidgets
 import java.io.File
 import java.nio.ByteBuffer
@@ -56,6 +62,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
@@ -70,14 +77,103 @@ import org.junit.runner.RunWith
 class PlaybackQueueIntegrationTest {
     @Test
     fun widgetTransportStartsPreviousAndNextTracksFromPausedPlayback() {
+        withServiceQueue { context, binder, items ->
+            val player = binder.service.player
+            onMain {
+                player.pause()
+                player.repeatMode = Player.REPEAT_MODE_OFF
+                player.shuffleModeEnabled = false
+                player.setMediaItems(items, 1, 0L)
+                player.prepare()
+            }
+            for ((action, target) in listOf(MusicWidgets.ACTION_PREVIOUS to 0, MusicWidgets.ACTION_NEXT to 2)) {
+                await("a paused widget queue") {
+                    player.currentMediaItem?.mediaId == items[1].mediaId &&
+                        player.playbackState == Player.STATE_READY && !player.playWhenReady
+                }
+                checkNotNull(MusicWidgets.transport(context, action)).send()
+                await("widget action $action to select the expected song") {
+                    player.currentMediaItem?.mediaId == items[target].mediaId
+                }
+                await("widget action $action to start playback") { player.isPlaying }
+                onMain {
+                    player.pause()
+                    player.seekToDefaultPosition(1)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun manualSkipsResumePlayableNeighborsAfterSourceFailure() {
+        withServiceQueue { context, binder, playable ->
+            val player = binder.service.player
+            val live = InstrumentationRegistry.getArguments().getString("queueUnavailableLive") == "true"
+            val missing = if (live) Track(TrackRef(ProviderIds.NETEASE, "3319487289"), "ふたりごと", listOf(SourceArtist("iri")))
+                else Track(TrackRef("test.unavailable", "no-source"), "Unavailable", emptyList())
+            val queue = listOf(playable.first(), missing.toMediaMetadata().toMediaItem(), playable.last())
+            val sourceSettings = SourcePreferences(context)
+            val missingRef = TrackRefCodec.encode(missing.ref)
+            val originalSkip = runBlocking { context.dataStore.data.first()[NoAudioSourceKey] }
+            val hadFallbackDisabled = runBlocking { missingRef in sourceSettings.snapshot().disabledTrackFallbacks }
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+            val controls = onMain { PlayerConnection(context, binder, AppDatabase.getDatabase(context), scope) }
+            try {
+                runBlocking {
+                    context.dataStore.edit { it[NoAudioSourceKey] = false }
+                    sourceSettings.update { it.copy(disabledTrackFallbacks = it.disabledTrackFallbacks + missingRef) }
+                }
+                onMain {
+                    player.repeatMode = Player.REPEAT_MODE_OFF
+                    player.shuffleModeEnabled = false
+                    player.setMediaItems(queue, 0, 0L)
+                    player.prepare()
+                    player.play()
+                }
+                fun awaitPlayback(index: Int) = await("audio position to advance on ${queue[index].mediaId}") {
+                    player.currentMediaItemIndex == index && player.isPlaying && player.currentPosition >= 150L
+                }
+                fun awaitMissingSource() = await("the unavailable middle song to pause in Media3", if (live) 25_000L else 5_000L) {
+                    val failure = generateSequence<Throwable>(player.playerError) { it.cause }
+                        .filterIsInstance<PlaybackResolutionException>().firstOrNull()
+                    if (live && failure != null) {
+                        assertEquals(missing.ref, failure.attempts.single().trackRef)
+                        assertTrue("NetEase must report that this recording is unavailable: ${failure.code}",
+                            failure.code in setOf(SourceErrorCode.UNAVAILABLE, SourceErrorCode.NOT_FOUND))
+                    }
+                    player.currentMediaItemIndex == 1 && !player.playWhenReady && player.playbackState == Player.STATE_IDLE &&
+                        failure != null
+                }
+                awaitPlayback(0)
+                val entries = onMain { List(player.mediaItemCount) { requireNotNull(player.getMediaItemAt(it).queueEntryId) } }
+                onMain { controls.seekToNext() }
+                awaitMissingSource()
+                onMain { controls.seekToNext() }
+                awaitPlayback(2)
+                onMain { controls.seekToPrevious() }
+                awaitMissingSource()
+                onMain { controls.seekToPrevious() }
+                awaitPlayback(0)
+                onMain { assertEquals(entries, List(player.mediaItemCount) { player.getMediaItemAt(it).queueEntryId }) }
+            } finally {
+                onMain { controls.dispose(); scope.cancel() }
+                runBlocking {
+                    context.dataStore.edit { if (originalSkip == null) it.remove(NoAudioSourceKey) else it[NoAudioSourceKey] = originalSkip }
+                    if (!hadFallbackDisabled) sourceSettings.update { it.copy(disabledTrackFallbacks = it.disabledTrackFallbacks - missingRef) }
+                }
+            }
+        }
+    }
+
+    private fun withServiceQueue(block: (Context, MusicService.MusicBinder, List<MediaItem>) -> Unit) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assumeTrue(context.packageName == "com.neoruaa.meilox.test")
         ActivityScenario.launch(MainActivity::class.java).use {
             val connected = CountDownLatch(1)
-            val serviceReference = AtomicReference<MusicService>()
+            val serviceReference = AtomicReference<MusicService.MusicBinder>()
             val connection = object : ServiceConnection {
                 override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-                    serviceReference.set((binder as? MusicService.MusicBinder)?.service)
+                    serviceReference.set(binder as MusicService.MusicBinder)
                     connected.countDown()
                 }
 
@@ -86,12 +182,13 @@ class PlaybackQueueIntegrationTest {
             assertTrue(context.bindService(Intent(context, MusicService::class.java), connection, Context.BIND_AUTO_CREATE))
             try {
                 assertTrue("The playback service must bind", connected.await(10, TimeUnit.SECONDS))
-                val service = checkNotNull(serviceReference.get())
+                val binder = checkNotNull(serviceReference.get())
+                val service = binder.service
                 runBlocking { withTimeout(10_000) { service.awaitPlaybackRestore() } }
-                val silence = File.createTempFile("widget-regression-", ".wav", context.cacheDir)
+                val silence = File.createTempFile("transport-regression-", ".wav", context.cacheDir)
                 val songs = (1..3).map { index ->
                     Song(
-                        id = "local_12700$index", title = "Widget fixture $index", artist = emptyList(),
+                        id = "local_12700$index", title = "Transport fixture $index", artist = emptyList(),
                         album = "", cover = "", duration = 30_000, path = silence.absolutePath,
                         sourceType = SourceType.LOCAL,
                     )
@@ -101,28 +198,7 @@ class PlaybackQueueIntegrationTest {
                 try {
                     writeSilence(silence, durationSeconds = 30)
                     runBlocking(Dispatchers.IO) { service.songRepository.insertSongs(songs) }
-                    onMain {
-                        player.pause()
-                        player.repeatMode = Player.REPEAT_MODE_OFF
-                        player.shuffleModeEnabled = false
-                        player.setMediaItems(items, 1, 0L)
-                        player.prepare()
-                    }
-                    for ((action, target) in listOf(MusicWidgets.ACTION_PREVIOUS to 0, MusicWidgets.ACTION_NEXT to 2)) {
-                        await("a paused widget queue") {
-                            player.currentMediaItem?.mediaId == items[1].mediaId &&
-                                player.playbackState == Player.STATE_READY && !player.playWhenReady
-                        }
-                        checkNotNull(MusicWidgets.transport(context, action)).send()
-                        await("widget action $action to select the expected song") {
-                            player.currentMediaItem?.mediaId == items[target].mediaId
-                        }
-                        await("widget action $action to start playback") { player.isPlaying }
-                        onMain {
-                            player.pause()
-                            player.seekToDefaultPosition(1)
-                        }
-                    }
+                    block(context, binder, items)
                 } finally {
                     onMain {
                         player.pause()
@@ -1909,9 +1985,9 @@ class PlaybackQueueIntegrationTest {
             file.writeBytes(header + ByteArray(dataSize))
         }
 
-        private fun await(stage: String = "queue state", matches: () -> Boolean) = runBlocking {
+        private fun await(stage: String = "queue state", timeoutMs: Long = 5_000, matches: () -> Boolean) = runBlocking {
             try {
-                withTimeout(5_000) { while (!onMain(matches)) delay(10) }
+                withTimeout(timeoutMs) { while (!onMain(matches)) delay(10) }
             } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
                 throw AssertionError("Timed out waiting for $stage", error)
             }

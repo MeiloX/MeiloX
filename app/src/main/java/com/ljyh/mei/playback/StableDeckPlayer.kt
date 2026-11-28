@@ -222,6 +222,11 @@ class StableDeckPlayer(
         seekCommand: Int,
     ): ListenableFuture<*> {
         if (internalQueueUpdateDepth == 0) onSeekRequested?.invoke()
+        val skipsTrack = seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS ||
+            seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM ||
+            seekCommand == Player.COMMAND_SEEK_TO_NEXT ||
+            seekCommand == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM
+        val skipAfterError = skipsTrack && activeDeck.playerError != null
         val result = if (seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS) {
             if (activeDeck.hasPreviousMediaItem()) {
                 activeDeck.seekToPreviousMediaItem()
@@ -232,16 +237,12 @@ class StableDeckPlayer(
         } else {
             super.handleSeek(mediaItemIndex, positionMs, seekCommand)
         }
-        // External track selections start playback; in-track seeks retain the current state.
-        if (isExternalMediaRequest?.invoke() == true && activeDeck.mediaItemCount > 0 &&
-            (seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS ||
-                seekCommand == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM ||
-                seekCommand == Player.COMMAND_SEEK_TO_NEXT ||
-                seekCommand == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
-                seekCommand == Player.COMMAND_SEEK_TO_MEDIA_ITEM)
-        ) {
+        val externalSelection = (skipsTrack || seekCommand == Player.COMMAND_SEEK_TO_MEDIA_ITEM) &&
+            isExternalMediaRequest?.invoke() == true
+        if ((skipsTrack || externalSelection) && activeDeck.mediaItemCount > 0) {
+            // Seeking an idle ExoPlayer changes its index without starting the new source.
             if (activeDeck.playbackState == Player.STATE_IDLE) activeDeck.prepare()
-            activeDeck.play()
+            if (skipAfterError || externalSelection) activeDeck.play()
         }
         return result
     }
