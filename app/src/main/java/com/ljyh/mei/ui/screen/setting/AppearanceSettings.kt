@@ -27,7 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.ljyh.mei.R
-import com.ljyh.mei.constants.AccompanimentLyricTextBoldKey
+import com.ljyh.mei.constants.TranslationLyricTextWeightKey
 import com.ljyh.mei.constants.AccentColorKey
 import com.ljyh.mei.constants.AccompanimentLyricTextSizeKey
 import com.ljyh.mei.constants.ColorfulDetailBackgroundsKey
@@ -44,7 +44,7 @@ import com.ljyh.mei.constants.MeshPlayingKey
 import com.ljyh.mei.constants.MeshRenderScaleKey
 import com.ljyh.mei.constants.MeshStaticModeKey
 import com.ljyh.mei.constants.MeshSubdivisionKey
-import com.ljyh.mei.constants.NormalLyricTextBoldKey
+import com.ljyh.mei.constants.NormalLyricTextWeightKey
 import com.ljyh.mei.constants.NormalLyricTextSizeKey
 import com.ljyh.mei.constants.OriginalCoverKey
 import com.ljyh.mei.constants.LibraryStyle
@@ -144,9 +144,9 @@ fun AppearanceSettings(
     val (meshStatic, setMeshStatic) = rememberPreference(MeshStaticModeKey, false)
     val (meshPlaying, setMeshPlaying) = rememberPreference(MeshPlayingKey, true)
     val (primarySize, setPrimarySize) = rememberEnumPreference(NormalLyricTextSizeKey, LyricTextSize.Size28)
-    val (primaryBold, setPrimaryBold) = rememberPreference(NormalLyricTextBoldKey, true)
+    val (primaryWeight, setPrimaryWeight) = rememberPreference(NormalLyricTextWeightKey, 700)
     val (secondarySize, setSecondarySize) = rememberEnumPreference(AccompanimentLyricTextSizeKey, LyricTextSize.Size18)
-    val (secondaryBold, setSecondaryBold) = rememberPreference(AccompanimentLyricTextBoldKey, true)
+    val (secondaryWeight, setSecondaryWeight) = rememberPreference(TranslationLyricTextWeightKey, 700)
     val (debug, setDebug) = rememberPreference(DebugKey, false)
 
     MeiloXPinnedListPage(
@@ -312,9 +312,9 @@ fun AppearanceSettings(
         }
         item {
             SettingsGroup(stringResource(R.string.appearance_lyrics)) {
-                AppearanceToggle(R.string.appearance_primary_bold, null, "bold", primaryBold, setPrimaryBold)
+                AppearanceLyricWeight(R.string.appearance_primary_weight, primaryWeight, setPrimaryWeight)
                 AppearanceLyricSize(R.string.appearance_primary_size, primarySize, 16..48, setPrimarySize)
-                AppearanceToggle(R.string.appearance_secondary_bold, null, "bold", secondaryBold, setSecondaryBold)
+                AppearanceLyricWeight(R.string.appearance_secondary_weight, secondaryWeight, setSecondaryWeight)
                 AppearanceLyricSize(R.string.appearance_secondary_size, secondarySize, 16..36, setSecondarySize)
             }
         }
@@ -339,6 +339,11 @@ fun AppearanceSettings(
             opacity = stringResource(R.string.color_picker_opacity),
         ),
     )
+}
+
+@Composable
+private fun AppearanceLyricWeight(titleRes: Int, weight: Int, setWeight: (Int) -> Unit) {
+    AppearanceChoice(titleRes, "bold", weight, (100..900 step 100).toList(), { it.toString() }, setWeight)
 }
 
 @Composable

@@ -7,6 +7,7 @@ import android.graphics.HardwareBufferRenderer
 import android.graphics.Paint
 import android.graphics.RenderNode
 import android.graphics.RuntimeXfermode
+import android.graphics.Typeface
 import android.hardware.HardwareBuffer
 import android.view.View
 import android.view.ViewGroup
@@ -90,12 +91,17 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.datastore.preferences.core.preferencesOf
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.neoruaa.glasmio.glass.render.backdrops.emptyBackdrop
 import com.ljyh.mei.R
+import com.ljyh.mei.constants.AccompanimentLyricTextBoldKey
 import com.ljyh.mei.constants.MusicQuality
+import com.ljyh.mei.constants.NormalLyricTextBoldKey
+import com.ljyh.mei.constants.NormalLyricTextWeightKey
+import com.ljyh.mei.constants.TranslationLyricTextWeightKey
 import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.ui.component.player.AutoMixVisuals
 import com.ljyh.mei.ui.component.player.FloatingLyricsPipContent
@@ -119,6 +125,8 @@ import com.ljyh.mei.ui.model.LyricCandidate
 import com.ljyh.mei.ui.model.LyricData
 import com.ljyh.mei.ui.model.LyricVariant
 import com.ljyh.mei.ui.model.LyricSource
+import com.ljyh.mei.ui.theme.AppFontFamily
+import com.ljyh.mei.utils.LyricWeightMigration
 import com.ljyh.mei.utils.lyric.LRCParser
 import com.ljyh.mei.utils.lyric.attachPhonetics
 import com.ljyh.mei.utils.lyric.karaokeRenderTimeWindow
@@ -136,6 +144,7 @@ import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -153,6 +162,54 @@ import android.graphics.Color as AndroidColor
 @RunWith(AndroidJUnit4::class)
 class PlayerLyricsRenderingTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun migratesIndependentLegacyLyricWeights() = runBlocking {
+        val primaryOnly = preferencesOf(NormalLyricTextBoldKey to false)
+        val updated = LyricWeightMigration.migrate(primaryOnly)
+        assertEquals(400, updated[NormalLyricTextWeightKey])
+        assertNull(updated[TranslationLyricTextWeightKey])
+        assertFalse(LyricWeightMigration.shouldMigrate(updated))
+
+        val mixed = preferencesOf(
+            NormalLyricTextBoldKey to false,
+            NormalLyricTextWeightKey to 900,
+            AccompanimentLyricTextBoldKey to true,
+        )
+        val result = LyricWeightMigration.migrate(mixed)
+        assertEquals(900, result[NormalLyricTextWeightKey])
+        assertEquals(700, result[TranslationLyricTextWeightKey])
+        assertFalse(LyricWeightMigration.shouldMigrate(result))
+    }
+
+    @Test
+    fun heavyLyricWeightsRenderDistinctGlyphs() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val fonts = createFontFamilyResolver(context)
+        val bitmap = Bitmap.createBitmap(540, 100, Bitmap.Config.ARGB_8888)
+        val canvas = AndroidCanvas(bitmap)
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        fun coverage(weight: FontWeight): Long {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                typeface = fonts.resolve(AppFontFamily, weight).value as Typeface
+                textSize = 72f
+                color = AndroidColor.WHITE
+            }
+            bitmap.eraseColor(AndroidColor.TRANSPARENT)
+            canvas.drawText("MeiloX", 0f, 80f, paint)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            return pixels.sumOf { (it ushr 24).toLong() }
+        }
+        try {
+            val bold = coverage(FontWeight.Bold)
+            val extraBold = coverage(FontWeight.ExtraBold)
+            val black = coverage(FontWeight.Black)
+            assertTrue("Expected increasing glyph coverage, got $bold, $extraBold, $black",
+                bold < extraBold && extraBold < black)
+        } finally {
+            bitmap.recycle()
+        }
+    }
 
     @Test
     fun primaryCenterMatchesWrappedTextWithoutIncludingTranslation() {

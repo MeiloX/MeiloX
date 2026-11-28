@@ -16,13 +16,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.ljyh.mei.R
 
-private val sfProWeights = listOf(
-    FontWeight.Light,
-    FontWeight.Normal,
-    FontWeight.Medium,
-    FontWeight.SemiBold,
-    FontWeight.Bold,
-)
+private val sfProWeights = (100..900 step 100).map(::FontWeight)
 
 private class SfProFont(override val weight: FontWeight) : AndroidFont(
     loadingStrategy = FontLoadingStrategy.Blocking,

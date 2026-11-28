@@ -275,9 +275,9 @@
     <string name="appearance_background_animation">Background animation</string>
     <string name="appearance_background_animation_description">Pause or resume fluid background rendering.</string>
     <string name="appearance_lyrics">Lyric Typography</string>
-    <string name="appearance_primary_bold">Bold primary lyric</string>
+    <string name="appearance_primary_weight">Primary lyric weight</string>
     <string name="appearance_primary_size">Primary lyric size</string>
-    <string name="appearance_secondary_bold">Bold translation lyric</string>
+    <string name="appearance_secondary_weight">Translation lyric weight</string>
     <string name="appearance_secondary_size">Translation lyric size</string>
     <string name="appearance_diagnostics">Diagnostics</string>
     <string name="appearance_player_debug">Player diagnostics</string>

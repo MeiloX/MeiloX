@@ -57,9 +57,11 @@ val InterfaceLetterSpacingKey = floatPreferencesKey("interfaceLetterSpacing")
 val PlayerActionKey = stringPreferencesKey("playerBottomAction")
 
 val NormalLyricTextSizeKey = stringPreferencesKey("lyricTextSize")
+val NormalLyricTextWeightKey = intPreferencesKey("lyricTextWeight")
 val NormalLyricTextBoldKey = booleanPreferencesKey("lyricTextBold")
 
 val AccompanimentLyricTextSizeKey = stringPreferencesKey("accompanimentLyricTextSize")
+val TranslationLyricTextWeightKey = intPreferencesKey("translationLyricTextWeight")
 val AccompanimentLyricTextBoldKey = booleanPreferencesKey("accompanimentLyricTextBold")
 
 val LoopPlaybackKey = booleanPreferencesKey("loopPlayback")

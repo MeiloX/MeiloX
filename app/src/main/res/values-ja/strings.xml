@@ -270,9 +270,9 @@
   <string name="appearance_background_animation">背景アニメーション</string>
   <string name="appearance_background_animation_description">流体背景のレンダリングを一時停止または再開します。</string>
   <string name="appearance_lyrics">歌詞のタイポグラフィ</string>
-  <string name="appearance_primary_bold">メイン歌詞を太字にする</string>
+  <string name="appearance_primary_weight">メイン歌詞の太さ</string>
   <string name="appearance_primary_size">メイン歌詞のサイズ</string>
-  <string name="appearance_secondary_bold">翻訳歌詞を太字にする</string>
+  <string name="appearance_secondary_weight">翻訳歌詞の太さ</string>
   <string name="appearance_secondary_size">翻訳歌詞のサイズ</string>
   <string name="appearance_diagnostics">診断</string>
   <string name="appearance_player_debug">プレーヤーの診断</string>

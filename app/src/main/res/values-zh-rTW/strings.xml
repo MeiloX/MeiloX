@@ -275,9 +275,9 @@
     <string name="appearance_background_animation">背景動畫</string>
     <string name="appearance_background_animation_description">暫停或恢復流動背景渲染。</string>
     <string name="appearance_lyrics">歌詞字型</string>
-    <string name="appearance_primary_bold">主歌詞粗體</string>
+    <string name="appearance_primary_weight">主歌詞字重</string>
     <string name="appearance_primary_size">主歌詞大小</string>
-    <string name="appearance_secondary_bold">翻譯歌詞粗體</string>
+    <string name="appearance_secondary_weight">翻譯歌詞字重</string>
     <string name="appearance_secondary_size">翻譯歌詞大小</string>
     <string name="appearance_diagnostics">診斷</string>
     <string name="appearance_player_debug">播放器診斷</string>

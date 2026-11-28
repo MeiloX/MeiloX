@@ -81,7 +81,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.ljyh.mei.R
-import com.ljyh.mei.constants.AccompanimentLyricTextBoldKey
+import com.ljyh.mei.constants.TranslationLyricTextWeightKey
 import com.ljyh.mei.constants.AccompanimentLyricTextSizeKey
 import com.ljyh.mei.constants.LyricGlowEnabledKey
 import com.ljyh.mei.constants.LyricLiftEnabledKey
@@ -89,7 +89,7 @@ import com.ljyh.mei.constants.LyricLongToneEnabledKey
 import com.ljyh.mei.constants.LyricRomanizationEnabledKey
 import com.ljyh.mei.constants.LyricTextSize
 import com.ljyh.mei.constants.LyricTranslationEnabledKey
-import com.ljyh.mei.constants.NormalLyricTextBoldKey
+import com.ljyh.mei.constants.NormalLyricTextWeightKey
 import com.ljyh.mei.constants.NormalLyricTextSizeKey
 import com.ljyh.mei.data.model.metadata
 import com.ljyh.mei.playback.PlayerConnection
@@ -168,12 +168,12 @@ fun LyricScreen(
         NormalLyricTextSizeKey,
         LyricTextSize.Size28
     )
-    val (normalLyricTextBold, _) = rememberPreference(NormalLyricTextBoldKey, true)
+    val (primaryWeight, _) = rememberPreference(NormalLyricTextWeightKey, 700)
     val (translationLyricTextSize, _) = rememberEnumPreference(
         AccompanimentLyricTextSizeKey,
         LyricTextSize.Size18
     )
-    val (translationLyricTextBold, _) = rememberPreference(AccompanimentLyricTextBoldKey, true)
+    val (translationWeight, _) = rememberPreference(TranslationLyricTextWeightKey, 700)
     val (translationEnabled, _) = rememberPreference(LyricTranslationEnabledKey, true)
     val (romanizationEnabled, _) = rememberPreference(LyricRomanizationEnabledKey, true)
     val (glowEnabled, _) = rememberPreference(LyricGlowEnabledKey, true)
@@ -181,12 +181,12 @@ fun LyricScreen(
     val (longToneEnabled, _) = rememberPreference(LyricLongToneEnabledKey, true)
     val mainTextStyle = LocalTextStyle.current.copy(
         fontSize = normalLyricTextSize.text.coerceIn(16, 48).sp,
-        fontWeight = if (normalLyricTextBold) FontWeight.Bold else FontWeight.Normal,
+        fontWeight = FontWeight(primaryWeight.coerceIn(100, 900)),
         textMotion = TextMotion.Animated,
     )
     val translationTextStyle = LocalTextStyle.current.copy(
         fontSize = translationLyricTextSize.text.coerceIn(16, 36).sp,
-        fontWeight = if (translationLyricTextBold) FontWeight.Bold else FontWeight.Normal,
+        fontWeight = FontWeight(translationWeight.coerceIn(100, 900)),
         textMotion = TextMotion.Animated,
     )
     val textMeasurer = rememberTextMeasurer()
@@ -639,11 +639,7 @@ fun LyricScreen(
                                     .padding(vertical = rendererVerticalPadding)
                                     .clipToBounds(),
                                 normalLineTextStyle = mainTextStyle,
-                                accompanimentLineTextStyle = LocalTextStyle.current.copy(
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textMotion = TextMotion.Animated,
-                                ),
+                                accompanimentLineTextStyle = mainTextStyle.copy(fontSize = 18.sp),
                                 translationLineTextStyle = translationTextStyle,
                                 offset = lyricOffset,
                                 keepAliveZone = keepAliveZone,
@@ -864,11 +860,7 @@ internal fun IncomingLyricLayer(
         modifier = modifier.onSizeChanged { lyricWidthPx = it.width },
         listModifier = Modifier.padding(vertical = rendererVerticalPadding).clipToBounds(),
         normalLineTextStyle = normalTextStyle,
-        accompanimentLineTextStyle = LocalTextStyle.current.copy(
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            textMotion = TextMotion.Animated,
-        ),
+        accompanimentLineTextStyle = normalTextStyle.copy(fontSize = 18.sp),
         translationLineTextStyle = translationTextStyle,
         offset = lyricOffset,
         keepAliveZone = 0.dp,

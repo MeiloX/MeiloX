@@ -7,11 +7,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.datastore.core.DataMigration
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.sqlite.db.SimpleSQLiteQuery
+import com.ljyh.mei.constants.AccompanimentLyricTextBoldKey
+import com.ljyh.mei.constants.NormalLyricTextBoldKey
+import com.ljyh.mei.constants.NormalLyricTextWeightKey
+import com.ljyh.mei.constants.TranslationLyricTextWeightKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -21,8 +26,29 @@ import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 import kotlin.properties.ReadOnlyProperty
 
-// DataStore 单例
-val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "settings",
+    produceMigrations = { listOf(LyricWeightMigration) },
+)
+
+internal object LyricWeightMigration : DataMigration<Preferences> {
+    private val keys = listOf(
+        NormalLyricTextBoldKey to NormalLyricTextWeightKey,
+        AccompanimentLyricTextBoldKey to TranslationLyricTextWeightKey,
+    )
+
+    override suspend fun shouldMigrate(currentData: Preferences) = keys.any { (old, _) -> old in currentData }
+
+    override suspend fun migrate(currentData: Preferences): Preferences = currentData.toMutablePreferences().apply {
+        for ((old, weight) in keys) {
+            val bold = currentData[old] ?: continue
+            if (weight !in this) this[weight] = if (bold) 700 else 400
+            remove(old)
+        }
+    }
+
+    override suspend fun cleanUp() = Unit
+}
 
 operator fun <T> DataStore<Preferences>.get(key: Preferences.Key<T>): T? =
     runBlocking(Dispatchers.IO) {

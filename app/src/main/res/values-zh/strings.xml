@@ -275,9 +275,9 @@
     <string name="appearance_background_animation">背景动画</string>
     <string name="appearance_background_animation_description">暂停或恢复流动背景渲染。</string>
     <string name="appearance_lyrics">歌词字体</string>
-    <string name="appearance_primary_bold">主歌词加粗</string>
+    <string name="appearance_primary_weight">主歌词字重</string>
     <string name="appearance_primary_size">主歌词大小</string>
-    <string name="appearance_secondary_bold">翻译歌词加粗</string>
+    <string name="appearance_secondary_weight">翻译歌词字重</string>
     <string name="appearance_secondary_size">翻译歌词大小</string>
     <string name="appearance_diagnostics">诊断</string>
     <string name="appearance_player_debug">播放器诊断</string>
