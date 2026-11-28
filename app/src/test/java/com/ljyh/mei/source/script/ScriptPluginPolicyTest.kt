@@ -1274,6 +1274,7 @@ class ScriptPluginPolicyTest {
         assertTrue(manifest.supported)
         assertTrue(PluginManifest.parse(minimal.replace("\"apiVersion\":1", "\"apiVersion\":2")).supported)
         assertFalse(PluginManifest.parse(minimal.replace("\"apiVersion\":1", "\"apiVersion\":3")).supported)
+        rejects { PluginManifest.parse(minimal.dropLast(1) + ",\"compatibilityUpdateId\":\"compat.lx.${"a".repeat(40)}\"}") }
     }
 
     @Test fun batchCatalogIsAnOptionalV2SupplementToSingleTrackLookup() {

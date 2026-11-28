@@ -13,6 +13,8 @@ import com.ljyh.mei.source.api.SourceStatus
 import com.ljyh.mei.source.core.ProviderRegistry
 import com.ljyh.mei.source.update.CompatibilityMarketEntry
 import com.ljyh.mei.source.update.isNewer
+import com.ljyh.mei.source.update.compatibilityFileId
+import com.ljyh.mei.source.update.compatibilityFileUpdateId
 import com.ljyh.mei.source.update.manualPackageId
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -243,6 +245,7 @@ class ScriptPluginManager @Inject constructor(
 
     internal suspend fun inspectMarketScript(
         entry: CompatibilityMarketEntry,
+        replacing: PluginManifest? = null,
         download: suspend (File) -> Unit,
     ): PreparedPlugin = prepareImport {
         val file = File.createTempFile("source-market-", ".js", context.cacheDir)
@@ -252,20 +255,33 @@ class ScriptPluginManager @Inject constructor(
             if (MessageDigest.getInstance("SHA-256").digest(source).joinToString("") { "%02x".format(it) } != entry.sha256) {
                 throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Source script checksum did not match")
             }
-            inspectCompatibilityScript(decodeCompatibilityScript(source), replacingId = null, market = entry)
+            val decoded = decodeCompatibilityScript(source)
+            val script = decoded.removePrefix("\uFEFF")
+            val digest = if (script.length == decoded.length) entry.sha256 else scriptSha256(script)
+            inspectCompatibilityScript(script, replacingId = replacing?.id, market = entry,
+                expectedMarketInstall = replacing, digest = digest)
         } finally { file.delete() }
     }
 
     private suspend fun inspectCompatibilityScript(
         script: String, replacingId: String?, market: CompatibilityMarketEntry? = null, filename: String? = null,
+        expectedMarketInstall: PluginManifest? = null, digest: String = scriptSha256(script),
     ): PreparedPlugin {
         val (review, unchangedName) = mutex.withLock {
             val selected = when {
-                replacingId != null -> providers[replacingId]?.manifest?.takeIf { it.compatibility != null }
+                replacingId != null -> providers[replacingId]?.manifest?.takeIf {
+                    it.compatibility != null && (market == null || market.format == it.compatibility)
+                }
                     ?: invalid("Select an installed compatibility source")
-                market != null -> (providers[market.packageId] ?: providers[market.manualPackageId])?.manifest
-                    ?: matchingCompatibilityScriptLocked(script, market.format)
+                market != null -> {
+                    val manifests = providers.values.associateBy { it.manifest.compatibilityUpdateId }
+                    (manifests[market.packageId] ?: manifests[market.manualPackageId] ?:
+                        manifests[compatibilityFileId(market.format, digest)])?.manifest
+                }
                 else -> matchingCompatibilityScriptLocked(script)
+            }
+            if (expectedMarketInstall != null && selected != expectedMarketInstall) {
+                invalid("The installed source changed while preparing its update")
             }
             val identical = selected != null && (replacingId == null && market == null ||
                 installedScriptMatches(selected, script, script.toByteArray(Charsets.UTF_8).size.toLong()))
@@ -302,7 +318,9 @@ class ScriptPluginManager @Inject constructor(
             }
             null
         }
-        val key = previous?.id ?: market?.packageId ?: "compat.$format.${scriptDigest(script)}"
+        val fileId = compatibilityFileId(format, digest)
+        val key = previous?.id ?: newCompatibilityId(format, fileId, market)
+        val priorOrigin = previous?.compatibilityUpdateId?.takeIf { unchangedName != null && it != fileId }
         val config = info.get("config")?.takeIf { it.isJsonArray }?.asJsonArray?.map { field ->
             Gson().fromJson(field, PluginConfigField::class.java)
         }.orEmpty()
@@ -320,6 +338,7 @@ class ScriptPluginManager @Inject constructor(
             config = config,
             compatibility = format,
             compatibilityPlatforms = platforms,
+            compatibilityUpdateId = market?.packageId ?: priorOrigin ?: compatibilityFileUpdateId(format, digest),
         )
         if (previous != null && (previous.name != manifest.name || previous.author != manifest.author)) {
             throw SourceException(SourceErrorCode.INVALID_RESPONSE, "The script belongs to a different source")
@@ -335,6 +354,12 @@ class ScriptPluginManager @Inject constructor(
         return providers.values.asSequence().map { it.manifest }.filter {
             it.compatibility != null && (format == null || it.compatibility == format)
         }.firstOrNull { manifest -> installedScriptMatches(manifest, script, length) }
+    }
+
+    private fun newCompatibilityId(format: String, fileId: String, market: CompatibilityMarketEntry?): String {
+        fun available(id: String) = !providers.containsKey(id) && !File(root, "$id/manifest.json").exists()
+        return listOfNotNull(market?.packageId, fileId).firstOrNull(::available)
+            ?: generateSequence { compatibilityFileId(format, scriptSha256(UUID.randomUUID().toString())) }.first(::available)
     }
 
     private fun installedScriptMatches(manifest: PluginManifest, script: String, length: Long): Boolean {
@@ -481,6 +506,11 @@ class ScriptPluginManager @Inject constructor(
         if (!prepared.directory.isDirectory || prepared.fingerprint != fingerprint(prepared.directory)) invalid("Source package changed after review")
         val manifest = prepared.manifest
         if (providers.values.any { it.manifest.id != manifest.id && it.id == manifest.providerId }) invalid("Another source already uses this provider ID")
+        manifest.compatibilityUpdateId?.let { updateId ->
+            if (providers.values.any { it.manifest.id != manifest.id && it.manifest.compatibilityUpdateId == updateId }) {
+                invalid("The market source is already installed")
+            }
+        }
         val destination = File(root, manifest.id)
         val previous = providers[manifest.id]
         if (previous != null && previous.id != manifest.providerId) invalid("Updates cannot change provider identity")
@@ -619,7 +649,15 @@ class ScriptPluginManager @Inject constructor(
     } }
 
     private fun register(manifest: PluginManifest, directory: File, state: PluginInstallState, gate: PluginRevisionGate, revision: PluginRevisionGate.Revision) {
-        val provider = ScriptMusicProvider(manifest, directory, runtime, state.enabled,
+        // Older compatibility installations kept their original ID even when a file replacement changed the bytes.
+        val installedManifest = if (manifest.compatibility != null && manifest.compatibilityUpdateId == null) {
+            val updateId = runCatching {
+                val script = File(directory, manifest.entry).inputStream().use(::readCompatibilityScript)
+                compatibilityFileUpdateId(manifest.compatibility, scriptSha256(script), legacyInstallId = manifest.id)
+            }.getOrNull()
+            manifest.copy(compatibilityUpdateId = updateId)
+        } else manifest
+        val provider = ScriptMusicProvider(installedManifest, directory, runtime, state.enabled,
             configurationSnapshot = configurations[manifest.id].orEmpty().toMap(),
             isCurrent = { gate.isCurrent(revision) },
             config = { gate.read(revision) { configurations[manifest.id].orEmpty().toMap() } },
@@ -719,7 +757,7 @@ class ScriptPluginManager @Inject constructor(
             catch (_: SourceException) { throw SourceException(SourceErrorCode.PERMISSION_DENIED) }
 
         private fun readCompatibilityScript(input: InputStream): String =
-            decodeCompatibilityScript(readCompatibilityScriptBytes(input))
+            decodeCompatibilityScript(readCompatibilityScriptBytes(input)).removePrefix("\uFEFF")
 
         private fun readCompatibilityScriptBytes(input: InputStream): ByteArray {
             val bytes = input.source().buffer().use {
@@ -733,7 +771,7 @@ class ScriptPluginManager @Inject constructor(
         private fun decodeCompatibilityScript(bytes: ByteArray): String {
             return try {
                 Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString().removePrefix("\uFEFF")
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
             } catch (_: java.nio.charset.CharacterCodingException) {
                 throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Source script must use UTF-8")
             }
@@ -742,8 +780,9 @@ class ScriptPluginManager @Inject constructor(
         private fun hasZipHeader(input: InputStream): Boolean =
             input.read() == 'P'.code && input.read() == 'K'.code && input.read() == 3 && input.read() == 4
 
-        private fun scriptDigest(script: String): String = MessageDigest.getInstance("SHA-256")
-            .digest(script.toByteArray(Charsets.UTF_8)).take(20).joinToString("") { "%02x".format(it) }
+        private fun scriptSha256(script: String): String = MessageDigest.getInstance("SHA-256")
+            .digest(script.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        private fun scriptDigest(script: String): String = scriptSha256(script).take(40)
         internal fun packageFileLimit(name: String): Int = when {
             name in setOf("manifest.json", "LICENSE", "NOTICE") -> 64 * 1024
             name == "index.js" -> 256 * 1024

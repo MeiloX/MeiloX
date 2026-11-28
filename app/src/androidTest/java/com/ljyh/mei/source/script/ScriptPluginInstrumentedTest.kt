@@ -460,7 +460,8 @@ class ScriptPluginInstrumentedTest {
 
             val newerScript = script.toString(Charsets.UTF_8).replace("1.0.0", "1.0.1").toByteArray()
             val newerDigest = java.security.MessageDigest.getInstance("SHA-256").digest(newerScript).joinToString("") { "%02x".format(it) }
-            val update = manager.inspectMarketScript(entry.copy(version = "1.0.1", sha256 = newerDigest)) {
+            val newerEntry = entry.copy(version = "1.0.1", sha256 = newerDigest)
+            val update = manager.inspectMarketScript(newerEntry) {
                 it.writeBytes(newerScript)
             }.also { imports += it }
             val editedReview = manager.withCompatibilityDomains(update, listOf("updated.example.com")).also { imports += it }
@@ -484,6 +485,73 @@ class ScriptPluginInstrumentedTest {
             assertEquals("1.0.0", provider.manifest.version)
             assertEquals(listOf("metadata.example.com", "*.music.126.net"), provider.manifest.permissions.network)
             assertEquals("Configured title", provider.search("a song").items.single().title)
+
+            val previousManifest = manager.installed.value.single().manifest
+            val sameFile = manager.inspectFile(Uri.fromFile(manualScript)).also { imports += it }
+            assertEquals(previousManifest, manager.install(sameFile, approved = true).manifest)
+            manager.inspectMarketScript(newerEntry, previousManifest) { it.writeBytes(newerScript) }.also { imports += it }
+
+            manualScript.writeText(script.toString(Charsets.UTF_8) + "\n// Independent replacement of a market install")
+            val independent = manager.inspectFile(Uri.fromFile(manualScript), replacingId = entry.packageId).also { imports += it }
+            manager.install(independent, approved = true)
+            val official = manager.inspectMarketScript(newerEntry) { it.writeBytes(newerScript) }.also { imports += it }
+            val officialId = manager.install(official, approved = true).manifest.id
+            try {
+                assertNotEquals(entry.packageId, officialId)
+                assertEquals("1.0.0", manager.updateSnapshot(entry.packageId)!!.manifest.version)
+                assertEquals(mapOf("token" to "Configured title"), manager.configuration(entry.packageId))
+                assertEquals("1.0.1", manager.updateSnapshot(officialId)!!.manifest.version)
+                assertEquals(officialId, com.ljyh.mei.source.update.compatibilityMarketItems(
+                    listOf(entry), listOf(newerEntry), manager.installed.value).single().installedPackageId)
+            } finally { manager.uninstall(officialId) }
+            manager.uninstall(entry.packageId)
+            manualScript.writeBytes(script)
+            val manual = manager.install(manager.inspectFile(Uri.fromFile(manualScript)).also { imports += it }, approved = true)
+            val manualId = manual.manifest.id
+            assertNotEquals(entry.packageId, manualId)
+            try {
+                val item = com.ljyh.mei.source.update.compatibilityMarketItems(listOf(entry), listOf(newerEntry),
+                    manager.installed.value).single()
+                assertTrue(item.updateAvailable)
+                assertEquals(manualId, item.installedPackageId)
+                val upgrade = manager.inspectMarketScript(newerEntry, item.installedManifest) {
+                    it.writeBytes(newerScript)
+                }.also { imports += it }
+                manager.install(upgrade, approved = true)
+                assertEquals(listOf(manualId), manager.installed.value.map { it.manifest.id })
+                assertEquals("1.0.1", manager.updateSnapshot(manualId)!!.manifest.version)
+                val restored = ScriptPluginManager(context, ProviderRegistry(emptyList()), ScriptRuntime(context))
+                restored.loadInstalled()
+                val nextApkEntry = newerEntry.copy(version = "1.0.2", sha256 = "c".repeat(64))
+                val next = com.ljyh.mei.source.update.compatibilityMarketItems(listOf(nextApkEntry), emptyList(),
+                    restored.installed.value).single()
+                assertEquals(manualId, next.installedPackageId)
+                assertTrue(next.updateAvailable)
+
+                manualScript.writeText(newerScript.toString(Charsets.UTF_8) + "\n// Independent file replacement")
+                val replacement = manager.inspectFile(Uri.fromFile(manualScript), replacingId = manualId)
+                    .also { imports += it }
+                manager.install(replacement, approved = true)
+                val detached = com.ljyh.mei.source.update.compatibilityMarketItems(listOf(entry), listOf(nextApkEntry),
+                    manager.installed.value).single()
+                assertNull(detached.installedPackageId)
+                assertFalse(detached.updateAvailable)
+                try {
+                    manager.inspectMarketScript(newerEntry, item.installedManifest) { it.writeBytes(newerScript) }
+                    fail("A previously matched market entry must not reclaim a replaced script")
+                } catch (error: SourceException) {
+                    assertEquals(SourceErrorCode.PLUGIN, error.code)
+                }
+                val file = File(context.filesDir, "music-sources/$manualId/manifest.json")
+                val legacyManifest = com.google.gson.JsonParser.parseString(file.readText()).asJsonObject
+                legacyManifest.remove("compatibilityUpdateId")
+                file.writeText(legacyManifest.toString())
+                val legacy = ScriptPluginManager(context, ProviderRegistry(emptyList()), ScriptRuntime(context))
+                legacy.loadInstalled()
+                val legacyItem = com.ljyh.mei.source.update.compatibilityMarketItems(listOf(entry), listOf(nextApkEntry),
+                    legacy.installed.value).single()
+                assertNull("The ID of an obsolete payload must not identify a replaced legacy file", legacyItem.installedPackageId)
+            } finally { manager.uninstall(manualId) }
         } finally {
             imports.forEach { manager.discardPrepared(it) }
             if (manager.installed.value.any { it.manifest.id == entry.packageId }) manager.uninstall(entry.packageId)
@@ -1179,7 +1247,7 @@ class ScriptPluginInstrumentedTest {
             assertEquals("Browsing the market cannot apply an update", "1.0.0", manager.updateSnapshot(id)!!.manifest.version)
             packageTimedOut = true
             val beforeTimeout = downloads
-            updates.checkNow()
+            assertTrue("An unresolved cached entry must not trigger a startup prompt", updates.checkOnStartup().isEmpty())
             assertEquals("A cached listing is available for manual retry", marketEntry, updates.state.value.items.single().entry)
             assertEquals("A stale listing cannot trigger automatic downloads", beforeTimeout, downloads)
             assertEquals("1.0.0", manager.updateSnapshot(id)!!.manifest.version)
@@ -1191,13 +1259,23 @@ class ScriptPluginInstrumentedTest {
             } catch (_: com.ljyh.mei.source.update.SourceUpdateDeferred) { }
             finally { manager.discardPrepared(revoked) }
             assertEquals("1.0.0", manager.updateSnapshot(id)!!.manifest.version)
-            updates.checkNow()
+            updates.setAutoUpdates(false)
+            val offered = updates.checkOnStartup().single()
+            assertEquals("1.0.0", offered.installedVersion)
+            assertEquals("1.1.0", offered.version)
+            assertFalse(offered.automaticallyUpdated)
+            assertEquals("1.0.0", manager.updateSnapshot(id)!!.manifest.version)
+            updates.setAutoUpdates(true)
+            assertEquals(offered.copy(automaticallyUpdated = true), updates.checkOnStartup().single())
             assertEquals("1.1.0", manager.updateSnapshot(id)!!.manifest.version)
             assertFalse(manager.updateSnapshot(id)!!.enabled)
             assertEquals(mapOf("cookie" to "fixture-local-only"), manager.configuration(id))
 
             marketEntry = entry("1.2.0", expanded); marketBytes = expanded
-            updates.checkNow()
+            val needsReview = updates.checkOnStartup().single()
+            assertEquals("1.2.0", needsReview.version)
+            assertEquals("1.1.0", needsReview.installedVersion)
+            assertFalse(needsReview.automaticallyUpdated)
             assertEquals("1.1.0", manager.updateSnapshot(id)!!.manifest.version)
             assertTrue(updates.state.value.items.single().requiresReview)
             val review = updates.prepareUpdate(id)
@@ -1206,6 +1284,7 @@ class ScriptPluginInstrumentedTest {
             updates.discardPrepared(review)
             assertEquals("1.2.0", manager.updateSnapshot(id)!!.manifest.version)
             assertFalse(manager.updateSnapshot(id)!!.enabled)
+            assertTrue(updates.checkOnStartup().isEmpty())
 
             val newer = archive("1.3.0", extraNetwork = true)
             marketEntry = entry("1.3.0", newer); marketBytes = newer
@@ -1219,7 +1298,7 @@ class ScriptPluginInstrumentedTest {
 
             manager.uninstall(id)
             val beforeRemovedCheck = downloads
-            updates.checkNow()
+            assertTrue(updates.checkOnStartup().isEmpty())
             assertEquals(beforeRemovedCheck, downloads)
             assertNull(manager.updateSnapshot(id))
             marketBytes = first // Deliberately does not match the registry digest.

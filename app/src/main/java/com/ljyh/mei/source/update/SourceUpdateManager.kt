@@ -12,7 +12,6 @@ import com.ljyh.mei.source.script.PreparedPlugin
 import com.ljyh.mei.source.script.ScriptPluginManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -51,17 +50,18 @@ class SourceUpdateManager internal constructor(
     private val registry: ProviderRegistry,
     private val transport: SourceUpdateTransport,
     backgroundScope: CoroutineScope? = null,
+    private val compatibilityMarket: CompatibilityMarket = CompatibilityMarket(context),
 ) {
     @Inject constructor(
         @ApplicationContext context: Context,
         plugins: ScriptPluginManager,
         registry: ProviderRegistry,
         transport: SourceMarketTransport,
-    ) : this(context, plugins, registry, transport as SourceUpdateTransport)
+        compatibilityMarket: CompatibilityMarket,
+    ) : this(context, plugins, registry, transport, compatibilityMarket = compatibilityMarket, backgroundScope = null)
 
     private val scope = backgroundScope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
-    private val startupStarted = AtomicBoolean(false)
     private val mutableState = MutableStateFlow(SourceUpdateState())
     val state: StateFlow<SourceUpdateState> = mutableState.asStateFlow()
     private val settings by lazy { context.getSharedPreferences("source-update-settings", Context.MODE_PRIVATE) }
@@ -84,8 +84,23 @@ class SourceUpdateManager internal constructor(
         }
     }
 
-    fun checkOnStartup() {
-        if (startupStarted.compareAndSet(false, true)) scope.launch { checkNow() }
+    suspend fun checkOnStartup(): List<SourcePluginUpdate> = withContext(Dispatchers.IO) {
+        registry.awaitInitialized()
+        val installed = plugins.installed.value
+        val compatibility = async {
+            if (installed.none { it.manifest.compatibility != null }) return@async emptyList()
+            val bundled = try { compatibilityMarket.bundled() } catch (_: Exception) { emptyList() }
+            val remote = try { compatibilityMarket.refresh().orEmpty() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { emptyList() }
+            compatibilityMarketItems(bundled, remote, plugins.installed.value).mapNotNull { item ->
+                val previous = item.installedVersion ?: return@mapNotNull null
+                if (item.updateAvailable) SourcePluginUpdate(item.entry.name, previous, item.entry.version, automaticallyUpdated = false)
+                else null
+            }
+        }
+        val native = if (installed.any { it.manifest.compatibility == null }) checkNow() else emptyList()
+        native + compatibility.await()
     }
 
     suspend fun setAutoUpdates(enabled: Boolean) {
@@ -121,17 +136,17 @@ class SourceUpdateManager internal constructor(
         }
     }
 
-    suspend fun checkNow() = withContext(Dispatchers.IO) {
+    suspend fun checkNow(): List<SourcePluginUpdate> = withContext(Dispatchers.IO) {
         registry.awaitInitialized()
         mutex.withLock {
             loadSettings()
             mutableState.update { it.copy(checking = true, message = null) }
-            var updated = 0
+            val updated = mutableMapOf<String, SourcePluginUpdate>()
             var failures = 0
             var deferred = 0
             reviewNeeded.clear()
             try {
-                val unresolved = fetchIndex()
+                val unresolved = fetchIndex().toMutableSet()
                 failures += unresolved.size
                 // Iterate only the installed snapshot. A removed source is never reinstalled by a check.
                 val installedIds = plugins.installed.value.map { it.manifest.id }.toSet()
@@ -161,13 +176,17 @@ class SourceUpdateManager internal constructor(
                         if (prepared!!.reviewReasons.isNotEmpty()) {
                             reviewNeeded += entry.packageId
                         } else if (mutableState.value.autoUpdates) {
-                            plugins.installMarket(prepared!!.plugin, entry, current, automatic = true,
+                            val installed = plugins.installMarket(prepared!!.plugin, entry, current, automatic = true,
                                 authorized = { mutableState.value.autoUpdates })
-                            updated++
+                            updated[entry.packageId] = SourcePluginUpdate(entry.name, current.manifest.version,
+                                installed.manifest.version, automaticallyUpdated = true)
                         }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: SourceUpdateDeferred) { deferred++ }
-                    catch (_: Exception) { failures++ }
+                    catch (_: Exception) {
+                        unresolved += entry.packageId
+                        failures++
+                    }
                     finally {
                         prepared?.let { value -> withContext(NonCancellable) { plugins.discardPrepared(value.plugin) } }
                         mutableState.update { it.copy(busyPackageId = null) }
@@ -176,13 +195,23 @@ class SourceUpdateManager internal constructor(
                 publishItems()
                 mutableState.update { it.copy(message = when {
                     failures > 0 -> "部分音源暂时无法检查更新"
-                    updated > 0 -> "已更新 $updated 个音源"
+                    updated.isNotEmpty() -> "已更新 ${updated.size} 个音源"
                     reviewNeeded.isNotEmpty() -> "有 ${reviewNeeded.size} 个更新需要确认"
                     deferred > 0 -> "正在使用的音源将在下次启动时更新"
                     else -> "已是最新版本"
                 }) }
+                mutableState.value.items.mapNotNull { item ->
+                    val previous = item.installedVersion ?: return@mapNotNull null
+                    if (item.entry.packageId in unresolved) return@mapNotNull null
+                    updated[item.entry.packageId]?.takeIf { it.version == previous } ?:
+                        if (item.updateAvailable) SourcePluginUpdate(item.entry.name, previous, item.entry.version, automaticallyUpdated = false)
+                        else null
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableState.update { it.copy(message = "暂时无法连接音源市场") } }
+            catch (_: Exception) {
+                mutableState.update { it.copy(message = "暂时无法连接音源市场") }
+                updated.values.toList()
+            }
             finally { mutableState.update { it.copy(checking = false, busyPackageId = null) } }
         }
     }
@@ -269,7 +298,8 @@ class SourceUpdateManager internal constructor(
             val current = try { plugins.updateSnapshot(entry.packageId) }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { null }
-            val update = current?.let { isNewer(entry.version, it.manifest.version) } == true
+            val update = current != null && current.manifest.providerId == entry.providerId &&
+                isNewer(entry.version, current.manifest.version)
             val trusted = entry.canonicalOrigin(current?.repository) == entry.repository
             SourceMarketItem(entry, current?.manifest?.version, current?.enabled, update,
                 trusted, update && (entry.packageId in reviewNeeded || !trusted))

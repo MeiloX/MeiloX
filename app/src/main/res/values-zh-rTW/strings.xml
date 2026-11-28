@@ -705,6 +705,12 @@
     <string name="source_allow_alternate_versions_detail">嘗試同一歌手的現場版、不插電版或重製版。</string>
     <string name="source_playing_alternate_version">正在播放其他版本</string>
     <string name="source_market_title">外掛市集</string>
+    <string name="source_updates_title">音源外掛有更新</string>
+    <string name="source_updates_installed">音源外掛已更新</string>
+    <string name="source_updates_available_version">目前為 %1$s，可更新至 %2$s</string>
+    <string name="source_updates_automatic_version">已自動更新至 %1$s</string>
+    <string name="source_updates_later">稍後</string>
+    <string name="source_updates_view">查看更新</string>
     <string name="source_market_refresh">重新整理外掛市集</string>
     <string name="source_market_empty">目前沒有可用的外掛</string>
     <string name="source_market_partial">部分外掛暫時無法載入</string>

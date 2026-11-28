@@ -700,6 +700,12 @@
   <string name="source_allow_alternate_versions_detail">同じアーティストのライブ版、アコースティック版、リマスター版を探します。</string>
   <string name="source_playing_alternate_version">別バージョンを再生中</string>
   <string name="source_market_title">プラグインストア</string>
+  <string name="source_updates_title">音源プラグインのアップデート</string>
+  <string name="source_updates_installed">音源プラグインを更新しました</string>
+  <string name="source_updates_available_version">現在のバージョンは %1$s です。%2$s に更新できます。</string>
+  <string name="source_updates_automatic_version">%1$s に自動更新しました</string>
+  <string name="source_updates_later">後で</string>
+  <string name="source_updates_view">更新を確認</string>
   <string name="source_market_refresh">プラグインストアを更新</string>
   <string name="source_market_empty">利用できるプラグインがありません</string>
   <string name="source_market_partial">一部のプラグインを読み込めませんでした</string>

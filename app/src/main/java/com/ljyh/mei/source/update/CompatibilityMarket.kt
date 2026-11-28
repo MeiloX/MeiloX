@@ -5,6 +5,7 @@ import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonToken
 import com.ljyh.mei.source.api.SourceErrorCode
 import com.ljyh.mei.source.api.SourceException
+import com.ljyh.mei.source.script.InstalledPlugin
 import com.ljyh.mei.source.script.ScriptNetworkPolicy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -15,6 +16,10 @@ import java.security.MessageDigest
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.Request
 
 data class CompatibilityMarketEntry(
@@ -40,20 +45,57 @@ data class CompatibilityMarketEntry(
         }
 }
 
+// Registry revision 1991a7d was the only catalog shipped before compatibility updates tracked their origin.
+internal fun compatibilityFileUpdateId(format: String, sha256: String, legacyInstallId: String? = null): String {
+    val fileId = compatibilityFileId(format, sha256)
+    if (format != "musicfree") return fileId
+    val marketId = when (sha256) {
+        // Navidrome
+        "2f1e930e417a72e2a0c870bde45359c442ad139bcf37bfe444df5141fd0cdeb3" -> "compat.musicfree.4bc48d76e81085da964a922b7e595745cedcbc77"
+        // Audiomack
+        "1b1f49fc1e0aa5933c3b45ce999d975e4f7fc5f69df2a487dd87830555cf01d5" -> "compat.musicfree.27639f7edc01d88e357752ede59882012e1e2e8e"
+        else -> return fileId
+    }
+    return if (legacyInstallId == null || legacyInstallId == marketId || legacyInstallId == fileId) marketId else fileId
+}
+
+internal fun compatibilityMarketItems(
+    bundled: List<CompatibilityMarketEntry>,
+    remote: List<CompatibilityMarketEntry>,
+    installed: List<InstalledPlugin>,
+): List<CompatibilityMarketItem> {
+    val matched = installed.associateBy { it.manifest.compatibilityUpdateId }
+    val builtIn = bundled.associateBy { it.id }
+    val compatibleRemote = remote.filter { entry ->
+        val baseline = builtIn[entry.id]
+        baseline == null || (entry.packageId == baseline.packageId &&
+            (entry.sha256 == baseline.sha256 || isNewer(entry.version, baseline.version)))
+    }
+    return (compatibleRemote + bundled).distinctBy { it.id }.map { entry ->
+        // File imports keep the ID derived from their original bytes after a reviewed upgrade.
+        val bundledId = builtIn[entry.id]?.manualPackageId
+        val manifest = (matched[entry.packageId] ?: matched[entry.manualPackageId] ?: bundledId?.let(matched::get))?.manifest
+        CompatibilityMarketItem(entry, manifest)
+    }
+}
+
 /** Compatibility entries use a separate index so earlier native-market clients can still read theirs. */
 @Singleton
 class CompatibilityMarket @Inject constructor(@ApplicationContext private val context: Context) {
     private val policy = ScriptNetworkPolicy(marketHosts)
     private val client = policy.marketClient()
+    private val refreshMutex = Mutex()
+    private val mutableRemoteEntries = MutableStateFlow<List<CompatibilityMarketEntry>>(emptyList())
+    val remoteEntries = mutableRemoteEntries.asStateFlow()
 
     fun bundled(): List<CompatibilityMarketEntry> =
         context.assets.open("source-market/compatibility.json").bufferedReader().use {
             CompatibilityMarketIndex.parse(it.readText())
         }
 
-    suspend fun refresh(): List<CompatibilityMarketEntry>? {
+    suspend fun refresh(): List<CompatibilityMarketEntry>? = refreshMutex.withLock {
         val request = Request.Builder().url(CompatibilityMarketIndex.URL).build()
-        return policy.readMarketFile(client, request) { response, ensureCurrent ->
+        policy.readMarketFile(client, request) { response, ensureCurrent ->
             if (response.code == 404) return@readMarketFile null
             if (!response.isSuccessful) throw SourceException(SourceErrorCode.NETWORK)
             val body = response.body
@@ -65,7 +107,7 @@ class CompatibilityMarket @Inject constructor(@ApplicationContext private val co
             val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
             CompatibilityMarketIndex.parse(decoder.decode(ByteBuffer.wrap(bytes)).toString())
-        }
+        }.also { mutableRemoteEntries.value = it.orEmpty() }
     }
 
     suspend fun download(entry: CompatibilityMarketEntry, destination: File) {

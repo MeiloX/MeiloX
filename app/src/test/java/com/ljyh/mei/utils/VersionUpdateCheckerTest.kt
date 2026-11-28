@@ -2,16 +2,68 @@ package com.ljyh.mei.utils
 
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
+import com.ljyh.mei.source.update.SourcePluginUpdate
+import com.ljyh.mei.ui.screen.about.StartupUpdate
+import com.ljyh.mei.ui.screen.about.checkStartupUpdates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class VersionUpdateCheckerTest {
+    @Test
+    fun startupRequiresAnUpToDateAppBeforeCheckingPlugins() = runBlocking {
+        val release = VersionUpdateResult.UpdateAvailable("2.0", "release")
+        val cases = listOf(
+            release to StartupUpdate.App(release),
+            release.copy(comparisonKnown = false) to null,
+            VersionUpdateResult.Failed to null,
+        )
+        for ((result, expected) in cases) {
+            assertEquals(expected, checkStartupUpdates({ true }, { beta ->
+                assertTrue(beta)
+                result
+            }, { error("Unexpected plugin check") }))
+        }
+    }
+
+    @Test
+    fun startupOffersOnlyInstalledPluginChangesAfterTheAppCheck() = runBlocking {
+        val pending = SourcePluginUpdate("LX", "1.0", "2.0", false)
+        val installed = SourcePluginUpdate("Native", "2.0", "2.1", true)
+        for (updates in listOf(emptyList(), listOf(pending, installed))) {
+            val requests = mutableListOf<String>()
+            val result = checkStartupUpdates({ false }, {
+                requests += "app"
+                VersionUpdateResult.UpToDate
+            }, {
+                requests += "plugins"
+                updates
+            })
+            assertEquals(listOf("app", "plugins"), requests)
+            assertEquals(updates.takeIf { it.isNotEmpty() }?.let(StartupUpdate::Plugins), result)
+        }
+    }
+
+    @Test
+    fun changingChannelsDiscardsThePreviousChannelCheck() = runBlocking {
+        var beta = false
+        assertNull(checkStartupUpdates({ beta }, {
+            beta = true
+            VersionUpdateResult.UpToDate
+        }, { error("Unexpected plugin check") }))
+
+        assertNull(checkStartupUpdates({ beta }, { VersionUpdateResult.UpToDate }, {
+            beta = false
+            listOf(SourcePluginUpdate("LX", "1.0", "2.0", false))
+        }))
+    }
+
     @Test
     fun betaUsesBuildNumberEvenWhenVersionNameHasNotChanged() = runBlocking {
         val requests = mutableListOf<String>()

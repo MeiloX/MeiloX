@@ -66,12 +66,24 @@ data class SourceMarketItem(
 
 data class CompatibilityMarketItem(
     val entry: CompatibilityMarketEntry,
-    val installedPackageId: String?,
-    val updateAvailable: Boolean,
+    val installedManifest: PluginManifest?,
+) {
+    val installedPackageId: String? get() = installedManifest?.id
+    val installedVersion: String? get() = installedManifest?.version
+    val updateAvailable: Boolean get() = installedVersion?.let { isNewer(entry.version, it) } == true
+}
+
+data class SourcePluginUpdate(
+    val name: String,
+    val installedVersion: String,
+    val version: String,
+    val automaticallyUpdated: Boolean,
 )
 
 internal val CompatibilityMarketEntry.manualPackageId: String
-    get() = "compat.$format.${sha256.take(40)}"
+    get() = compatibilityFileId(format, sha256)
+
+internal fun compatibilityFileId(format: String, sha256: String): String = "compat.$format.${sha256.take(40)}"
 
 data class SourceUpdateState(
     val checking: Boolean = false,

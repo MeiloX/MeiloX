@@ -51,7 +51,9 @@ API 1 may declare only `catalog.search`, `catalog.track`, `playback.resolve` and
 
 The [source registry](https://github.com/MeiloX/MeiloX-Source-Registry) publishes a bounded, declarative `index.json`. Entries bind package/provider identity, a relative `.meisource` path, and API version to a declared GitHub repository. The host resolves the latest commit touching the package. When the commit API times out, is unavailable or rate-limits the request, the host reads the package at `HEAD`. In both cases it reads the version from the manifest and records the archive’s SHA-256. Installation verifies the reviewed digest again.
 
-Startup checks run after source initialization in the background. Automatic updates require a matching, payload-bound repository origin and no additional permissions, capabilities or required configuration. Session fingerprint contract changes also require review. A file-imported source can acquire origin only after its exact current payload matches the digest-verified same-version market package, or after an explicit reviewed market update. Reimporting a file clears market origin.
+At startup, the host checks the selected app release channel first. Once it confirms the app is up to date, it checks installed sources against the native and compatibility catalogs. The startup alert lists available source updates and any native updates installed automatically.
+
+Automatic updates require a matching, payload-bound repository origin and no additional permissions, capabilities or required configuration. Session fingerprint contract changes also require review. A file-imported source can acquire origin only after its exact current payload matches the digest-verified same-version market package, or after an explicit reviewed market update. Reimporting a file clears market origin.
 
 Changing an exact network grant to a wildcard still requires permission review. Wildcard grants require a host supporting this syntax; older hosts reject the manifest.
 

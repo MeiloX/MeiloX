@@ -1,18 +1,39 @@
 package com.ljyh.mei.ui.component
 
-import com.ljyh.mei.ui.component.utils.rememberAlertContent
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.DialogProperties
 import com.ljyh.mei.BuildConfig
 import com.ljyh.mei.R
+import com.ljyh.mei.ui.component.utils.rememberAlertContent
+import com.ljyh.mei.utils.VersionUpdateResult
 import io.github.neoruaa.glasmio.ui.GlasmioAlertButtonRole
 import io.github.neoruaa.glasmio.ui.GlasmioAlertButtonSpec
 import io.github.neoruaa.glasmio.ui.GlasmioAlertDialog
-import com.ljyh.mei.utils.VersionUpdateResult
+
+@Composable
+internal fun UpdateAlertDialog(
+    visible: Boolean,
+    title: String,
+    message: String? = null,
+    buttons: List<GlasmioAlertButtonSpec>,
+    content: @Composable ColumnScope.() -> Unit = {},
+) {
+    GlasmioAlertDialog(
+        visible = visible,
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        title = title,
+        message = message,
+        buttons = buttons,
+        content = content,
+    )
+}
 
 @Composable
 fun VersionUpdateAlert(
@@ -24,9 +45,8 @@ fun VersionUpdateAlert(
     val context = LocalContext.current
     when (val result = displayedResult) {
         is VersionUpdateResult.UpdateAvailable -> {
-            GlasmioAlertDialog(
+            UpdateAlertDialog(
                 visible = visible,
-                onDismissRequest = onDismiss,
                 title = stringResource(
                     if (result.comparisonKnown) R.string.about_update_available_title
                     else R.string.about_beta_latest_build_title,
@@ -65,9 +85,8 @@ fun VersionUpdateAlert(
         }
 
         VersionUpdateResult.UpToDate -> {
-            GlasmioAlertDialog(
+            UpdateAlertDialog(
                 visible = visible,
-                onDismissRequest = onDismiss,
                 title = stringResource(R.string.about_update_up_to_date_title),
                 message = stringResource(
                     R.string.about_update_up_to_date_message,
@@ -84,9 +103,8 @@ fun VersionUpdateAlert(
         }
 
         VersionUpdateResult.Failed -> {
-            GlasmioAlertDialog(
+            UpdateAlertDialog(
                 visible = visible,
-                onDismissRequest = onDismiss,
                 title = stringResource(R.string.about_update_failed_title),
                 message = stringResource(R.string.about_update_failed_message),
                 buttons = listOf(

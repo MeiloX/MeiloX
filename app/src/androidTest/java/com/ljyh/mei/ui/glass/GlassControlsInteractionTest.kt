@@ -118,6 +118,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -170,6 +171,10 @@ import com.ljyh.mei.ui.screen.account.AccountDeviceTab
 import com.ljyh.mei.source.shared.SourcePrivateConversation as PrivateConversation
 import com.ljyh.mei.ui.theme.MusicTheme
 import com.ljyh.mei.R
+import com.ljyh.mei.source.update.SourcePluginUpdate
+import com.ljyh.mei.ui.component.SourcePluginUpdateAlert
+import com.ljyh.mei.ui.component.VersionUpdateAlert
+import com.ljyh.mei.utils.VersionUpdateResult
 import com.ljyh.mei.data.model.api.CommentSortType
 import com.ljyh.mei.ui.navigation.MeiRoute
 import com.ljyh.mei.ui.navigation.MeiloXPageEntry
@@ -188,6 +193,71 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class GlassControlsInteractionTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun updateAlertStaysOpenUntilAnActionIsSelected() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val cancel = instrumentation.targetContext.getString(R.string.cancel)
+        val result = mutableStateOf<VersionUpdateResult?>(
+            VersionUpdateResult.UpdateAvailable("2.0", "https://example.com"),
+        )
+        compose.setContent {
+            val backdrop = emptyBackdrop()
+            CompositionLocalProvider(LocalGlassBackdrop provides backdrop, LocalBlurBackdrop provides backdrop) {
+                VersionUpdateAlert(result.value) { result.value = null }
+            }
+        }
+
+        compose.onNodeWithText(cancel).assertIsDisplayed()
+        compose.onNode(isDialog()).performTouchInput { click(Offset(center.x, height * 0.12f)) }
+        compose.onNodeWithText(cancel).assertIsDisplayed()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        compose.onNodeWithText(cancel).assertIsDisplayed().performClick()
+        awaitUpdateAlertDismissal()
+    }
+
+    @Test fun pluginUpdateAlertKeepsActionsVisibleForLongAndCompletedLists() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val completed = SourcePluginUpdate("Automatic source", "3.0", "3.1", automaticallyUpdated = true)
+        val pending = List(24) { SourcePluginUpdate("Plugin $it", "1.0", "2.0", automaticallyUpdated = false) }
+        val updates = mutableStateOf<List<SourcePluginUpdate>?>(listOf(completed) + pending)
+        val view = context.getString(R.string.source_updates_view)
+        val later = context.getString(R.string.source_updates_later)
+        val done = context.getString(R.string.done)
+        var marketVisits = 0
+        compose.setContent {
+            val backdrop = emptyBackdrop()
+            CompositionLocalProvider(LocalGlassBackdrop provides backdrop, LocalBlurBackdrop provides backdrop) {
+                SourcePluginUpdateAlert(updates.value, onDismiss = { updates.value = null }, onOpenMarket = { marketVisits++ })
+            }
+        }
+
+        compose.onNodeWithText(pending.first().name).assertIsDisplayed()
+        compose.onAllNodes(hasText(context.getString(R.string.source_updates_available_version, "1.0", "2.0")))[0]
+            .assertIsDisplayed()
+        compose.onNodeWithText(view).assertIsDisplayed()
+        compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(completed.name))
+        compose.onNodeWithText(context.getString(R.string.source_updates_automatic_version, "3.1")).assertIsDisplayed()
+        compose.onNodeWithText(view).assertIsDisplayed().performClick()
+        awaitUpdateAlertDismissal()
+        compose.runOnIdle {
+            assertEquals(1, marketVisits)
+            updates.value = pending.take(1)
+        }
+
+        compose.onNodeWithText(later).assertIsDisplayed().performClick()
+        awaitUpdateAlertDismissal()
+        compose.runOnIdle { updates.value = listOf(completed) }
+        compose.onNodeWithText(context.getString(R.string.source_updates_installed)).assertIsDisplayed()
+        compose.onNodeWithText(later).assertDoesNotExist()
+        compose.onNodeWithText(view).assertDoesNotExist()
+        compose.onNodeWithText(done).assertIsDisplayed().performClick()
+        awaitUpdateAlertDismissal()
+        compose.runOnIdle { assertEquals(1, marketVisits) }
+    }
+
+    private fun awaitUpdateAlertDismissal() {
+        compose.waitUntil(5_000) { compose.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
+    }
 
     private val checked = mutableStateOf(false)
     private val enabled = mutableStateOf(true)

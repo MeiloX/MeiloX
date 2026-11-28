@@ -55,7 +55,9 @@ import androidx.navigation3.runtime.NavEntry
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.ljyh.mei.MainActivity
 import com.ljyh.mei.R
 import com.ljyh.mei.constants.AllowConcurrentPlaybackKey
@@ -79,6 +81,8 @@ import com.ljyh.mei.constants.UserAvatarUrlKey
 import com.ljyh.mei.constants.UserNicknameKey
 import com.ljyh.mei.ui.screen.Index
 import com.ljyh.mei.ui.screen.Screen
+import com.ljyh.mei.ui.screen.about.StartupUpdate
+import com.ljyh.mei.ui.screen.about.StartupUpdateViewModel
 import com.ljyh.mei.utils.dataStore
 import io.github.neoruaa.glasmio.core.swipeBackExcluded
 import io.github.neoruaa.glasmio.scaffold.navigation.GlasmioNavDisplay
@@ -89,7 +93,10 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.runner.RunWith
 import kotlin.math.abs
 
@@ -283,6 +290,47 @@ class MainNavigationInstrumentedTest {
             mini?.let {
                 assertTrue("Web content stays above the mini player", location[1] + browser.height <= it.top + density)
             }
+        }
+    }
+
+    @Test
+    fun startupPluginUpdateSurvivesRecreationAndOpensMarketOnce() {
+        assumeTrue(
+            "Run on an isolated install with an older market source and the current stable app",
+            InstrumentationRegistry.getArguments().getString("startupPluginUpdateLive") == "true",
+        )
+        fun awaitDisplayed(matcher: SemanticsMatcher, timeoutMillis: Long = 10_000L) {
+            compose.waitUntil(timeoutMillis) {
+                compose.onAllNodes(matcher, useUnmergedTree = true)
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+            }
+            compose.onNode(matcher, useUnmergedTree = true).assertIsDisplayed()
+        }
+        val title = hasText(text(R.string.source_updates_title))
+        awaitDisplayed(title, timeoutMillis = 120_000L)
+        val retained = compose.runOnIdle { ViewModelProvider(compose.activity)[StartupUpdateViewModel::class.java] }
+        val update = retained.pending.value as StartupUpdate.Plugins
+        assertTrue(update.updates.any { !it.automaticallyUpdated })
+
+        compose.activityRule.scenario.recreate()
+
+        awaitDisplayed(title)
+        compose.runOnIdle {
+            assertSame(retained, ViewModelProvider(compose.activity)[StartupUpdateViewModel::class.java])
+            assertEquals(update, retained.pending.value)
+        }
+        compose.onNodeWithText(text(R.string.source_updates_view)).performClick()
+        val marketPage = hasTestTag("MeiloXPage:${Screen.SourceMarket.route}")
+        awaitDisplayed(marketPage)
+        assertNull(retained.pending.value)
+
+        compose.activityRule.scenario.recreate()
+
+        awaitDisplayed(marketPage)
+        compose.onNode(title, useUnmergedTree = true).assertDoesNotExist()
+        compose.runOnIdle {
+            assertSame(retained, ViewModelProvider(compose.activity)[StartupUpdateViewModel::class.java])
+            assertNull(retained.pending.value)
         }
     }
 

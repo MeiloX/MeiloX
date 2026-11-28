@@ -7,12 +7,9 @@ import com.ljyh.mei.source.api.*
 import com.ljyh.mei.source.core.*
 import com.ljyh.mei.source.script.*
 import com.ljyh.mei.source.update.CompatibilityMarket
-import com.ljyh.mei.source.update.CompatibilityMarketEntry
-import com.ljyh.mei.source.update.CompatibilityMarketItem
 import com.ljyh.mei.source.update.PreparedSourceUpdate
 import com.ljyh.mei.source.update.SourceUpdateManager
-import com.ljyh.mei.source.update.isNewer
-import com.ljyh.mei.source.update.manualPackageId
+import com.ljyh.mei.source.update.compatibilityMarketItems
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -22,8 +19,11 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,22 +55,10 @@ class SourceManagementViewModel @Inject constructor(
     val invalidCompatibilityDomains = MutableStateFlow(false)
     val editing = MutableStateFlow<InstalledPlugin?>(null)
     val configuration = MutableStateFlow<Map<String, String>>(emptyMap())
-    private val bundledCompatibility = MutableStateFlow<List<CompatibilityMarketEntry>>(emptyList())
-    private val remoteCompatibility = MutableStateFlow<List<CompatibilityMarketEntry>>(emptyList())
-    val compatibilityMarket = combine(bundledCompatibility, remoteCompatibility, plugins) { bundled, remote, installed ->
-        val matched = installed.associateBy { it.manifest.id }
-        val builtIn = bundled.associateBy { it.id }
-        val compatibleRemote = remote.filter { entry ->
-            val baseline = builtIn[entry.id]
-            baseline == null || (entry.packageId == baseline.packageId &&
-                (entry.sha256 == baseline.sha256 || isNewer(entry.version, baseline.version)))
-        }
-        (compatibleRemote + bundled).distinctBy { it.id }.map { entry ->
-            val plugin = matched[entry.packageId] ?: matched[entry.manualPackageId]
-            CompatibilityMarketItem(entry, plugin?.manifest?.id,
-                plugin?.let { isNewer(entry.version, it.manifest.version) } == true)
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val bundledCompatibility = flow { emit(compatibleSources.bundled()) }
+        .flowOn(Dispatchers.IO).catch { emit(emptyList()) }
+    val compatibilityMarket = combine(bundledCompatibility, compatibleSources.remoteEntries, plugins, ::compatibilityMarketItems)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private val mutableFallbackOrder = MutableStateFlow<List<String>?>(null)
     val fallbackOrder = mutableFallbackOrder.asStateFlow()
     private var savedFallbackOrder = emptyList<String>()
@@ -86,11 +74,6 @@ class SourceManagementViewModel @Inject constructor(
     val preparingCompatibilityId = MutableStateFlow<String?>(null)
 
     init {
-        viewModelScope.launch {
-            try { bundledCompatibility.value = withContext(Dispatchers.IO) { compatibleSources.bundled() } }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { /* The native catalog remains available if the bundled catalog is unreadable. */ }
-        }
         viewModelScope.launch {
             try { awaitCancellation() }
             finally { withContext(NonCancellable) { runCatching { discardPending() } } }
@@ -152,7 +135,7 @@ class SourceManagementViewModel @Inject constructor(
             marketRefreshFailed.value = false
             launch {
                 refreshingCompatibilityMarket.value = true
-                try { compatibleSources.refresh()?.let { remoteCompatibility.value = it } }
+                try { compatibleSources.refresh() }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { marketRefreshFailed.value = true }
                 finally { refreshingCompatibilityMarket.value = false }
@@ -187,7 +170,7 @@ class SourceManagementViewModel @Inject constructor(
         val entry = item.entry
         preparingCompatibilityId.value = id
         try {
-            val prepared = manager.inspectMarketScript(entry) { compatibleSources.download(entry, it) }
+            val prepared = manager.inspectMarketScript(entry, item.installedManifest) { compatibleSources.download(entry, it) }
             showPreparedImport(prepared, item.installedPackageId)
         } finally {
             preparingCompatibilityId.value = null

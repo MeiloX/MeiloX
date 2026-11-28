@@ -705,6 +705,12 @@
     <string name="source_allow_alternate_versions_detail">Try a live, acoustic or remastered version by the same artist.</string>
     <string name="source_playing_alternate_version">Playing another version</string>
     <string name="source_market_title">Plugin Market</string>
+    <string name="source_updates_title">Source plugin updates</string>
+    <string name="source_updates_installed">Source plugin updates installed</string>
+    <string name="source_updates_available_version">%1$s installed · %2$s available</string>
+    <string name="source_updates_automatic_version">Automatically updated to %1$s</string>
+    <string name="source_updates_later">Later</string>
+    <string name="source_updates_view">View Updates</string>
     <string name="source_market_refresh">Refresh Plugin Market</string>
     <string name="source_market_empty">No plugins available</string>
     <string name="source_market_partial">Some plugins could not be loaded.</string>

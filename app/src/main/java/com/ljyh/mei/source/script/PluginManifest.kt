@@ -50,6 +50,7 @@ data class PluginManifest(
     val concurrentReadFeatures: Map<String, Set<String>> = emptyMap(),
     val compatibility: String? = null,
     val compatibilityPlatforms: Set<String>? = null,
+    internal val compatibilityUpdateId: String? = null,
 ) {
     val supported: Boolean get() = apiVersion in 1..2
     val sourceCapabilities: Set<SourceCapability> get() = capabilities.mapNotNull(CAPABILITIES::get).toSet()
@@ -192,6 +193,9 @@ data class PluginManifest(
                     require(lx || manifest.compatibility == "musicfree")
                     require(COMPATIBILITY_ID.matchEntire(manifest.id)?.groupValues?.get(1) == manifest.compatibility &&
                         manifest.providerId == manifest.id)
+                    manifest.compatibilityUpdateId?.let {
+                        require(COMPATIBILITY_ID.matchEntire(it)?.groupValues?.get(1) == manifest.compatibility)
+                    }
                     require(manifest.apiVersion == 2 && manifest.permissions.nativeSdks.isEmpty() &&
                         manifest.permissions.effects.isEmpty() && !manifest.permissions.storage && manifest.linkHosts.isEmpty())
                     manifest.permissions.network.forEach(ScriptNetworkPolicy::validateCompatibilityGrant)
@@ -200,7 +204,7 @@ data class PluginManifest(
                     require(if (lx) manifest.compatibilityPlatforms?.let {
                         it.isNotEmpty() && LxPlaybackCatalog.platforms.containsAll(it)
                     } == true else manifest.compatibilityPlatforms == null)
-                } else require(manifest.compatibilityPlatforms == null &&
+                } else require(manifest.compatibilityPlatforms == null && manifest.compatibilityUpdateId == null &&
                     !COMPATIBILITY_ID.matches(manifest.id) && !COMPATIBILITY_ID.matches(manifest.providerId))
                 return manifest
             } catch (error: SourceException) { throw error

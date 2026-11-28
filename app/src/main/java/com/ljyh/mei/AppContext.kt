@@ -37,7 +37,6 @@ import timber.log.Timber
 class AppContext : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var sourcePlugins: ScriptPluginManager
     @Inject lateinit var sourceArtwork: com.ljyh.mei.source.script.SourceArtworkStore
-    @Inject lateinit var sourceUpdates: com.ljyh.mei.source.update.SourceUpdateManager
     @Inject internal lateinit var mcpService: McpService
     private val sourceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var imageCacheLimitMb = DefaultImageCacheLimitMb
@@ -62,7 +61,6 @@ class AppContext : Application(), SingletonImageLoader.Factory {
         imageCacheSettings.start()
         com.ljyh.mei.source.script.SourceArtworkRegistry.attach(sourceArtwork)
         sourceScope.launch { sourcePlugins.loadInstalled() }
-        sourceUpdates.checkOnStartup()
         mcpService.start()
     }
 

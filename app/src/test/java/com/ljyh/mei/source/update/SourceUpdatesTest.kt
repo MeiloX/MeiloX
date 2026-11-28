@@ -2,6 +2,8 @@ package com.ljyh.mei.source.update
 
 import com.ljyh.mei.source.api.SourceErrorCode
 import com.ljyh.mei.source.api.SourceException
+import com.ljyh.mei.source.api.SourceStatus
+import com.ljyh.mei.source.script.InstalledPlugin
 import com.ljyh.mei.source.script.PluginConfigField
 import com.ljyh.mei.source.script.PluginManifest
 import com.ljyh.mei.source.script.PluginPermissions
@@ -102,6 +104,60 @@ class SourceUpdatesTest {
         invalid.forEach { json ->
             val failure = runCatching { CompatibilityMarketIndex.parse(json) }.exceptionOrNull()
             assertEquals(SourceErrorCode.INVALID_RESPONSE, (failure as? SourceException)?.code)
+        }
+    }
+
+    @Test
+    fun compatibilityUpdatesMatchInstalledMarketAndKnownFileImportsAcrossVersions() {
+        val bundled = CompatibilityMarketEntry("lx.fixture", "Fixture", "1.0.0", "lx",
+            "https://github.com/Owner/Fixture", "a".repeat(40), "fixture.js", "b".repeat(64))
+        val next = bundled.copy(version = "1.1.0", sha256 = "c".repeat(64))
+        fun item(id: String, version: String = bundled.version, remote: List<CompatibilityMarketEntry> = listOf(next)): CompatibilityMarketItem {
+            val manifest = PluginManifest(id = id, name = bundled.name, author = "Fixture", version = version,
+                apiVersion = 2, capabilities = emptySet(), compatibility = bundled.format, compatibilityUpdateId = id)
+            val installed = InstalledPlugin(manifest, false, SourceStatus.DISABLED, null, null, "1")
+            return compatibilityMarketItems(listOf(bundled), remote, listOf(installed)).single()
+        }
+
+        for (id in listOf(bundled.packageId, bundled.manualPackageId)) {
+            val update = item(id)
+            assertEquals(id, update.installedPackageId)
+            assertEquals("1.0.0", update.installedVersion)
+            assertEquals(next, update.entry)
+            assertTrue(update.updateAvailable)
+            assertFalse(item(id, "1.1.0").updateAvailable)
+            assertFalse(item(id, "1.2.0").updateAvailable)
+        }
+        assertFalse(item("compat.lx." + "d".repeat(40)).updateAvailable)
+        assertFalse(item(bundled.packageId, remote = listOf(next.copy(path = "moved.js"))).updateAvailable)
+        assertTrue(item(bundled.packageId, "0.9.0", remote = emptyList()).updateAvailable)
+    }
+
+    @Test
+    fun historicalMarketInstallsKeepTheirOriginAfterBothCatalogDigestsChange() {
+        val legacy = listOf(
+            "navidrome" to "2f1e930e417a72e2a0c870bde45359c442ad139bcf37bfe444df5141fd0cdeb3",
+            "audiomack" to "1b1f49fc1e0aa5933c3b45ce999d975e4f7fc5f69df2a487dd87830555cf01d5",
+        )
+        for ((source, digest) in legacy) {
+            val bundled = CompatibilityMarketEntry("musicfree.$source", source, "2.0.0", "musicfree",
+                "https://github.com/maotoumao/MusicFreePlugins", "a".repeat(40), "dist/$source/index.js", "b".repeat(64))
+            val latest = bundled.copy(version = "3.0.0", sha256 = "c".repeat(64))
+            assertEquals("A fresh file import recognizes the published bytes", bundled.packageId,
+                compatibilityFileUpdateId(bundled.format, digest))
+            fun item(id: String, installedDigest: String): CompatibilityMarketItem {
+                val manifest = PluginManifest(id = id, name = source, author = "Fixture", version = "1.0.0", apiVersion = 2,
+                    capabilities = emptySet(), compatibility = bundled.format,
+                    compatibilityUpdateId = compatibilityFileUpdateId(bundled.format, installedDigest, legacyInstallId = id))
+                val installed = InstalledPlugin(manifest, true, SourceStatus.READY, null, null, "1")
+                return compatibilityMarketItems(listOf(bundled), listOf(latest), listOf(installed)).single()
+            }
+            for (id in listOf(bundled.packageId, "compat.musicfree.${digest.take(40)}")) {
+                val match = item(id, digest)
+                assertEquals(id, match.installedPackageId)
+                assertTrue(match.updateAvailable)
+            }
+            assertNull(item(bundled.packageId, digest.take(40) + "0".repeat(24)).installedPackageId)
         }
     }
 

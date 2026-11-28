@@ -21,6 +21,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import io.github.neoruaa.glasmio.glass.render.configureGlassDynamicRange
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -123,6 +124,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -168,7 +170,6 @@ import io.github.neoruaa.glasmio.scaffold.navigation.iosTransitionSpec
 import com.ljyh.mei.constants.AppBarHeight
 import com.ljyh.mei.constants.AppAppearance
 import com.ljyh.mei.constants.AppAppearanceKey
-import com.ljyh.mei.constants.BetaUpdatesEnabledKey
 import com.ljyh.mei.constants.DeviceIdKey
 import com.ljyh.mei.constants.DynamicThemeKey
 import com.ljyh.mei.constants.AccentColorKey
@@ -225,7 +226,10 @@ import com.ljyh.mei.ui.component.item.LocalTrackAlternateVersionPicker
 import com.ljyh.mei.ui.component.item.TrackAlternateVersionSheet
 import com.ljyh.mei.ui.component.item.rememberTrackAlternateVersionPicker
 import com.ljyh.mei.ui.component.IconButton
+import com.ljyh.mei.ui.component.SourcePluginUpdateAlert
 import com.ljyh.mei.ui.component.VersionUpdateAlert
+import com.ljyh.mei.ui.screen.about.StartupUpdate
+import com.ljyh.mei.ui.screen.about.StartupUpdateViewModel
 import com.ljyh.mei.ui.component.player.BottomSheetPlayer
 import com.ljyh.mei.ui.component.player.FloatingLyricsPipBackdrop
 import com.ljyh.mei.ui.component.player.FloatingLyricsPipScreen
@@ -307,8 +311,6 @@ import com.ljyh.mei.utils.get
 import com.ljyh.mei.utils.netease.NeteaseUtils.getAndroidId
 import com.ljyh.mei.utils.rememberPreference
 import com.ljyh.mei.utils.rememberEnumPreference
-import com.ljyh.mei.utils.VersionUpdateChecker
-import com.ljyh.mei.utils.VersionUpdateResult
 import com.ljyh.mei.widget.MusicWidgets
 import com.ljyh.mei.widget.decodeWidgetContent
 import io.github.neoruaa.glasmio.glass.render.backdrops.layerBackdrop
@@ -354,6 +356,7 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var recognitionSession: SongRecognitionSession
 
+    private val startupUpdates by viewModels<StartupUpdateViewModel>()
     private var userData by mutableStateOf(UserData.VISITOR)
     private var pictureInPictureMode by mutableStateOf(false)
     private var floatingLyricsRequest: Boolean? = null
@@ -500,28 +503,7 @@ class MainActivity : ComponentActivity() {
             val playerLyricsRequest = remember { mutableStateOf(false) }
             var clipboardLink by remember { mutableStateOf<com.ljyh.mei.source.core.OwnedSourceLink?>(null) }
             var clipboardInspected by rememberSaveable { mutableStateOf(false) }
-            var startupUpdateResult by remember { mutableStateOf<VersionUpdateResult?>(null) }
-
-            LaunchedEffect(Unit) {
-                try {
-                    val betaUpdatesEnabled = context.dataStore.data.first()[BetaUpdatesEnabledKey] ?: false
-                    val result = VersionUpdateChecker.check(
-                        BuildConfig.VERSION_NAME,
-                        betaUpdatesEnabled = betaUpdatesEnabled,
-                    )
-                    val currentBetaUpdatesEnabled = context.dataStore.data.first()[BetaUpdatesEnabledKey] ?: false
-                    if (result is VersionUpdateResult.UpdateAvailable &&
-                        result.comparisonKnown &&
-                        currentBetaUpdatesEnabled == betaUpdatesEnabled
-                    ) {
-                        startupUpdateResult = result
-                    }
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (_: Exception) {
-                    return@LaunchedEffect
-                }
-            }
+            val startupUpdate by startupUpdates.pending.collectAsStateWithLifecycle()
 
             var isMeasured by remember { mutableStateOf(false) }
             DisposableEffect(Unit) {
@@ -1948,10 +1930,19 @@ class MainActivity : ComponentActivity() {
                                 ),
                             )
                         }
-                        if (!showCompatibilityNotice) {
+                        if (!showCompatibilityNotice && !pictureInPictureMode) {
                             VersionUpdateAlert(
-                                result = startupUpdateResult,
-                                onDismiss = { startupUpdateResult = null },
+                                result = (startupUpdate as? StartupUpdate.App)?.release,
+                                onDismiss = startupUpdates::dismiss,
+                            )
+                            SourcePluginUpdateAlert(
+                                updates = (startupUpdate as? StartupUpdate.Plugins)?.updates,
+                                onDismiss = startupUpdates::dismiss,
+                                onOpenMarket = {
+                                    playerLyricsRequest.value = false
+                                    if (playerBottomSheetState.isContentVisible) playerBottomSheetState.collapseSoft()
+                                    Screen.SourceMarket.navigate(navController)
+                                },
                             )
                         }
                         }

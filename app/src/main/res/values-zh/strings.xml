@@ -705,6 +705,12 @@
     <string name="source_allow_alternate_versions_detail">尝试同一歌手的现场版、不插电版或重制版。</string>
     <string name="source_playing_alternate_version">正在播放其他版本</string>
     <string name="source_market_title">插件市场</string>
+    <string name="source_updates_title">音源插件有更新</string>
+    <string name="source_updates_installed">音源插件已更新</string>
+    <string name="source_updates_available_version">当前 %1$s，可更新至 %2$s</string>
+    <string name="source_updates_automatic_version">已自动更新至 %1$s</string>
+    <string name="source_updates_later">稍后</string>
+    <string name="source_updates_view">查看更新</string>
     <string name="source_market_refresh">刷新插件市场</string>
     <string name="source_market_empty">暂无可用插件</string>
     <string name="source_market_partial">部分插件暂时无法加载</string>
