@@ -13,6 +13,7 @@ import java.io.File
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
 import okhttp3.Response
@@ -108,12 +109,21 @@ class SourceUpdatesTest {
     fun onlyTheCanonicalPublisherAndPackagePathCanBeOfficial() {
         val qq = SourceMarketEntry(
             "org.meilox.qqmusic", "qqmusic", "QQ Music", "0.4.0",
-            "https://github.com/NEORUAA/MeiloX-QQMusic-Source",
-            "https://raw.githubusercontent.com/NEORUAA/MeiloX-QQMusic-Source/${"a".repeat(40)}/qq-music.meisource",
+            "https://github.com/MeiloX/MeiloX-QQMusic-Source",
+            "https://raw.githubusercontent.com/MeiloX/MeiloX-QQMusic-Source/${"a".repeat(40)}/qq-music.meisource",
             "b".repeat(64), 2,
         )
         SourceMarketIndex.validate(qq)
         assertTrue(qq.isOfficial)
+        val legacy = SourceMarketListing(qq.packageId, qq.providerId, qq.name,
+            "https://github.com/NEORUAA/MeiloX-QQMusic-Source", qq.packagePath, qq.apiVersion)
+        assertEquals(qq.repository, SourceMarketIndex.parse(json(legacy)).single().repository)
+        assertEquals(qq.repository, qq.canonicalOrigin(legacy.repository))
+        assertNull(qq.canonicalOrigin(null))
+        assertEquals("https://github.com/Other/Source", qq.canonicalOrigin("https://github.com/Other/Source"))
+        assertEquals(legacy.repository, qq.copy(packagePath = "other.meisource").canonicalOrigin(legacy.repository))
+        val other = legacy.copy(packagePath = "other.meisource")
+        assertEquals(other, SourceMarketIndex.parse(json(other)).single())
         assertFalse(qq.copy(repository = "https://github.com/Another/MeiloX-QQMusic-Source").isOfficial)
         assertFalse(qq.copy(providerId = "qqmusic.other").isOfficial)
         assertFalse(qq.copy(packagePath = "dist/qq-music.meisource").isOfficial)
@@ -241,8 +251,69 @@ class SourceUpdatesTest {
     }
 
     @Test
-    fun marketTransportPinsCommitFallsBackOnlyOnRateLimitsAndVerifiesChecksum() = runTest {
-        fun archiveBytes(version: String): ByteArray {
+    fun partialRefreshRetainsOnlyMatchingTransientFailuresForManualRetry() = runTest {
+        val other = listing.copy(packageId = "org.meilox.other", providerId = "other.music")
+        val otherEntry = entry.copy(packageId = other.packageId, providerId = other.providerId)
+        val renamed = listing.copy(name = "Renamed")
+        val items = listOf(renamed, other)
+        for (code in listOf(SourceErrorCode.TIMEOUT, SourceErrorCode.NETWORK)) {
+            val refreshed = resolveMarketListings(items, listOf(entry)) {
+                if (it == renamed) throw SourceException(code)
+                otherEntry
+            }
+            assertEquals(listOf(entry.copy(name = "Renamed"), otherEntry), refreshed.entries)
+            assertEquals(setOf(entry.packageId), refreshed.unresolved)
+        }
+        val changed = listOf(listing.copy(packageId = other.packageId), listing.copy(providerId = other.providerId),
+            listing.copy(repository = other.repository + "-moved"), listing.copy(packagePath = "other.meisource"), listing.copy(apiVersion = 1))
+        for (item in changed) {
+            assertTrue(resolveMarketListings(listOf(item), listOf(entry)) { throw SourceException(SourceErrorCode.NETWORK) }.entries.isEmpty())
+        }
+        for (code in listOf(SourceErrorCode.INVALID_RESPONSE, SourceErrorCode.NOT_FOUND, SourceErrorCode.PERMISSION_DENIED)) {
+            assertTrue(resolveMarketListings(listOf(listing), listOf(entry)) { throw SourceException(code) }.entries.isEmpty())
+        }
+        val removed = resolveMarketListings(emptyList(), listOf(entry)) { error("Delisted package") }
+        assertTrue(removed.entries.isEmpty())
+    }
+
+    @Test
+    fun githubFileFallbackKeepsTheRepositoryPathRevisionAndResponseChecks() = runTest {
+        val calls = mutableListOf<okhttp3.Request>()
+        val policy = ScriptNetworkPolicy(marketHosts)
+        var rawStatus = 503
+        val client = policy.marketClient().newBuilder().addInterceptor { chain ->
+            val request = chain.request()
+            calls += request
+            val available = request.url.host == "api.github.com"
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+                .code(if (available) 200 else rawStatus).message("Fixture")
+                .body((if (available) json() else "").toResponseBody()).build()
+        }.build()
+        assertNull(client.proxy)
+        java.net.ProxySelector.getDefault()?.let { assertSame(it, client.proxySelector) }
+        assertEquals(json(), SourceMarketTransport(policy, client).index(null).json)
+        assertEquals(listOf(SourceMarketIndex.URL,
+            "https://api.github.com/repos/MeiloX/MeiloX-Source-Registry/contents/index.json?ref=main"),
+            calls.map { it.url.toString() })
+        assertEquals("application/vnd.github.raw+json", calls.last().header("Accept"))
+        rawStatus = 404
+        val compatibility = okhttp3.Request.Builder().url(CompatibilityMarketIndex.URL).build()
+        assertEquals(200, policy.readMarketFile(client, compatibility) { response, _ ->
+            if (response.code == 404) null else response.code
+        })
+        assertEquals("/repos/MeiloX/MeiloX-Source-Registry/contents/compatibility.json", calls.last().url.encodedPath)
+
+        val before = "https://api.github.com/repos/Owner/Source/commits?path=source.meisource&per_page=1".toHttpUrl()
+        val moved = "https://api.github.com/repositories/1234/commits?path=source.meisource&per_page=1".toHttpUrl()
+        assertTrue(isGitHubRepositoryRedirect(before, moved))
+        assertFalse(isGitHubRepositoryRedirect(before, moved.newBuilder().host("another.example").build()))
+        assertFalse(isGitHubRepositoryRedirect(before, moved.newBuilder().encodedPath("/repositories/1234/issues").build()))
+        assertFalse(isGitHubRepositoryRedirect(before, moved.newBuilder().query("path=other.meisource").build()))
+    }
+
+    @Test
+    fun marketTransportPinsCommitFallsBackOnTransientFailuresAndVerifiesChecksum() = runTest {
+        fun archiveBytes(version: String, padding: Int = 0): ByteArray {
             val out = ByteArrayOutputStream()
             ZipOutputStream(out).use { zip ->
                 zip.putNextEntry(ZipEntry("manifest.json"))
@@ -250,6 +321,7 @@ class SourceUpdatesTest {
                     """{"id":"${listing.packageId}","providerId":"${listing.providerId}","version":"$version","apiVersion":${listing.apiVersion}}"""
                         .toByteArray(Charsets.UTF_8),
                 )
+                if (padding > 0) zip.write(ByteArray(padding) { ' '.code.toByte() })
                 zip.closeEntry()
             }
             return out.toByteArray()
@@ -258,7 +330,7 @@ class SourceUpdatesTest {
         val sha = "a".repeat(40)
         val packageV1 = archiveBytes("1.2.3")
         val packageV2 = archiveBytes("1.2.4")
-        var apiCode = 200
+        var apiCode: Int? = 200
         var apiBody = """[{"sha":"$sha"}]"""
         var rawBytes = packageV1
         val seenRawUrls = mutableListOf<String>()
@@ -268,13 +340,12 @@ class SourceUpdatesTest {
                 val request = chain.request()
                 val url = request.url.toString()
                 when (request.url.host) {
-                    "api.github.com" -> Response.Builder()
-                        .request(request)
-                        .protocol(Protocol.HTTP_1_1)
-                        .code(apiCode)
-                        .message(if (apiCode == 200) "OK" else "Error")
-                        .body(apiBody.toResponseBody("application/json".toMediaType()))
-                        .build()
+                    "api.github.com" -> {
+                        val code = apiCode ?: throw java.net.SocketTimeoutException()
+                        Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+                            .code(code).message(if (code == 200) "OK" else "Error")
+                            .body(apiBody.toResponseBody("application/json".toMediaType())).build()
+                    }
                     "raw.githubusercontent.com" -> {
                         seenRawUrls += url
                         Response.Builder()
@@ -294,10 +365,15 @@ class SourceUpdatesTest {
         val pinned = transport.resolve(listing)
         assertEquals("https://raw.githubusercontent.com/Owner/Fixture/$sha/${listing.packagePath}", pinned.packageUrl)
         assertEquals("1.2.3", pinned.version)
+        rawBytes = archiveBytes("1.2.3", padding = 64 * 1024)
+        assertTrue(rawBytes.size < 64 * 1024)
+        val oversized = runCatching { transport.resolve(listing) }.exceptionOrNull() as SourceException
+        assertEquals(SourceErrorCode.INVALID_RESPONSE, oversized.code)
+        rawBytes = packageV1
 
-        for (rateLimited in listOf(403, 429)) {
-            apiCode = rateLimited
-            apiBody = """{"message":"rate limit exceeded"}"""
+        for (transient in listOf(403, 408, 429, 503, null)) {
+            apiCode = transient
+            apiBody = """{"message":"temporarily unavailable"}"""
             val fallback = transport.resolve(listing)
             assertEquals("https://raw.githubusercontent.com/Owner/Fixture/HEAD/${listing.packagePath}", fallback.packageUrl)
             val destination = File.createTempFile("source-market-test-", ".meisource")
@@ -318,7 +394,9 @@ class SourceUpdatesTest {
             }
         }
 
-        for (failureCode in listOf(400, 404, 500)) {
+        val failureCodes = mapOf(200 to SourceErrorCode.INVALID_RESPONSE, 400 to SourceErrorCode.INVALID_RESPONSE,
+            404 to SourceErrorCode.NOT_FOUND, 410 to SourceErrorCode.NOT_FOUND)
+        for ((failureCode, expected) in failureCodes) {
             apiCode = failureCode
             apiBody = """{"message":"error"}"""
             val rawCountBefore = seenRawUrls.size
@@ -326,7 +404,7 @@ class SourceUpdatesTest {
                 transport.resolve(listing)
                 fail("HTTP $failureCode must fail closed without falling back to HEAD")
             } catch (error: SourceException) {
-                assertEquals(SourceErrorCode.NETWORK, error.code)
+                assertEquals(expected, error.code)
                 assertEquals(rawCountBefore, seenRawUrls.size)
             }
         }

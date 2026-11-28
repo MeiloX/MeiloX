@@ -31,7 +31,7 @@ data class PendingSourceMatch(val origin: TrackRef, val instanceId: ProviderInst
 class PlaybackResolutionException(
     val attempts: List<ResolutionAttempt>,
     cause: SourceException? = null,
-) : SourceException(attempts.lastOrNull()?.error ?: SourceErrorCode.UNAVAILABLE,
+) : SourceException(cause?.code ?: attempts.lastOrNull()?.error ?: SourceErrorCode.UNAVAILABLE,
     outcomeUnknown = cause?.outcomeUnknown ?: false) {
     init { if (cause != null) initCause(cause) }
 }
@@ -114,26 +114,25 @@ class PlaybackResolver(
     ): PlaybackResolution {
         val attempts = mutableListOf<ResolutionAttempt>()
         var lastFailure: SourceException? = null
+        var configurationFailure: SourceException? = null
         val original = registry.provider(track.ref.providerId)
         val mayFallback = settings.autoFallbackEnabled && TrackRefCodec.encode(track.ref) !in settings.disabledTrackFallbacks
-        val fallbacks = if (mayFallback) settings.fallbackOrder.distinct().mapNotNull { registry.instance(ProviderInstanceId(it)) }
-            .filter {
-                it.status == SourceStatus.READY && it.canSupplyFallback && it is PlaybackCapability &&
-                    SourceCapability.PLAYBACK in it.capabilities && it.instanceId != original?.instanceId
+        val ordered = if (mayFallback) settings.fallbackOrder.mapNotNull { registry.instance(ProviderInstanceId(it)) }
+            .filter { provider ->
+                provider === original || provider.status == SourceStatus.READY && provider.canSupplyFallback &&
+                    provider is PlaybackCapability && SourceCapability.PLAYBACK in provider.capabilities &&
+                    (provider !is OriginalTrackPlaybackCapability || !provider.originalTrackPlaybackOnly ||
+                        allowPlaybackOnlyFallback && provider.supportsOriginalTrack(track.ref))
             } else emptyList()
-        val playbackOnly = fallbacks.filter { it is OriginalTrackPlaybackCapability && it.originalTrackPlaybackOnly }
-        val catalogFallbacks = fallbacks - playbackOnly.toSet()
-        val compatible = if (allowPlaybackOnlyFallback) fallbacks.filter { provider ->
-            provider !in playbackOnly || (provider as OriginalTrackPlaybackCapability).supportsOriginalTrack(track.ref)
-        } else catalogFallbacks
-        val providers = if (settings.preferOriginalProvider) listOfNotNull(original) + compatible
-            else catalogFallbacks + listOfNotNull(original) + compatible.filter { it in playbackOnly }
-        val originalProviders = providers.distinctBy { it.instanceId }
+        val originalProviders = (if (settings.preferOriginalProvider) listOfNotNull(original) + ordered
+            else ordered + listOfNotNull(original)).distinctBy { it.instanceId }
         val alternateProviders = originalProviders.filter {
             settings.allowAlternateVersions && TrackRefCodec.encode(track.ref) !in settings.disabledTrackFallbacks &&
                 it is CatalogCapability && it is PlaybackCapability && it.status == SourceStatus.READY &&
                 SourceCapability.SEARCH in it.capabilities
         }
+        var hydratedTrack: Track? = null
+        var hydrationFailure: SourceException? = null
         var originalUnavailable = false
         if (original == null) attempts += ResolutionAttempt(ProviderInstanceId(track.ref.providerId), track.ref, SourceErrorCode.MISSING_PROVIDER)
         for ((provider, alternate) in originalProviders.map { it to false } + alternateProviders.map { it to true }) {
@@ -143,12 +142,22 @@ class PlaybackResolver(
             try {
                 return withTimeout(attemptTimeoutMs) {
                     val direct = (provider as? OriginalTrackPlaybackCapability)?.takeIf {
-                        !alternate && provider !== original && provider in playbackOnly
+                        !alternate && provider !== original && it.originalTrackPlaybackOnly
                     }
                     val manualKey = TrackRefCodec.encode(track.ref) + "|" + provider.id
                     val needsMetadata = track.title.isBlank() || track.durationMs <= 0 || track.artists.isEmpty()
                     val matchOrigin = if (needsMetadata && (direct != null || alternate || provider !== original && manualKey !in settings.manualMatches)) {
-                        (original as? CatalogCapability)?.getTrack(track.ref)?.takeIf { it.ref == track.ref } ?: track
+                        if (hydratedTrack == null && hydrationFailure == null) {
+                            try {
+                                hydratedTrack = (original as? CatalogCapability)?.getTrack(track.ref)
+                                    ?.takeIf { it.ref == track.ref } ?: track
+                            } catch (error: SourceException) {
+                                hydrationFailure = error
+                            }
+                        }
+                        // Direct platform playback can still use the queued identity and duration.
+                        hydrationFailure?.let { if (direct == null || track.durationMs <= 0) throw it }
+                        hydratedTrack ?: track
                     } else track
                     candidate = when {
                         direct != null -> matchOrigin.copy(ref = TrackRef(provider.id, TrackRefCodec.encode(matchOrigin.ref)))
@@ -159,7 +168,9 @@ class PlaybackResolver(
                     val target = candidate ?: throw SourceException(SourceErrorCode.NOT_FOUND)
                     if (target.ref.providerId != provider.id) throw SourceException(SourceErrorCode.INVALID_RESPONSE)
                     val resource = when {
-                        direct != null -> direct.resolveOriginalTrack(matchOrigin, quality).copy(cachePolicy = CachePolicy.NO_STORE)
+                        direct != null -> direct.resolveOriginalTrack(matchOrigin, quality) {
+                            excluded.isEmpty() || audioResourceIdentity(provider.instanceId, target.ref, it) !in excluded
+                        }.copy(cachePolicy = CachePolicy.NO_STORE)
                         !alternate && provider === original && originalResolver != null -> originalResolver()
                         else -> (provider as? PlaybackCapability ?: throw SourceException(SourceErrorCode.UNSUPPORTED)).resolve(target.ref, quality)
                     }
@@ -190,13 +201,18 @@ class PlaybackResolver(
                 }
                 lastFailure = failure
                 attempts += ResolutionAttempt(provider.instanceId, candidate?.ref, failure.code)
+                if (failure.code == SourceErrorCode.PERMISSION_DENIED ||
+                    failure.code == SourceErrorCode.PLUGIN && configurationFailure == null) {
+                    configurationFailure = failure
+                }
                 logResolutionFailure(provider, candidate?.ref ?: track.ref, quality, failure)
-                if (failure is SourceRuntimeUnavailableException && provider !in playbackOnly) {
+                if (failure is SourceRuntimeUnavailableException &&
+                    (provider !is OriginalTrackPlaybackCapability || !provider.originalTrackPlaybackOnly)) {
                     throw PlaybackResolutionException(attempts.toList(), failure)
                 }
             }
         }
-        throw PlaybackResolutionException(attempts, lastFailure)
+        throw PlaybackResolutionException(attempts, configurationFailure ?: lastFailure)
     }
 
     private suspend fun matchAlternate(origin: Track, catalog: CatalogCapability, providerId: String): Track? {

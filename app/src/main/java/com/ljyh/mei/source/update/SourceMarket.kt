@@ -28,16 +28,27 @@ data class SourceMarketEntry(
     val apiVersion: Int,
     val packagePath: String = inferPackagePath(packageUrl),
 ) {
-    val isOfficial: Boolean get() = when (packageId) {
-        "org.meilox.source.netease" -> providerId == "netease" && packagePath == "netease.meisource" &&
-            repository.equals("https://github.com/NEORUAA/MeiloX-Netease-Source", ignoreCase = true)
-        "org.meilox.qqmusic" -> providerId == "qqmusic" && packagePath == "qq-music.meisource" &&
-            repository.equals("https://github.com/NEORUAA/MeiloX-QQMusic-Source", ignoreCase = true)
-        else -> false
-    }
+    val isOfficial: Boolean get() = officialRepository(packageId, providerId, packagePath) == repository
+
+    internal fun canonicalOrigin(origin: String?): String? =
+        if (isOfficial && origin.equals(repository.replace("/MeiloX/", "/NEORUAA/"), ignoreCase = true)) repository else origin
 
     internal fun matches(manifest: PluginManifest): Boolean = manifest.id == packageId &&
         manifest.providerId == providerId && manifest.version == version && manifest.apiVersion == apiVersion
+}
+
+private fun officialRepository(packageId: String, providerId: String, path: String): String? = when {
+    packageId == "org.meilox.source.netease" && providerId == "netease" && path == "netease.meisource" ->
+        "https://github.com/MeiloX/MeiloX-Netease-Source"
+    packageId == "org.meilox.qqmusic" && providerId == "qqmusic" && path == "qq-music.meisource" ->
+        "https://github.com/MeiloX/MeiloX-QQMusic-Source"
+    else -> null
+}
+
+private fun SourceMarketListing.canonicalListing(): SourceMarketListing {
+    val canonical = officialRepository(packageId, providerId, packagePath) ?: return this
+    val previous = canonical.replace("/MeiloX/", "/NEORUAA/")
+    return if (repository.equals(previous, true) || repository.equals(canonical, true)) copy(repository = canonical) else this
 }
 
 private fun inferPackagePath(url: String): String = runCatching {
@@ -118,7 +129,7 @@ internal object SourceMarketIndex {
                             require(entryFields == fields)
                             fun value(key: String) = valuesByName.getValue(key)
                             values += SourceMarketListing(value("packageId"), value("providerId"), value("name"),
-                                value("repository"), value("packagePath"), requireNotNull(api)).also(::validate)
+                                value("repository"), value("packagePath"), requireNotNull(api)).also(::validate).canonicalListing()
                         }
                         reader.endArray()
                         entries = values

@@ -34,12 +34,18 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+private object DeferDomainNotice
+
+internal fun Request.Builder.deferDomainNotice(): Request.Builder =
+    tag(DeferDomainNotice::class.java, DeferDomainNotice)
+
 /** The only network path exposed to scripts and their audio resources. */
 class ScriptNetworkPolicy(
     private val domains: List<String>,
     private val nativeSdks: Set<String> = emptySet(),
     private val configuration: () -> Map<String, String> = { emptyMap() },
     private val strictRedirects: Boolean = false,
+    private val onMissingDomain: ((String) -> Unit)? = null,
 ) {
     init { domains.forEach(::validateGrant) }
 
@@ -55,6 +61,8 @@ class ScriptNetworkPolicy(
         maxRequestsPerHost = AUDIO_CONCURRENCY
     }
     private data class InitialHost(val value: String)
+    private class MissingDomain(val host: String, val redirect: Boolean = false) :
+        SourceException(SourceErrorCode.PERMISSION_DENIED, "Source domain needs approval")
 
     val client: OkHttpClient = OkHttpClient.Builder()
         .dispatcher(Dispatcher().apply {
@@ -71,21 +79,42 @@ class ScriptNetworkPolicy(
         })
         .addInterceptor { chain ->
             val request = chain.request()
-            validateUrl(request.url.toString())
-            chain.proceed(if (strictRedirects) request.newBuilder().tag(InitialHost::class.java, InitialHost(request.url.host)).build() else request)
+            try {
+                validateTransportUrl(request.url.toString(), requireGrantedHost = true)
+                chain.proceed(if (strictRedirects) request.newBuilder().tag(InitialHost::class.java, InitialHost(request.url.host)).build() else request)
+            } catch (error: MissingDomain) {
+                if (request.tag(DeferDomainNotice::class.java) == null) reportMissingDomain(error)
+                throw error
+            }
         }.apply {
             if (strictRedirects) addNetworkInterceptor { chain ->
                 val request = chain.request()
-                validateUrl(request.url.toString())
-                if (request.tag(InitialHost::class.java)?.value != request.url.host) {
+                validateTransportUrl(request.url.toString(), requireGrantedHost = true)
+                val outgoing = if (request.tag(InitialHost::class.java)?.value != request.url.host) {
                     if (request.method !in setOf("GET", "HEAD")) denied()
                     val redirect = request.newBuilder()
                     // Only transport headers belong to a cross-host redirect.
                     request.headers.names().filterNot { it.lowercase() in REDIRECT_HEADERS }.forEach(redirect::removeHeader)
-                    chain.proceed(redirect.build())
-                } else chain.proceed(request)
+                    redirect.build()
+                } else request
+                secureCompatibilityRedirect(chain.proceed(outgoing))
             }
         }.build()
+
+    internal fun secureCompatibilityRedirect(response: Response): Response {
+        if (!response.isRedirect || response.request.method !in setOf("GET", "HEAD")) return response
+        val location = response.header("Location") ?: return response
+        val target = response.request.url.resolve(location) ?: return response
+        // Some media services advertise HTTP on redirects even when their CDN supports TLS.
+        val secure = compatibilityUrl(target.toString())
+        try {
+            validateCompatibilityRedirectTarget(secure)
+        } catch (error: SourceException) {
+            response.close()
+            throw error
+        }
+        return if (target.scheme == "http") response.newBuilder().header("Location", secure).build() else response
+    }
 
     // Wrappers share the owning policy's connection pool, but contain no account or request state.
     // Keeping the base identity also makes replacement clients take effect immediately.
@@ -132,7 +161,18 @@ class ScriptNetworkPolicy(
 
     internal val audioClient: OkHttpClient get() = transports().audio
 
-    fun validateUrl(value: String): HttpUrl = validateTransportUrl(value, requireGrantedHost = true)
+    fun validateUrl(value: String): HttpUrl = try { validateTransportUrl(value, requireGrantedHost = true) }
+    catch (error: MissingDomain) { reportMissingDomain(error); throw error }
+
+    internal fun reportMissingDomain(error: SourceException) {
+        if (error is MissingDomain) onMissingDomain?.invoke(error.host)
+    }
+
+    internal fun validateCandidateUrl(value: String): HttpUrl = validateTransportUrl(value, requireGrantedHost = true)
+
+    internal fun validateCompatibilityRedirectTarget(value: String): HttpUrl = try {
+        validateTransportUrl(value, requireGrantedHost = true)
+    } catch (error: MissingDomain) { throw MissingDomain(error.host, redirect = true) }
 
     /** Redirect targets may move to the canonical host selected by the service. */
     internal fun validateRedirectUrl(value: String): HttpUrl = validateTransportUrl(value, requireGrantedHost = false)
@@ -158,7 +198,7 @@ class ScriptNetworkPolicy(
 
     suspend fun artwork(url: String, directory: java.io.File, ensureCurrent: () -> Unit = {}): String = networkDeadline(ensureCurrent) {
         ensureCurrent()
-        val checked = validateUrl(url)
+        val checked = validateCandidateUrl(url)
         val file = artworkFile(url, directory)
         withContext(Dispatchers.IO) {
             fun cached(): String? {
@@ -171,7 +211,8 @@ class ScriptNetworkPolicy(
             cached()?.let { return@withContext it }
             artworkConcurrency.withPermit {
                 cached()?.let { return@withPermit it }
-                exchange(transports().artwork.newCall(Request.Builder().url(checked).build()), ensureCurrent) { response, guard ->
+                val request = Request.Builder().url(checked).tag(DeferDomainNotice::class.java, DeferDomainNotice).build()
+                exchange(transports().artwork.newCall(request), ensureCurrent) { response, guard ->
                     cacheArtwork(response, file, guard)
                 }
             }
@@ -218,14 +259,20 @@ class ScriptNetworkPolicy(
         return artworkUri(file)
     }
 
-    suspend fun request(request: JsonObject, ensureCurrent: () -> Unit = {}): JsonObject = networkDeadline(ensureCurrent) {
+    suspend fun request(request: JsonObject, ensureCurrent: () -> Unit = {}): JsonObject = try {
+        deferredRequest(request, ensureCurrent)
+    } catch (error: MissingDomain) { reportMissingDomain(error); throw error }
+
+    /** Alternative API routes can recover; publish a denied host only if the whole operation fails. */
+    internal suspend fun deferredRequest(request: JsonObject, ensureCurrent: () -> Unit): JsonObject = networkDeadline(ensureCurrent) {
         apiConcurrency.withPermit { performRequest(request, ensureCurrent) }
     }
 
     private suspend fun performRequest(request: JsonObject, ensureCurrent: () -> Unit): JsonObject {
         ensureCurrent()
         val responseEncoding = responseEncoding(request)
-        val url = validateUrl(request.get("url")?.asString ?: denied())
+        val rawUrl = request.get("url")?.asString ?: denied()
+        val url = validateTransportUrl(if (strictRedirects) compatibilityUrl(rawUrl) else rawUrl, requireGrantedHost = true)
         val method = request.get("method")?.asString?.uppercase() ?: "GET"
         if (method !in setOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")) denied()
         val headers = request.getAsJsonObject("headers")?.entrySet()?.associate { it.key to it.value.asString }.orEmpty()
@@ -238,7 +285,7 @@ class ScriptNetworkPolicy(
             else value.toByteArray(Charsets.UTF_8)
         }
         if ((body?.size ?: 0) > MAX_REQUEST_BYTES || method in setOf("GET", "HEAD") && body != null) denied()
-        val builder = Request.Builder().url(url)
+        val builder = Request.Builder().url(url).deferDomainNotice()
         headers.forEach(builder::header)
         val requestBody = if (method in setOf("POST", "PUT", "PATCH")) (body ?: byteArrayOf()).toRequestBody() else body?.toRequestBody()
         builder.method(method, requestBody)
@@ -300,13 +347,14 @@ class ScriptNetworkPolicy(
 
     internal fun responsePayload(response: Response, encoding: String): JsonObject = transport {
         if (encoding !in setOf("utf8", "base64")) denied()
-        val responseBody = response.body
+        val responseBody = response.body.takeUnless { response.request.method == "HEAD" }
         if (responseBody != null && responseBody.contentLength() > MAX_RESPONSE_BYTES) throw SourceResponseSizeException()
         val source = responseBody?.source()
         if (source != null && source.request(MAX_RESPONSE_BYTES + 1L)) throw SourceResponseSizeException()
         val bytes = source?.readByteArray() ?: byteArrayOf()
         JsonObject().apply {
             addProperty("status", response.code)
+            addProperty("statusText", response.message)
             // Cookies from one response are not installed in a shared cookie jar.
             add("headers", JsonObject().apply { response.headers.names().forEach { name -> addProperty(name, response.header(name)) } })
             add("setCookies", com.google.gson.JsonArray().apply { response.headers.values("Set-Cookie").forEach(::add) })
@@ -333,10 +381,39 @@ class ScriptNetworkPolicy(
     } catch (_: Exception) { throw SourceException(SourceErrorCode.INVALID_RESPONSE) }
 
     private fun validateHost(host: String) {
-        if (!isHostAllowed(host, domains)) denied()
+        if (isHostAllowed(host, domains)) return
+        validateDomain(host)
+        if (strictRedirects && onMissingDomain != null) throw MissingDomain(host)
+        denied()
     }
 
     companion object {
+        /** A server reached through an approved route can identify the next host needed for that route. */
+        internal fun preferredCompatibilityFailure(previous: SourceException?, next: SourceException): SourceException {
+            fun priority(error: SourceException): Int = when {
+                error is MissingDomain && error.redirect -> 3
+                error is MissingDomain -> 2
+                error.code == SourceErrorCode.PERMISSION_DENIED -> 1
+                else -> 0
+            }
+            return if (previous == null || priority(next) > priority(previous)) next else previous
+        }
+
+        private const val NETEASE_MEDIA_GRANT = "*.music.126.net"
+
+        internal fun suggestedCompatibilityGrant(host: String): String =
+            if (host.endsWith(NETEASE_MEDIA_GRANT.substring(1))) NETEASE_MEDIA_GRANT else host
+
+        internal fun validateCompatibilityGrant(grant: String) {
+            if (grant != NETEASE_MEDIA_GRANT) validateDomain(grant)
+        }
+
+        internal fun compatibilityUrl(value: String): String {
+            if (!value.startsWith("http://", ignoreCase = true)) return value
+            val url = value.toHttpUrlOrNull() ?: return value
+            return if (url.port == 80) url.newBuilder().scheme("https").port(443).build().toString() else value
+        }
+
         /** System DNS may return a local proxy's synthetic address; TLS still authenticates the declared hostname. */
         internal fun validateResolvedAddresses(addresses: List<InetAddress>) {
             if (addresses.isEmpty() || addresses.any { address ->

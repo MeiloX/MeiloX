@@ -40,7 +40,7 @@ MeiloX 是一个基于 [Mei](https://github.com/ljyh223/Mei) 改造的多音源�
 - Apple Music 风格全屏播放器、迷你播放器和歌词浮窗；
 - 浅色/深色主题、动态专辑背景和 Liquid Glass 交互效果。
 - 默认安装且可移除的网易云音源、独立 QQ 音乐插件，以及按用户顺序自动切换播放音源。
-- [插件市场](https://github.com/NEORUAA/MeiloX-Source-Registry)、启动版本检查和自动更新，支持开发者提交 PR 上架。
+- [插件市场](https://github.com/MeiloX/MeiloX-Source-Registry)、启动版本检查和自动更新，支持开发者提交 PR 上架。
 
 功能仍在持续调整中，实际可用范围会随版本和音乐源接口状态变化。
 

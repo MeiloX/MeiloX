@@ -87,27 +87,28 @@
         if (typeof options === "function") { callback = options; options = {}; }
         if (typeof callback !== "function") throw new TypeError("Expected a request callback");
         const headers = {...options.headers};
-        const setType = value => {
-            if (!Object.keys(headers).some(key => key.toLowerCase() === "content-type")) headers["Content-Type"] = value;
+        const setDefaultHeader = (name, value) => {
+            if (!Object.keys(headers).some(key => key.toLowerCase() === name.toLowerCase())) headers[name] = value;
         };
+        setDefaultHeader("User-Agent", "Mozilla/5.0");
         let body = options.body;
         let bodyEncoding;
         if (options.formData) {
             const boundary = "meilox-" + Buffer.from(runtime.randomBytes(16)).toString("hex");
             body = pairs(options.formData, (key, value) => {
-                if (/[\r\n"\\]/.test(key) || typeof value !== "string") throw new Error("Unsupported multipart field");
+                if (/[\r\n"\\]/.test(key) || !["string", "number", "boolean"].includes(typeof value)) throw new Error("Unsupported multipart field");
                 return `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`;
             }).join("") + `--${boundary}--\r\n`;
-            setType("multipart/form-data; boundary=" + boundary);
+            setDefaultHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
         } else if (options.form) {
             body = pairs(options.form, (key, value) => encodeURIComponent(key) + "=" + encodeURIComponent(value ?? "")).join("&");
-            setType("application/x-www-form-urlencoded");
+            setDefaultHeader("Content-Type", "application/x-www-form-urlencoded");
         } else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) {
             body = Buffer.from(body).toString("base64");
             bodyEncoding = "base64";
         } else if (typeof body === "object" && body !== null) {
             body = JSON.stringify(body);
-            setType("application/json");
+            setDefaultHeader("Content-Type", "application/json");
         }
         const call = runtime.request({url, method: String(options.method || "GET").toUpperCase(),
             headers, body, bodyEncoding, timeout: options.timeout});
@@ -118,11 +119,14 @@
         call.promise.then(response => {
             if (aborted) return;
             let payload = response.body;
-            const contentType = response.headers?.["content-type"] ?? response.headers?.["Content-Type"];
-            if (typeof contentType === "string" && /[+/]json\b/i.test(contentType)) {
-                try { payload = JSON.parse(payload); } catch (_) {}
+            const responseHeaders = Object.fromEntries(Object.entries(response.headers ?? {})
+                .map(([name, value]) => [name.toLowerCase(), value]));
+            const contentType = responseHeaders["content-type"];
+            // Some LX APIs return JSON objects and arrays as text/plain or omit Content-Type.
+            if (typeof payload === "string" && (/[+/]json\b/i.test(contentType || "") || /^\s*(?:\{|\[)/.test(payload))) {
+                try { payload = JSON.parse(payload.replace(/^\uFEFF/, "")); } catch (_) {}
             }
-            callback(null, {statusCode: response.status, statusMessage: "", headers: response.headers, body: payload}, payload);
+            callback(null, {statusCode: response.status, statusMessage: response.statusText ?? "", headers: responseHeaders, body: payload}, payload);
         }, error => { if (!aborted) callback(error, null, null); });
         return abort;
     }
@@ -131,6 +135,7 @@
         const properties = {};
         for (const platform of platforms) {
             const source = sources?.[platform];
+            if (source?.type != null && source.type !== "music") continue;
             if (!Array.isArray(source?.actions) || !source.actions.includes("musicUrl") || !Array.isArray(source.qualitys)) continue;
             const qualities = knownQualities.filter(quality => source.qualitys.includes(quality));
             if (qualities.length) properties[platform] = qualities;
@@ -141,24 +146,25 @@
 
     globalThis.__meiloxFormat = async ({source, operation, params, scriptName}) => {
         const tag = key => (source.match(new RegExp("^\\s*\\*?\\s*@" + key + "\\s+([^\\r\\n]+)", "m"))?.[1] || "").trim().slice(0, 128);
-        const info = Object.freeze({name: tag("name") || scriptName || "LX", author: tag("author"), version: tag("version"),
-            description: tag("description"), homepage: tag("homepage")});
+        const info = {name: tag("name") || scriptName || "LX", author: tag("author"), version: tag("version"),
+            description: tag("description"), homepage: tag("homepage")};
+        const scriptInfo = Object.freeze({...info, rawScript: source});
         let handler;
-        let initialized = false;
+        let declaredSources;
         let ready;
         const setup = new Promise(resolve => { ready = resolve; });
         const lx = Object.freeze({
-            env: "mobile", version: "2.0.0", EVENT_NAMES: events, currentScriptInfo: info,
-            on(event, callback) {
+            env: "mobile", version: "2.0.0", EVENT_NAMES: events, currentScriptInfo: scriptInfo,
+            async on(event, callback) {
                 if (event !== events.request || typeof callback !== "function") throw new Error("Unsupported LX event");
                 handler = callback;
+                if (declaredSources) ready(declaredSources);
             },
             async send(event, payload) {
                 if (event === events.updateAlert) return;
-                if (event !== events.inited || initialized || typeof handler !== "function") throw new Error("Invalid LX initialization");
-                const declared = capabilities(payload?.sources);
-                initialized = true;
-                ready(declared);
+                if (event !== events.inited || declaredSources) throw new Error("Invalid LX initialization");
+                declaredSources = capabilities(payload?.sources);
+                if (handler) ready(declaredSources);
             },
             request,
             utils: Object.freeze({buffer, crypto})

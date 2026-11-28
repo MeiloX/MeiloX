@@ -8,6 +8,8 @@
     const timers = new Map();
     const cancelled = [];
     let nextId = 0;
+    let requestCount = 0;
+    let lastTurn;
     let started = false;
     let inspect = false;
     let result;
@@ -140,7 +142,8 @@
 
     function request(options) {
         if (inspect) return {promise: Promise.reject(failure("PERMISSION_DENIED")), abort() {}};
-        if (requests.size >= 4) throw failure("PLUGIN");
+        if (requestCount >= 16) return {promise: Promise.reject(failure("PLUGIN")), abort() {}};
+        requestCount++;
         const id = ++nextId;
         const call = {options, sent: false};
         const promise = new Promise((resolve, reject) => {
@@ -200,6 +203,11 @@
     Object.defineProperty(globalThis, "__meiloxCompat", {value: Object.freeze({
         request,
         randomBytes,
+        turn(id, action) {
+            if (action) lastTurn = {id, value: action()};
+            if (lastTurn?.id !== id) throw failure("PLUGIN");
+            return lastTurn.value;
+        },
         start(input) {
             if (started) throw failure("PLUGIN");
             started = true;
@@ -223,10 +231,14 @@
         step() {
             if (result) return stringify(result);
             const network = [];
+            let active = 0;
+            for (const call of requests.values()) if (call.sent) active++;
             for (const [id, call] of requests) {
+                if (active >= 4) break;
                 if (call.sent) continue;
                 network.push({id, options: call.options});
                 call.sent = true;
+                active++;
             }
             let due = null;
             for (const timer of timers.values()) due = due === null ? timer.at : Math.min(due, timer.at);

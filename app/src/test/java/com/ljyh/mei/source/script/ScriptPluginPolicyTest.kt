@@ -34,6 +34,101 @@ import okhttp3.FormBody
 import okhttp3.RequestBody.Companion.toRequestBody
 
 class ScriptPluginPolicyTest {
+    @Test fun lxCatalogUsesTheMatchedPlatformsIdsAndRejectsAmbiguousRecordings() = runTest {
+        val origin = Track(TrackRef("netease", "42"), "Song", listOf(SourceArtist("Artist")), SourceAlbum("Album"), 180_000)
+        fun row(json: String) = JsonParser.parseString(json).asJsonObject
+        val wy = LxPlaybackCatalog.candidates(origin, "wy").single()
+        assertEquals(42L, wy.get("songId").asLong)
+        assertTrue(wy.getAsJsonObject("_types").has("128k"))
+        val qqOrigin = origin.copy(ref = TrackRef("qqmusic", "42"))
+        val studio = row("""{"id":81,"name":"Song","artists":[{"name":"Artist"}],"album":{"id":9,"name":"Album"},"duration":180040}""")
+        val differentArtist = studio.deepCopy().apply {
+            addProperty("id", 42)
+            getAsJsonArray("artists")[0].asJsonObject.addProperty("name", "Other")
+        }
+        val demo = studio.deepCopy().apply {
+            addProperty("id", 83)
+            getAsJsonObject("album").addProperty("name", "Album demo")
+        }
+        val live = studio.deepCopy().apply { addProperty("id", 84); add("alias", JsonParser.parseString("""["Live"]""")) }
+        val clip = studio.deepCopy().apply { addProperty("id", 85); addProperty("duration", 30_000) }
+        val wrongVersions = listOf(differentArtist, demo, live, clip)
+        assertNull(LxPlaybackCatalog.match(qqOrigin, "wy", wrongVersions))
+        val wyMatch = requireNotNull(LxPlaybackCatalog.match(qqOrigin, "wy", wrongVersions + studio))
+        assertEquals(81L, wyMatch.get("songId").asLong)
+        assertEquals("81", wyMatch.get("songmid").asString)
+        assertEquals("9", wyMatch.get("albumId").asString)
+        assertNull(LxPlaybackCatalog.match(qqOrigin, "wy", listOf(studio, studio.deepCopy().apply { addProperty("id", 86) })))
+        val qq = row("""{"songmid":"SongMid","songid":100,"songname":"Song","singer":[{"name":"Artist"}],
+            "interval":180,"albumname":"Album","albummid":"AlbumMid","media_mid":"MediaMid"}""")
+        val tx = requireNotNull(LxPlaybackCatalog.match(origin, "tx", listOf(qq)))
+        assertEquals("SongMid", tx.get("songmid").asString)
+        assertEquals(100L, tx.get("songId").asLong)
+        assertEquals("MediaMid", tx.get("strMediaMid").asString)
+        assertNull(LxPlaybackCatalog.match(origin, "tx", listOf(qq, qq.deepCopy().apply { addProperty("songid", 101) })))
+        val kg = row("""{"Audioid":54,"OriSongName":"Song","FileHash":"low","HQFileHash":"high","ResFileHash":"000",
+            "Singers":[{"name":"Artist"}],"AlbumName":"Album","Duration":180}""")
+        val hashes = requireNotNull(LxPlaybackCatalog.match(origin, "kg", listOf(kg))).getAsJsonObject("_types")
+        assertEquals(setOf("128k", "320k"), hashes.keySet())
+        assertEquals("high", hashes.getAsJsonObject("320k").get("hash").asString)
+        val mg = row("""{"contentId":"600913000007639264","copyrightId":"6005751YL8P","songId":"1135162566","name":"Song",
+            "length":"00:03:00","singers":[{"name":"Artist"}],"albums":[{"name":"Album","id":"56"}]}""")
+        val migu = requireNotNull(LxPlaybackCatalog.match(origin, "mg", listOf(mg)))
+        assertEquals("600913000007639264", migu.get("contentId").asString)
+        assertEquals("1135162566", migu.get("songmid").asString)
+        assertEquals("6005751YL8P", migu.get("copyrightId").asString)
+        assertNull(LxPlaybackCatalog.match(origin, "mg", listOf(mg.apply { addProperty("length", "00:00:30") })))
+    }
+
+    @Test fun missingCompatibilityGrantsExposeOnlyTheExactApprovableDomain() {
+        val requested = mutableListOf<String>()
+        val policy = ScriptNetworkPolicy(listOf("known.example"), strictRedirects = true, onMissingDomain = { requested += it })
+        val upgraded = ScriptNetworkPolicy.compatibilityUrl("http://media.example:80/audio?ticket=opaque")
+        assertEquals("https://media.example/audio?ticket=opaque", upgraded)
+        val direct = assertThrows(SourceException::class.java) { policy.validateUrl(upgraded) }
+        assertEquals(SourceErrorCode.PERMISSION_DENIED, direct.code)
+        for (url in listOf("https://127.0.0.1", "https://media.example:8888/audio", "https://secret@private.example/audio")) {
+            assertThrows(SourceException::class.java) { policy.validateUrl(url) }
+            assertEquals(SourceErrorCode.PLUGIN, assertThrows(SourceException::class.java) {
+                policy.validateCompatibilityRedirectTarget(url)
+            }.code)
+        }
+        val redirect = assertThrows(SourceException::class.java) {
+            policy.validateCompatibilityRedirectTarget("https://cdn.example/audio")
+        }
+        val generic = SourceException(SourceErrorCode.PERMISSION_DENIED)
+        assertSame(direct, ScriptNetworkPolicy.preferredCompatibilityFailure(generic, direct))
+        assertSame(redirect, ScriptNetworkPolicy.preferredCompatibilityFailure(direct, redirect))
+        assertSame(redirect, ScriptNetworkPolicy.preferredCompatibilityFailure(redirect, direct))
+        assertEquals(listOf("media.example"), requested)
+        policy.reportMissingDomain(redirect)
+        assertEquals(listOf("media.example", "cdn.example"), requested)
+    }
+
+    @Test fun mediaRedirectsUseTlsAndKeepTheDestinationGrantBoundary() {
+        val policy = ScriptNetworkPolicy(listOf("api.example", "cdn.example"), strictRedirects = true, onMissingDomain = {})
+        val request = Request.Builder().url("https://api.example/media").head().build()
+        fun redirect(location: String) = response(byteArrayOf(), code = 302).newBuilder()
+            .request(request).header("Location", location).build()
+
+        redirect("http://cdn.example/song?token=a%2Fb").use {
+            assertEquals("https://cdn.example/song?token=a%2Fb", policy.secureCompatibilityRedirect(it).header("Location"))
+        }
+        redirect("/song").use { assertSame(it, policy.secureCompatibilityRedirect(it)) }
+        for ((target, code) in listOf("http://unapproved.example/song" to SourceErrorCode.PERMISSION_DENIED,
+            "http://cdn.example:1234/song" to SourceErrorCode.PLUGIN, "https://user@cdn.example/song" to SourceErrorCode.PLUGIN)) {
+            assertEquals(code, assertThrows(SourceException::class.java) {
+                policy.secureCompatibilityRedirect(redirect(target))
+            }.code)
+        }
+        val mediaLength = ScriptNetworkPolicy.MAX_RESPONSE_BYTES + 30L
+        response(byteArrayOf(), mediaLength).newBuilder().request(request).header("Content-Length", mediaLength.toString()).build().use {
+            val payload = policy.responsePayload(it, "utf8")
+            assertEquals("", payload.get("body").asString)
+            assertEquals(mediaLength.toString(), payload.getAsJsonObject("headers").get("Content-Length").asString)
+        }
+    }
+
     @Test fun compatibilityAudioRevocationGuardsPreviouslyIssuedHandlesAndUnstartedCalls() {
         val policy = ScriptNetworkPolicy(listOf("media.example.com"), strictRedirects = true)
         val resource = AudioResource("https://media.example.com/track", "standard")

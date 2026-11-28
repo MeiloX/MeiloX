@@ -45,6 +45,7 @@ internal class ScriptMusicProvider(
     private val artworkStore: SourceArtworkStore? = null,
     private val compatibilityTracks: CompatibilityTrackStore? = null,
     private val commitCompatibilityTracks: ((() -> Unit) -> Unit) = { it() },
+    private val onDomainRequest: () -> Unit = {},
 ) : MusicProvider, CatalogCapability, PlaybackCapability, LyricsCapability, ResourceValidationCapability,
     FeedCapability, TypedSearchCapability, AlbumCapability, ArtistCapability, PlaylistCapability,
     AccountCapability, LibraryCapability, LikeCapability, CollectionCapability, PlaylistEditCapability,
@@ -93,9 +94,17 @@ internal class ScriptMusicProvider(
             it in setOf("cookie", "sessionType", "ursAppId", "deviceId", "sDeviceId", "musicA", "csrf")
         } + ("sdkInstance" to instanceId.value) + if (verified == null) emptyMap() else mapOf("userId" to verified)
     }
+    @Volatile var requestedDomain: String? = null
+        private set
     private val network = ScriptNetworkPolicy(
         manifest.permissions.network, manifest.permissions.nativeSdks, strictRedirects = manifest.compatibility != null,
         configuration = ::platformConfiguration,
+        onMissingDomain = { host ->
+            if (isCurrent() && requestedDomain != host) {
+                requestedDomain = host
+                onDomainRequest()
+            }
+        },
     )
     private val operations = Mutex()
     private val gson = Gson()
@@ -174,20 +183,17 @@ internal class ScriptMusicProvider(
             catalog.ensureOwner(it.owner)
         }
         if (url.isNotBlank() && !SourceArtworkRegistry.isLegacy(url) && artworkStore?.owns(url) != true) {
-            try { network.validateUrl(url) }
-            catch (error: SourceException) {
-                // Optional remote artwork may reference a new CDN. Reject the image without
-                // issuing a request or discarding the source's otherwise valid catalog data.
-                if (error.code == SourceErrorCode.PLUGIN) return@validated ""
-                throw error
-            }
+            if (!canLoadArtwork(url)) return@validated ""
         }
         when {
             url.isBlank() -> ""
             SourceArtworkRegistry.isLegacy(url) -> SourceArtworkRegistry.resolve(url)
             artworkStore?.owns(url) == true -> artworkStore.acceptOwned(this, url)
             artworkStore != null -> artworkStore.register(this, url, artworkIdentity)
-            else -> network.artwork(url, artworkDirectory) { ensureArtworkCurrent(artworkIdentity) }
+            else -> try { network.artwork(url, artworkDirectory) { ensureArtworkCurrent(artworkIdentity) } }
+                catch (error: SourceException) {
+                    if (error.code == SourceErrorCode.PERMISSION_DENIED) "" else throw error
+                }
         }
     }
 
@@ -196,7 +202,15 @@ internal class ScriptMusicProvider(
         ensureCurrent()
         if (status != SourceStatus.READY || artworkAccountIdentity() != identity) throw CancellationException("Source artwork owner changed")
     }
-    internal fun validateArtworkUrl(url: String) { network.validateUrl(url) }
+    internal fun validateArtworkUrl(url: String) { network.validateCandidateUrl(url) }
+
+    private fun canLoadArtwork(url: String): Boolean = try {
+        validateArtworkUrl(url)
+        true
+    } catch (error: SourceException) {
+        if (error.code !in setOf(SourceErrorCode.PLUGIN, SourceErrorCode.PERMISSION_DENIED)) throw error
+        false
+    }
     internal suspend fun downloadArtwork(url: String, identity: String): String =
         network.artwork(url, artworkDirectory) { ensureArtworkCurrent(identity) }
 
@@ -231,7 +245,10 @@ internal class ScriptMusicProvider(
                     if (url.isBlank()) addProperty(key, "") else if (artworkStore != null) {
                         addProperty(key, featureArtwork(url))
                     } else {
-                        network.validateUrl(url)
+                        if (!canLoadArtwork(url)) {
+                            addProperty(key, "")
+                            return@forEach
+                        }
                         val handle = SourceArtworkRegistry.register("${instanceId.value}:$version:$revision", url) {
                             ensureCurrent()
                             if (sessionRevision.value != revision) throw CancellationException("Source account changed")
@@ -738,8 +755,9 @@ internal class ScriptMusicProvider(
         } else playbackResponse(ref, requestedQuality)
         val quality = result.get("quality")?.asString?.takeIf { it.isNotBlank() && it.length <= 50 } ?: invalid()
         val headers = result.getAsJsonObject("headers")?.entrySet()?.associate { it.key to it.value.asString }.orEmpty()
+        val uri = result.get("uri")?.asString ?: invalid()
         val resource = AudioResource(
-            uri = result.get("uri")?.asString ?: invalid(),
+            uri = if (manifest.compatibility == "musicfree") ScriptNetworkPolicy.compatibilityUrl(uri) else uri,
             quality = quality,
             headers = headers,
             expiresAtMs = result.get("expiresAtMs")?.takeUnless { it.isJsonNull }?.asLong,
@@ -752,41 +770,78 @@ internal class ScriptMusicProvider(
         registerAudio(resource)
     }
 
-    override fun supportsOriginalTrack(ref: TrackRef): Boolean =
-        originalTrackPlaybackOnly && "wy" in manifest.compatibilityPlatforms.orEmpty() &&
-            ref.providerId == ProviderIds.NETEASE && ref.trackId.toLongOrNull()?.let { it > 0 } == true
+    // Older installations only recorded wy in the manifest. Inspect the installed bytes once
+    // per provider revision to recover the actual platforms and supported quality ladders.
+    private val lxCapabilitiesLock = Mutex()
+    private var lxCapabilities: Map<String, Set<String>>? = null
 
-    override suspend fun resolveOriginalTrack(track: Track, requestedQuality: String): AudioResource = validated {
+    private suspend fun lxPlaybackQualities(): Map<String, Set<String>> = lxCapabilitiesLock.withLock {
+        lxCapabilities ?: compatibilityCall("inspect", JsonObject()).asJsonObject.getAsJsonObject("qualities")
+            .entrySet().associate { (platform, levels) -> platform to levels.asJsonArray.map { it.asString }.toSet() }
+            .also { lxCapabilities = it }
+    }
+
+    override fun supportsOriginalTrack(ref: TrackRef): Boolean = originalTrackPlaybackOnly && when (ref.providerId) {
+        ProviderIds.NETEASE -> ref.trackId.toLongOrNull()?.let { it > 0 } == true
+        "qqmusic" -> ref.trackId.length <= 80 && ref.trackId.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }
+        else -> false
+    }
+
+    override suspend fun resolveOriginalTrack(
+        track: Track,
+        requestedQuality: String,
+        acceptsResource: (AudioResource) -> Boolean,
+    ): AudioResource = validated {
         if (!supportsOriginalTrack(track.ref) || track.durationMs <= 0) throw SourceException(SourceErrorCode.UNSUPPORTED)
         val levels = when (requestedQuality) {
-            "standard", "higher" -> listOf("128k")
-            "exhigh" -> listOf("320k", "128k")
-            "lossless" -> listOf("flac", "320k", "128k")
+            "standard", "128k" -> listOf("128k")
+            "higher", "exhigh", "320k" -> listOf("320k", "128k")
+            "lossless", "flac" -> listOf("flac", "320k", "128k")
             else -> listOf("flac24bit", "flac", "320k", "128k")
         }
-        val result = compatibilityCall("playback.resolve", JsonObject().apply {
-            addProperty("platform", "wy")
-            addProperty("quality", levels.first())
-            add("qualities", gson.toJsonTree(levels))
-            add("musicInfo", JsonObject().apply {
-                addProperty("source", "wy")
-                addProperty("songmid", track.ref.trackId)
-                addProperty("songId", track.ref.trackId.toLong())
-                addProperty("name", track.title)
-                addProperty("singer", track.artists.joinToString("、") { it.name })
-                addProperty("albumName", track.album.title)
-                addProperty("albumId", track.album.ref?.albumId.orEmpty())
-                val seconds = track.durationMs / 1_000
-                addProperty("interval", String.format(java.util.Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60))
-                addProperty("_interval", seconds)
-            })
-        }).takeIf { it.isJsonObject }?.asJsonObject ?: throw SourceException(SourceErrorCode.UNAVAILABLE)
-        val url = result.get("uri")?.asString ?: invalid()
-        network.validateUrl(url)
-        val info = probeCompatibilityAudio(url, network, ::ensureCurrent)?.takeIf { it.matches(track.durationMs) }
-            ?: throw SourceException(SourceErrorCode.UNAVAILABLE)
-        registerAudio(AudioResource(url, info.quality, contentLength = info.length,
-            mimeType = info.format.sampleMimeType, cachePolicy = CachePolicy.NO_STORE))
+        val capabilities = lxPlaybackQualities()
+        val origin = if (track.ref.providerId == ProviderIds.NETEASE) "wy" else "tx"
+        val attemptedUrls = mutableSetOf<String>()
+        var failure: SourceException? = null
+        for (platform in capabilities.keys.sortedBy { it != origin }) {
+            val qualities = levels.filter { it in capabilities.getValue(platform) }
+            if (qualities.isEmpty()) continue
+            val candidates = try {
+                LxPlaybackCatalog.candidates(track, platform)
+            } catch (error: SourceException) {
+                if (failure == null) failure = error
+                continue
+            }
+            for (candidate in candidates) {
+                for (quality in qualities) {
+                    if (platform == "kg" && candidate.getAsJsonObject("_types")?.has(quality) != true) continue
+                    try {
+                        val result = compatibilityCall("playback.resolve", JsonObject().apply {
+                            addProperty("platform", platform)
+                            addProperty("quality", quality)
+                            add("musicInfo", candidate)
+                        })
+                        val uri = result.takeIf { it.isJsonObject }?.asJsonObject?.get("uri")?.asString ?: continue
+                        val url = ScriptNetworkPolicy.compatibilityUrl(uri)
+                        if (!attemptedUrls.add(url)) continue
+                        network.validateCandidateUrl(url)
+                        val info = probeCompatibilityAudio(url, network, ::ensureCurrent) ?: continue
+                        if (!info.matches(track.durationMs)) continue
+                        val resource = AudioResource(url, info.quality, headers = mapOf("User-Agent" to LX_AUDIO_USER_AGENT),
+                            contentLength = info.length, contentId = info.contentId, mimeType = info.format.sampleMimeType,
+                            cachePolicy = CachePolicy.NO_STORE)
+                        if (acceptsResource(resource)) {
+                            return@validated registerAudio(resource, info.contentId)
+                        }
+                    } catch (error: SourceRuntimeUnavailableException) {
+                        throw error
+                    } catch (error: SourceException) {
+                        failure = ScriptNetworkPolicy.preferredCompatibilityFailure(failure, error)
+                    }
+                }
+            }
+        }
+        throw failure ?: SourceException(SourceErrorCode.UNAVAILABLE)
     }
 
     private suspend fun compatibilityCall(operation: String, parameters: JsonObject): com.google.gson.JsonElement =
@@ -800,14 +855,15 @@ internal class ScriptMusicProvider(
             val check = { job?.ensureActive(); ensureCurrent(); read?.let(::ensureCatalog); Unit }
             val fields = manifest.config.mapTo(hashSetOf()) { it.key }
             val variables = config().filterKeys { it in fields }
+            if (format == "lx") parameters.addProperty("scriptName", manifest.name)
             runtime.invokeCompatibility(File(directory, manifest.entry).readText(), format, operation, parameters, variables,
-                request = { network.request(it, check) }, ensureCurrent = check).also { check() }
+                request = { network.deferredRequest(it, check) }, ensureCurrent = check).also { check() }
         }
 
-    private fun registerAudio(resource: AudioResource): AudioResource {
+    private fun registerAudio(resource: AudioResource, hostContentId: String? = null): AudioResource {
         ensureCurrent()
         val compatible = manifest.compatibility != null
-        val identified = if (compatible) resource.copy(contentId = compatibilityContentId(resource)) else resource
+        val identified = if (compatible) resource.copy(contentId = hostContentId ?: compatibilityContentId(resource)) else resource
         return try {
             ScriptAudioResources.register(manifest.id, identified, network, directory,
                 isCurrent = if (compatible) ({ enabled && isCurrent() }) else null)
@@ -872,6 +928,7 @@ internal class ScriptMusicProvider(
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (error: SourceException) {
             ensureCurrent()
+            network.reportMissingDomain(error)
             if (error.code == SourceErrorCode.AUTH_REQUIRED || error.code == SourceErrorCode.AUTH_EXPIRED) {
                 catalog.ensureOwner(owner.owner) {
                     ensureCurrent()

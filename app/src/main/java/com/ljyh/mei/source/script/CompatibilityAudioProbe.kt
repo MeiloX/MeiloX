@@ -12,6 +12,7 @@ import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.SeekMap
 import androidx.media3.extractor.TrackOutput
 import androidx.media3.extractor.mp3.Mp3Extractor
+import com.ljyh.mei.source.api.SourceException
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
@@ -19,8 +20,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.ByteString.Companion.toByteString
 
-internal data class CompatibilityAudioInfo(val durationMs: Long, val format: Format, val length: Long?) {
+internal const val LX_AUDIO_USER_AGENT = "Mozilla/5.0"
+
+internal data class CompatibilityAudioInfo(val durationMs: Long, val format: Format, val length: Long?, val contentId: String) {
     val quality: String get() = when (format.sampleMimeType) {
         "audio/flac", "audio/alac" -> if (format.sampleRate > 48_000) "hires" else "lossless"
         else -> if (format.bitrate >= 256_000) "exhigh" else "standard"
@@ -56,17 +60,17 @@ internal suspend fun probeCompatibilityAudio(
             override fun endTracks() = Unit
             override fun seekMap(seekMap: SeekMap) { durationUs = seekMap.durationUs }
         })
+        fun audioInfo(): CompatibilityAudioInfo? {
+            val format = audio ?: return null
+            if (durationUs <= 0) return null
+            return reader.audioInfo(durationUs / 1_000, format)
+        }
         val seek = PositionHolder()
         repeat(512) {
             ensureCurrent()
-            val format = audio
-            if (durationUs > 0 && format != null) {
-                return@runInterruptible CompatibilityAudioInfo(durationUs / 1_000, format, reader.length.takeIf { it > 0 })
-            }
+            audioInfo()?.let { return@runInterruptible it }
             when (extractor.read(input, seek)) {
-                Extractor.RESULT_END_OF_INPUT -> return@runInterruptible audio?.takeIf { durationUs > 0 }?.let {
-                    CompatibilityAudioInfo(durationUs / 1_000, it, reader.length.takeIf { size -> size > 0 })
-                }
+                Extractor.RESULT_END_OF_INPUT -> return@runInterruptible audioInfo()
                 Extractor.RESULT_SEEK -> {
                     reader.position = seek.position
                     input = DefaultExtractorInput(reader, seek.position, reader.length)
@@ -74,7 +78,8 @@ internal suspend fun probeCompatibilityAudio(
             }
         }
         null
-    } catch (_: IOException) { null }
+    } catch (error: SourceException) { throw error }
+    catch (_: IOException) { null }
     finally { extractors.forEach(Extractor::release) }
 }
 
@@ -86,8 +91,16 @@ private class AudioProbeReader(
         private set
     private var start = -1L
     private var chunk = ByteArray(0)
+    private var prefix: ByteArray? = null
     private var bytesLeft = 1024 * 1024
     private val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
+
+    fun audioInfo(durationMs: Long, format: Format): CompatibilityAudioInfo {
+        // Signed URLs, mirror hosts and LX quality labels can all point to the same encoded stream.
+        val digest = checkNotNull(prefix).toByteString().sha256().hex()
+        val id = "lx:${format.sampleMimeType}:${format.sampleRate}:${format.channelCount}:$digest"
+        return CompatibilityAudioInfo(durationMs, format, length.takeIf { it > 0 }, id)
+    }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         ensureCurrent()
@@ -106,7 +119,8 @@ private class AudioProbeReader(
     private fun loadChunk() {
         if (bytesLeft <= 0 || position > Long.MAX_VALUE - 128 * 1024) throw IOException()
         val size = minOf(bytesLeft, 128 * 1024)
-        val request = Request.Builder().url(url)
+        val request = Request.Builder().url(url).deferDomainNotice()
+            .header("User-Agent", LX_AUDIO_USER_AGENT)
             .header("Range", "bytes=$position-${position + size - 1}")
             .header("Accept-Encoding", "identity").build()
         client.newCall(request).execute().use { response ->
@@ -123,6 +137,7 @@ private class AudioProbeReader(
             val source = response.body.source()
             source.request(size.toLong())
             chunk = source.readByteArray(minOf(source.buffer.size, size.toLong()))
+            if (start == 0L && prefix == null) prefix = chunk
             bytesLeft -= chunk.size
         }
     }

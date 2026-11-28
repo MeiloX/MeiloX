@@ -692,12 +692,17 @@
   <string name="move_up">上に移動</string>
   <string name="move_down">下に移動</string>
   <string name="reorder_drag_handle">ドラッグして並べ替え</string>
+  <string name="source_playback_order">再生に使う音源の順序</string>
+  <string name="source_order_after_original">元の音源で再生できないときの順序</string>
+  <string name="source_order_when_enabled">自動切り替えをオンにしたときの順序</string>
+  <string name="source_playback_permission_denied">音源の設定でネットワーク権限を確認してから、もう一度再生してください。</string>
   <string name="source_allow_alternate_versions">再生できない曲の別バージョンを再生</string>
   <string name="source_allow_alternate_versions_detail">同じアーティストのライブ版、アコースティック版、リマスター版を探します。</string>
   <string name="source_playing_alternate_version">別バージョンを再生中</string>
   <string name="source_market_title">プラグインストア</string>
   <string name="source_market_refresh">プラグインストアを更新</string>
   <string name="source_market_empty">利用できるプラグインがありません</string>
+  <string name="source_market_partial">一部のプラグインを読み込めませんでした</string>
   <string name="source_market_official">MeiloX 公式</string>
   <string name="source_market_third_party">サードパーティ</string>
   <string name="source_market_installed">インストール済み</string>
@@ -709,6 +714,7 @@
   <string name="source_search_set_default">既定の検索音源に設定</string>
   <string name="source_network_permissions">ネットワーク権限</string>
   <string name="source_network_domains_none">許可済みのドメインなし</string>
+  <string name="source_network_requested_domain">許可が必要なドメイン：%1$s</string>
   <string name="source_network_save">保存</string>
   <string name="source_import_from_link">リンクから読み込む</string>
   <string name="source_update_from_link">リンクから更新</string>
@@ -719,7 +725,7 @@
   <string name="source_import_install">インストール</string>
   <string name="source_import_update">アップデート</string>
   <string name="source_import_domains">アクセスを許可するドメイン</string>
-  <string name="source_import_domains_invalid">ドメイン名をコンマで区切って入力してください。URL やワイルドカードは使用できません。</string>
+  <string name="source_import_domains_invalid">api.example.com や *.music.126.net のように、ドメインをカンマ区切りで入力してください。</string>
   <string name="source_format_lx">LX カスタム音源 · 予備の再生元</string>
   <string name="source_format_musicfree">MusicFree · 検索と再生</string>
   <string name="source_enable_lx">予備の再生元として使う</string>

@@ -2,6 +2,7 @@ package com.ljyh.mei.source.script
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.annotation.Keep
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -39,7 +40,8 @@ import okhttp3.Request
 import okio.buffer
 import okio.source
 
-data class InstalledPlugin(val manifest: PluginManifest, val enabled: Boolean, val status: SourceStatus, val diagnostic: String? = null)
+data class InstalledPlugin(val manifest: PluginManifest, val enabled: Boolean, val status: SourceStatus,
+    val diagnostic: String?, val requestedDomain: String?, internal val revision: String)
 class PreparedPlugin internal constructor(
     val manifest: PluginManifest,
     internal val directory: File,
@@ -132,7 +134,14 @@ class ScriptPluginManager @Inject constructor(
     suspend fun inspectFile(uri: Uri, replacingId: String? = null): PreparedPlugin = prepareImport {
         val input = context.contentResolver.openInputStream(uri)
             ?: invalid("Unable to open source script")
-        BufferedInputStream(input).use { inspectSourceInput(it, replacingId) }
+        BufferedInputStream(input).use {
+            val name = if (uri.scheme == "file") uri.lastPathSegment else runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                }
+            }.getOrNull()
+            inspectSourceInput(it, replacingId, name)
+        }
     }
 
     suspend fun inspectLink(
@@ -146,15 +155,18 @@ class ScriptPluginManager @Inject constructor(
                 currentCoroutineContext().ensureActive()
                 throw SourceException(SourceErrorCode.TIMEOUT)
             }
-            BufferedInputStream(file.inputStream()).use { inspectSourceInput(it, replacingId) }
+            BufferedInputStream(file.inputStream()).use {
+                inspectSourceInput(it, replacingId, url.trim().toHttpUrlOrNull()?.pathSegments?.lastOrNull())
+            }
         } finally { file.delete() }
     }
 
-    private suspend fun inspectSourceInput(input: BufferedInputStream, replacingId: String?): PreparedPlugin {
+    private suspend fun inspectSourceInput(input: BufferedInputStream, replacingId: String?, filename: String?): PreparedPlugin {
         input.mark(4)
         val archive = hasZipHeader(input)
         input.reset()
-        if (!archive) return inspectCompatibilityScript(readCompatibilityScript(input), replacingId)
+        if (!archive) return inspectCompatibilityScript(readCompatibilityScript(input), replacingId,
+            filename = filename?.takeIf { it.endsWith(".js", ignoreCase = true) }?.dropLast(3)?.trim()?.take(100))
         val prepared = inspectPackage(input)
         if (replacingId != null && prepared.manifest.id != replacingId) {
             prepared.directory.deleteRecursively()
@@ -245,9 +257,9 @@ class ScriptPluginManager @Inject constructor(
     }
 
     private suspend fun inspectCompatibilityScript(
-        script: String, replacingId: String?, market: CompatibilityMarketEntry? = null,
+        script: String, replacingId: String?, market: CompatibilityMarketEntry? = null, filename: String? = null,
     ): PreparedPlugin {
-        val review = mutex.withLock {
+        val (review, unchangedName) = mutex.withLock {
             val selected = when {
                 replacingId != null -> providers[replacingId]?.manifest?.takeIf { it.compatibility != null }
                     ?: invalid("Select an installed compatibility source")
@@ -255,22 +267,35 @@ class ScriptPluginManager @Inject constructor(
                     ?: matchingCompatibilityScriptLocked(script, market.format)
                 else -> matchingCompatibilityScriptLocked(script)
             }
-            CompatibilityInstallReview(selected?.let { snapshotLocked(it.id) }, market?.repository)
+            val identical = selected != null && (replacingId == null && market == null ||
+                installedScriptMatches(selected, script, script.toByteArray(Charsets.UTF_8).size.toLong()))
+            CompatibilityInstallReview(selected?.let { snapshotLocked(it.id) }, market?.repository) to
+                selected?.name?.takeIf { identical }
         }
         val previous = review.expected?.manifest
         if (market != null && previous != null && !isNewer(market.version, previous.version)) {
             throw SourceException(SourceErrorCode.INVALID_RESPONSE, "The source is already up to date")
         }
-        val format = market?.format ?: previous?.compatibility ?: if (LX_MARKERS.containsMatchIn(script)) "lx" else "musicfree"
-        val info = runtime.invokeCompatibility(script, format, "inspect", JsonObject(), emptyMap())
+        val pinnedFormat = market?.format ?: previous?.compatibility
+        val firstFormat = pinnedFormat ?: if (LX_MARKERS.containsMatchIn(script)) "lx" else "musicfree"
+        val scriptName = unchangedName ?: filename ?: market?.path?.substringAfterLast('/')?.substringBeforeLast('.')
+        val params = JsonObject().apply { scriptName?.let { addProperty("scriptName", it) } }
+        suspend fun inspect(format: String) = runtime.invokeCompatibility(script, format, "inspect", params, emptyMap())
             .takeIf { it.isJsonObject }?.asJsonObject ?: invalid("Invalid compatibility script")
+        val (format, info) = try {
+            firstFormat to inspect(firstFormat)
+        } catch (error: SourceException) {
+            // Computed globals and bundled CommonJS modules need a protocol probe, not a literal marker.
+            if (pinnedFormat != null || error.code !in setOf(SourceErrorCode.PLUGIN, SourceErrorCode.INVALID_RESPONSE,
+                    SourceErrorCode.UNSUPPORTED)) throw error
+            val other = if (firstFormat == "lx") "musicfree" else "lx"
+            other to inspect(other)
+        }
         val lx = format == "lx"
         val platforms = if (lx) {
-            val known = info.get("platforms")?.takeIf { it.isJsonArray }?.asJsonArray
-            if (known?.any { it.isJsonPrimitive && it.asString == "wy" } != true) {
-                throw SourceException(SourceErrorCode.UNSUPPORTED, "The script must support the LX wy platform")
-            }
-            setOf("wy")
+            info.getAsJsonArray("platforms")?.map { it.asString }?.intersect(LxPlaybackCatalog.platforms)
+                ?.takeIf { it.isNotEmpty() }
+                ?: throw SourceException(SourceErrorCode.UNSUPPORTED, "No supported LX playback platforms")
         } else {
             if (info.get("search")?.asBoolean != true || info.get("playback")?.asBoolean != true) {
                 throw SourceException(SourceErrorCode.UNSUPPORTED, "The MusicFree plugin must support song search and playback")
@@ -309,10 +334,12 @@ class ScriptPluginManager @Inject constructor(
         val length = script.toByteArray(Charsets.UTF_8).size.toLong()
         return providers.values.asSequence().map { it.manifest }.filter {
             it.compatibility != null && (format == null || it.compatibility == format)
-        }.firstOrNull { manifest ->
-            val installed = File(root, "${manifest.id}/${manifest.entry}")
-            installed.length() == length && runCatching { installed.inputStream().use(::readCompatibilityScript) == script }.getOrDefault(false)
-        }
+        }.firstOrNull { manifest -> installedScriptMatches(manifest, script, length) }
+    }
+
+    private fun installedScriptMatches(manifest: PluginManifest, script: String, length: Long): Boolean {
+        val installed = File(root, "${manifest.id}/${manifest.entry}")
+        return installed.length() == length && runCatching { installed.inputStream().use(::readCompatibilityScript) == script }.getOrDefault(false)
     }
 
     private fun writeCompatibilityImport(
@@ -332,7 +359,7 @@ class ScriptPluginManager @Inject constructor(
     }
 
     private suspend fun downloadSourceLink(value: String, file: File) {
-        var url = value.toHttpUrlOrNull()?.takeIf { value.length <= 8192 && it.isHttps }
+        var url = ScriptNetworkPolicy.compatibilityUrl(value).toHttpUrlOrNull()?.takeIf { value.length <= 8192 && it.isHttps }
             ?: throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Use an HTTPS source link")
         repeat(5) { index ->
             val policy = ScriptNetworkPolicy(listOf(url.host))
@@ -417,7 +444,7 @@ class ScriptPluginManager @Inject constructor(
             if (oldVersion == null || nextVersion == null || nextVersion <= oldVersion) invalid("Source update is not newer")
         }
         if (automatic && (current == null || com.ljyh.mei.source.update.sourceUpdateReviewReasons(
-                current.manifest, prepared.manifest, current.repository, entry.repository).isNotEmpty())) invalid("Source update needs permission review")
+                current.manifest, prepared.manifest, entry.canonicalOrigin(current.repository), entry.repository).isNotEmpty())) invalid("Source update needs permission review")
         if (automatic) playbackUpdates.installIfIdle(entry.providerId) {
             if (!authorized()) throw com.ljyh.mei.source.update.SourceUpdateDeferred()
             installLocked(prepared, entry.repository)
@@ -550,11 +577,15 @@ class ScriptPluginManager @Inject constructor(
         }
     } }
 
-    suspend fun configureCompatibilityDomains(id: String, domains: List<String>): InstalledPlugin = withContext(Dispatchers.IO) {
+    suspend fun configureCompatibilityDomains(review: InstalledPlugin, domains: List<String>): InstalledPlugin = withContext(Dispatchers.IO) {
         val grants = approvedCompatibilityDomains(domains)
         mutex.withLock {
-            val current = providers[id]?.manifest?.takeIf { it.compatibility != null }
-                ?: invalid("Select an installed compatibility source")
+            val id = review.manifest.id
+            val provider = providers[id]
+            if (provider == null || provider.manifest !== review.manifest || provider.version != review.revision) {
+                throw SourceException(SourceErrorCode.UNAVAILABLE, "Source changed during network permission review")
+            }
+            val current = provider.manifest.takeIf { it.compatibility != null } ?: invalid("Select an installed compatibility source")
             if (grants == current.permissions.network) return@withLock installed.value.first { it.manifest.id == id }
             val updated = current.copy(permissions = current.permissions.copy(network = grants))
             val source = File(root, "$id/${current.entry}").inputStream().use(::readCompatibilityScript)
@@ -619,6 +650,7 @@ class ScriptPluginManager @Inject constructor(
                 CompatibilityTrackStore(File(compatibilityTrackDirectory(manifest.id), scriptDigest(Gson().toJson(configuration))))
             } else null,
             commitCompatibilityTracks = { action -> gate.read(revision, action) },
+            onDomainRequest = ::publish,
         )
         providers[manifest.id] = provider
         registry.register(provider)
@@ -632,7 +664,9 @@ class ScriptPluginManager @Inject constructor(
     }
 
     @Synchronized private fun publish() {
-        mutableInstalled.value = providers.values.map { InstalledPlugin(it.manifest, it.enabled, it.status, diagnostics[it.manifest.id]) }.sortedBy { it.manifest.name }
+        mutableInstalled.value = providers.values.map {
+            InstalledPlugin(it.manifest, it.enabled, it.status, diagnostics[it.manifest.id], it.requestedDomain, it.version)
+        }.sortedBy { it.manifest.name }
     }
 
     private fun readState(directory: File): PluginInstallState = File(directory, "state.json").takeIf(File::isFile)
@@ -667,17 +701,17 @@ class ScriptPluginManager @Inject constructor(
     companion object {
         private val installationMutex = Mutex()
         private val LX_MARKERS = Regex("""\b(?:globalThis|window)\s*\.\s*lx\b|\blx\s*\.\s*(?:on|send|EVENT_NAMES)\b""")
-        private val HTTPS_LITERAL = Regex("""(?i)https://([a-z0-9][a-z0-9.-]{2,252})(?=[:/\s`"'?&#]|$)""")
+        private val HTTP_LITERAL = Regex("""(?i)https?://([a-z0-9][a-z0-9.-]{2,252})(?=[:/\s`"'?&#]|$)""")
         private const val MAX_COMPATIBILITY_BYTES = 1024 * 1024
 
-        internal fun inferredCompatibilityDomains(script: String): List<String> = HTTPS_LITERAL.findAll(script)
+        internal fun inferredCompatibilityDomains(script: String): List<String> = HTTP_LITERAL.findAll(script)
             .map { it.groupValues[1].lowercase(java.util.Locale.ROOT) }.distinct()
             .filter { runCatching { ScriptNetworkPolicy.validateDomain(it) }.isSuccess }.take(32).toList()
 
         private fun compatibilityDomains(domains: List<String>): List<String> =
             domains.map { it.trim().lowercase(java.util.Locale.ROOT) }.filter(String::isNotBlank).distinct().also { grants ->
                 if (grants.size > 32) throw SourceException(SourceErrorCode.INVALID_RESPONSE, "Too many source domains")
-                grants.forEach(ScriptNetworkPolicy::validateDomain)
+                grants.forEach(ScriptNetworkPolicy::validateCompatibilityGrant)
             }
 
         private fun approvedCompatibilityDomains(domains: List<String>): List<String> =

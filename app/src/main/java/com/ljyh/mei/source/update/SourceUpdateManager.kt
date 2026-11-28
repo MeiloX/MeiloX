@@ -2,6 +2,7 @@ package com.ljyh.mei.source.update
 
 import android.content.Context
 import android.net.Uri
+import com.ljyh.mei.R
 import com.ljyh.mei.source.api.SourceErrorCode
 import com.ljyh.mei.source.api.SourceException
 import com.ljyh.mei.source.core.ProviderRegistry
@@ -19,6 +20,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +31,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
@@ -95,14 +101,22 @@ class SourceUpdateManager internal constructor(
     }
 
     /** Browsing the market refreshes data only, including when automatic updates are enabled. */
-    suspend fun refreshMarket() = withContext(Dispatchers.IO) {
+    suspend fun refreshMarket(): Boolean = withContext(Dispatchers.IO) {
         registry.awaitInitialized()
         mutex.withLock {
             loadSettings()
             mutableState.update { it.copy(checking = true, message = null) }
-            try { fetchIndex(); publishItems() }
+            try {
+                val unresolved = fetchIndex()
+                publishItems()
+                if (unresolved.isNotEmpty()) mutableState.update { it.copy(message = context.getString(R.string.source_market_partial)) }
+                unresolved.isEmpty()
+            }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableState.update { it.copy(message = "暂时无法连接音源市场") } }
+            catch (_: Exception) {
+                mutableState.update { it.copy(message = "暂时无法连接音源市场") }
+                false
+            }
             finally { mutableState.update { it.copy(checking = false, busyPackageId = null) } }
         }
     }
@@ -117,10 +131,11 @@ class SourceUpdateManager internal constructor(
             var deferred = 0
             reviewNeeded.clear()
             try {
-                fetchIndex()
+                val unresolved = fetchIndex()
+                failures += unresolved.size
                 // Iterate only the installed snapshot. A removed source is never reinstalled by a check.
                 val installedIds = plugins.installed.value.map { it.manifest.id }.toSet()
-                entries.filter { it.packageId in installedIds }.forEach { entry ->
+                entries.filter { it.packageId in installedIds && it.packageId !in unresolved }.forEach { entry ->
                     var prepared: PreparedSourceUpdate? = null
                     try {
                         val current = plugins.updateSnapshot(entry.packageId) ?: return@forEach
@@ -138,7 +153,7 @@ class SourceUpdateManager internal constructor(
                             }
                             return@forEach
                         }
-                        if (!mutableState.value.autoUpdates || current.repository != entry.repository) {
+                        if (!mutableState.value.autoUpdates || entry.canonicalOrigin(current.repository) != entry.repository) {
                             reviewNeeded += entry.packageId
                             return@forEach
                         }
@@ -232,20 +247,21 @@ class SourceUpdateManager internal constructor(
             val plugin = plugins.inspect(Uri.fromFile(archive)).also { inspected = it }
             if (!entry.matches(plugin.manifest)) invalid("音源安装包与市场信息不符")
             return PreparedSourceUpdate(plugin, entry,
-                sourceUpdateReviewReasons(current?.manifest, plugin.manifest, current?.repository, entry.repository).toList(), current)
+                sourceUpdateReviewReasons(current?.manifest, plugin.manifest, entry.canonicalOrigin(current?.repository), entry.repository).toList(), current)
         } catch (error: Exception) {
             inspected?.let { withContext(NonCancellable) { plugins.discardPrepared(it) } }
             throw error
         } finally { archive.delete() }
     }
 
-    private suspend fun fetchIndex() {
+    private suspend fun fetchIndex(): Set<String> {
         val response = transport.index(etag)
         val json = response.json ?: cachedJson ?: invalid("音源市场缓存已失效")
-        val parsed = SourceMarketIndex.parse(json)
-        entries = parsed.map { transport.resolve(it) }
+        val refreshed = resolveMarketListings(SourceMarketIndex.parse(json), entries, transport::resolve)
+        entries = refreshed.entries
         cachedJson = json
         etag = response.etag
+        return refreshed.unresolved
     }
 
     private suspend fun publishItems() {
@@ -254,8 +270,9 @@ class SourceUpdateManager internal constructor(
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { null }
             val update = current?.let { isNewer(entry.version, it.manifest.version) } == true
+            val trusted = entry.canonicalOrigin(current?.repository) == entry.repository
             SourceMarketItem(entry, current?.manifest?.version, current?.enabled, update,
-                current?.repository == entry.repository, update && (entry.packageId in reviewNeeded || current?.repository != entry.repository))
+                trusted, update && (entry.packageId in reviewNeeded || !trusted))
         }
         mutableState.update { it.copy(items = values) }
     }
@@ -268,6 +285,40 @@ class SourceUpdateManager internal constructor(
     }
 
     private fun invalid(message: String): Nothing = throw SourceException(SourceErrorCode.INVALID_RESPONSE, message)
+}
+
+internal data class ResolvedMarketListings(val entries: List<SourceMarketEntry>, val unresolved: Set<String>)
+
+internal suspend fun resolveMarketListings(
+    listings: List<SourceMarketListing>,
+    previous: List<SourceMarketEntry>,
+    resolve: suspend (SourceMarketListing) -> SourceMarketEntry,
+): ResolvedMarketListings = coroutineScope {
+    val permits = Semaphore(4)
+    val results = listings.map { listing ->
+        async {
+            permits.withPermit {
+                try { Result.success(resolve(listing)) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { Result.failure(error) }
+            }
+        }
+    }.awaitAll()
+
+    val cached = previous.associateBy { it.packageId }
+    val unresolved = mutableSetOf<String>()
+    val entries = listings.zip(results).mapNotNull { (listing, result) ->
+        result.getOrNull() ?: run {
+            unresolved += listing.packageId
+            val failure = result.exceptionOrNull() as? SourceException
+            if (failure?.code != SourceErrorCode.NETWORK && failure?.code != SourceErrorCode.TIMEOUT) return@mapNotNull null
+            cached[listing.packageId]?.takeIf {
+                listing.providerId == it.providerId && listing.repository == it.repository &&
+                    listing.packagePath == it.packagePath && listing.apiVersion == it.apiVersion
+            }?.copy(name = listing.name)
+        }
+    }
+    ResolvedMarketListings(entries, unresolved)
 }
 
 internal fun isNewer(next: String, current: String): Boolean {

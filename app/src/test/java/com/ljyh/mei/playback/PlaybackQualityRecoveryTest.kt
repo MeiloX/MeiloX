@@ -38,6 +38,7 @@ class PlaybackQualityRecoveryTest {
             SourceErrorCode.NOT_FOUND,
             SourceErrorCode.AUTH_REQUIRED,
             SourceErrorCode.AUTH_EXPIRED,
+            SourceErrorCode.PERMISSION_DENIED,
             SourceErrorCode.INVALID_RESPONSE,
             SourceErrorCode.PLUGIN,
         ).forEach { code ->

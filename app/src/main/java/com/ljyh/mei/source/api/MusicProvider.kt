@@ -75,7 +75,11 @@ interface PlaybackCapability {
 interface OriginalTrackPlaybackCapability {
     val originalTrackPlaybackOnly: Boolean get() = true
     fun supportsOriginalTrack(ref: TrackRef): Boolean
-    suspend fun resolveOriginalTrack(track: Track, requestedQuality: String): AudioResource
+    suspend fun resolveOriginalTrack(
+        track: Track,
+        requestedQuality: String,
+        acceptsResource: (AudioResource) -> Boolean = { true },
+    ): AudioResource
 }
 interface LyricsCapability { suspend fun getLyrics(ref: TrackRef): SourceLyrics? }
 interface QualityCapability { suspend fun availableQualities(ref: TrackRef): List<String> }

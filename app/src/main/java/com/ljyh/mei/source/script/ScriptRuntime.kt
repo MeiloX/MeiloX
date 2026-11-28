@@ -420,10 +420,22 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                             }
                             phase = ScriptRuntimePhase.SCRIPT
                             evaluate(bootstrap + "\n;'loaded';")
+                            var turnId = 0
+                            suspend fun turn(expression: String): String {
+                                if (format != "lx") return evaluate(expression)
+                                val call = "globalThis.__meiloxCompat.turn(${++turnId}"
+                                return try {
+                                    evaluate("$call, () => ($expression))")
+                                } catch (_: QuickJsEvaluationFailedException) {
+                                    // QuickJS-KT reports detached promise rejections after the command returns.
+                                    // Recover its recorded result without replaying any requests or callbacks.
+                                    evaluate("$call)")
+                                }
+                            }
                             phase = ScriptRuntimePhase.OPERATION
-                            evaluate("globalThis.__meiloxCompat.start(${compatibilityJsonString(input)}); 'started';")
+                            turn("globalThis.__meiloxCompat.start(${compatibilityJsonString(input)}), 'started'")
                             phase = ScriptRuntimePhase.RESULT
-                            pumpCompatibility(lease, terminated, ::evaluate, request.takeUnless { inspection }, resultLimit) {
+                            pumpCompatibility(lease, terminated, ::turn, request.takeUnless { inspection }, resultLimit) {
                                 requestSent = true
                             }
                         }
@@ -454,16 +466,20 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
         resultLimit: Int,
         onRequest: () -> Unit,
     ): JsonElement = coroutineScope {
-        val pending = mutableMapOf<Int, Deferred<JsonObject>>()
+        val pending = mutableMapOf<Int, Deferred<Result<JsonObject>>>()
         var requests = 0
+        var permissionFailure: SourceException? = null
         try {
             repeat(96) {
                 val call = parseScriptResult(evaluate("globalThis.__meiloxCompat.step()"), resultLimit)
                     .takeIf(JsonElement::isJsonObject)?.asJsonObject ?: invalidCompatibilityResult()
-                call.get("result")?.let { return@coroutineScope boundedCompatibilityResult(it) }
+                call.get("result")?.let { result ->
+                    if (result.isJsonNull) permissionFailure?.let { throw it }
+                    return@coroutineScope boundedCompatibilityResult(result)
+                }
                 call.get("error")?.let { raw ->
                     val code = runCatching { SourceErrorCode.valueOf(raw.asString) }.getOrDefault(SourceErrorCode.PLUGIN)
-                    throw SourceException(code)
+                    throw permissionFailure ?: SourceException(code)
                 }
 
                 val cancelled = call.getAsJsonArray("cancelled") ?: invalidCompatibilityResult()
@@ -483,27 +499,33 @@ class ScriptRuntime @Inject constructor(@ApplicationContext private val context:
                     onRequest()
                     pending[id] = async {
                         try {
-                            withTimeoutOrNull(timeout) { checkNotNull(request).invoke(frame) }
-                                ?: JsonObject().apply { addProperty("error", SourceErrorCode.TIMEOUT.name) }
+                            Result.success(withTimeoutOrNull(timeout) { checkNotNull(request).invoke(frame) }
+                                ?: JsonObject().apply { addProperty("error", SourceErrorCode.TIMEOUT.name) })
                         } catch (error: SourceException) {
-                            scriptErrorResponse(error, allowed = true) ?: throw error
+                            if (error.code == SourceErrorCode.PERMISSION_DENIED) Result.failure(error)
+                            else Result.success(scriptErrorResponse(error, allowed = true) ?: throw error)
                         }
                     }
                 }
 
                 val delay = call.get("delay")?.takeUnless { it.isJsonNull }?.asLong?.coerceIn(0, 20_000)
                 if (delay == null && pending.isEmpty()) throw SourceException(SourceErrorCode.PLUGIN)
-                val next = select<Pair<Int, JsonObject>?> {
+                val next = select<Pair<Int, Result<JsonObject>>?> {
                     terminated.onAwait { throw SourceRuntimeUnavailableException(outcomeUnknown = requests > 0) }
                     lease.retired.onAwait { throw SourceRuntimeUnavailableException(outcomeUnknown = requests > 0) }
                     if (delay != null) onTimeout(delay) { null }
                     pending.forEach { (id, job) -> job.onAwait { id to it } }
                 }
                 if (next != null) {
-                    val (id, response) = next
+                    val (id, outcome) = next
                     pending.remove(id)
-                    evaluate("globalThis.__meiloxCompat.resume($id,${compatibilityJsonString(response)}); 'resumed';")
-                } else evaluate("globalThis.__meiloxCompat.tick(); 'elapsed';")
+                    val response = outcome.getOrElse { error ->
+                        val denial = error as SourceException
+                        permissionFailure = ScriptNetworkPolicy.preferredCompatibilityFailure(permissionFailure, denial)
+                        JsonObject().apply { addProperty("error", denial.code.name) }
+                    }
+                    evaluate("globalThis.__meiloxCompat.resume($id,${compatibilityJsonString(response)}), 'resumed'")
+                } else evaluate("globalThis.__meiloxCompat.tick(), 'elapsed'")
             }
             throw SourceException(SourceErrorCode.PLUGIN)
         } finally { pending.values.forEach { it.cancel() } }

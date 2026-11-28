@@ -1,6 +1,6 @@
 # Multi-source architecture
 
-The host owns playback, persistence, shared UI and the independent multi-source lyric system. Installed providers own online catalog, account and service behavior. The current registry permanently contains local music; the default NetEase provider is a bundled, removable script package maintained in the separate [MeiloX-Netease-Source](https://github.com/NEORUAA/MeiloX-Netease-Source) repository. QQ is maintained in [MeiloX-QQMusic-Source](https://github.com/NEORUAA/MeiloX-QQMusic-Source).
+The host owns playback, persistence, shared UI and the independent multi-source lyric system. Installed providers own online catalog, account and service behavior. The current registry permanently contains local music; the default NetEase provider is a bundled, removable script package maintained in the separate [MeiloX-Netease-Source](https://github.com/MeiloX/MeiloX-Netease-Source) repository. QQ is maintained in [MeiloX-QQMusic-Source](https://github.com/MeiloX/MeiloX-QQMusic-Source).
 
 ```text
 Original Compose presenters
@@ -88,7 +88,7 @@ Updates and ordinary package imports use the inspected-byte approval path. Confi
 
 `SourceUpdatePlaybackGuard` coordinates installation reservations with queue restoration and resource resolution. Current original/actual audio providers remain protected even while paused; cancellation releases pending resolution leases. Deferred updates remain available for a later startup or explicit review without a polling loop. Existing HTTPS audio handles retain their validated transport.
 
-The host-owned marketplace transport uses system DNS routing for its fixed HTTPS raw GitHub endpoints. It retains hostname/TLS validation, redirect rejection and size/digest limits. Plugin requests additionally enforce their own reviewed domain grants and DNS address policy.
+The marketplace honors Android’s proxy settings and reads files from GitHub’s raw endpoint, with the GitHub Contents API as a fallback. Both paths enforce size and digest checks. The only accepted redirect is a GitHub API repository transfer to the same operation and query on its numeric repository ID. Plugin traffic uses its own reviewed domain grants and DNS address policy.
 
 ## Playback and independent lyrics
 

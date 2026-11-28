@@ -697,12 +697,17 @@
     <string name="move_up">上移</string>
     <string name="move_down">下移</string>
     <string name="reorder_drag_handle">拖动排序</string>
+    <string name="source_playback_order">播放音源顺序</string>
+    <string name="source_order_after_original">原音源失败后的顺序</string>
+    <string name="source_order_when_enabled">开启自动切换后的顺序</string>
+    <string name="source_playback_permission_denied">请在音源设置中检查网络权限后重新播放。</string>
     <string name="source_allow_alternate_versions">无音源时播放其他版本</string>
     <string name="source_allow_alternate_versions_detail">尝试同一歌手的现场版、不插电版或重制版。</string>
     <string name="source_playing_alternate_version">正在播放其他版本</string>
     <string name="source_market_title">插件市场</string>
     <string name="source_market_refresh">刷新插件市场</string>
     <string name="source_market_empty">暂无可用插件</string>
+    <string name="source_market_partial">部分插件暂时无法加载</string>
     <string name="source_market_official">MeiloX 官方</string>
     <string name="source_market_third_party">第三方</string>
     <string name="source_market_installed">已安装</string>
@@ -714,6 +719,7 @@
     <string name="source_search_set_default">设为默认搜索源</string>
     <string name="source_network_permissions">网络权限</string>
     <string name="source_network_domains_none">无已授权域名</string>
+    <string name="source_network_requested_domain">待授权域名：%1$s</string>
     <string name="source_network_save">保存</string>
     <string name="source_import_from_link">从链接导入</string>
     <string name="source_update_from_link">从链接更新</string>
@@ -724,7 +730,7 @@
     <string name="source_import_install">安装</string>
     <string name="source_import_update">更新</string>
     <string name="source_import_domains">允许访问的域名</string>
-    <string name="source_import_domains_invalid">请输入域名，用逗号分隔，无需填写网址或通配符。</string>
+    <string name="source_import_domains_invalid">请用逗号分隔域名，例如 api.example.com 或 *.music.126.net。</string>
     <string name="source_format_lx">LX 自定义音源 · 备用播放</string>
     <string name="source_format_musicfree">MusicFree · 搜索与播放</string>
     <string name="source_enable_lx">用于备用播放</string>

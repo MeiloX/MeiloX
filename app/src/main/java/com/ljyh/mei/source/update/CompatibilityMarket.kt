@@ -43,8 +43,8 @@ data class CompatibilityMarketEntry(
 /** Compatibility entries use a separate index so earlier native-market clients can still read theirs. */
 @Singleton
 class CompatibilityMarket @Inject constructor(@ApplicationContext private val context: Context) {
-    private val policy = ScriptNetworkPolicy(listOf("raw.githubusercontent.com"))
-    private val client = policy.client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    private val policy = ScriptNetworkPolicy(marketHosts)
+    private val client = policy.marketClient()
 
     fun bundled(): List<CompatibilityMarketEntry> =
         context.assets.open("source-market/compatibility.json").bufferedReader().use {
@@ -53,8 +53,8 @@ class CompatibilityMarket @Inject constructor(@ApplicationContext private val co
 
     suspend fun refresh(): List<CompatibilityMarketEntry>? {
         val request = Request.Builder().url(CompatibilityMarketIndex.URL).build()
-        return policy.exchange(client.newCall(request), {}) { response, ensureCurrent ->
-            if (response.code == 404) return@exchange null
+        return policy.readMarketFile(client, request) { response, ensureCurrent ->
+            if (response.code == 404) return@readMarketFile null
             if (!response.isSuccessful) throw SourceException(SourceErrorCode.NETWORK)
             val body = response.body
             if (body.contentLength() > INDEX_BYTES) malformed()
@@ -72,7 +72,7 @@ class CompatibilityMarket @Inject constructor(@ApplicationContext private val co
         CompatibilityMarketIndex.validate(entry)
         val request = Request.Builder().url(entry.url).build()
         try {
-            policy.exchange(client.newCall(request), {}) { response, ensureCurrent ->
+            policy.readMarketFile(client, request) { response, ensureCurrent ->
                 if (!response.isSuccessful) throw SourceException(SourceErrorCode.NETWORK)
                 val body = response.body
                 if (body.contentLength() > SCRIPT_BYTES) malformed()

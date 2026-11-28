@@ -697,12 +697,17 @@
     <string name="move_up">Move up</string>
     <string name="move_down">Move down</string>
     <string name="reorder_drag_handle">Drag to reorder</string>
+    <string name="source_playback_order">Playback source order</string>
+    <string name="source_order_after_original">Order after the original source fails</string>
+    <string name="source_order_when_enabled">Order when automatic switching is on</string>
+    <string name="source_playback_permission_denied">Check the network permissions in the source settings before playing this track.</string>
     <string name="source_allow_alternate_versions">Play other versions when unavailable</string>
     <string name="source_allow_alternate_versions_detail">Try a live, acoustic or remastered version by the same artist.</string>
     <string name="source_playing_alternate_version">Playing another version</string>
     <string name="source_market_title">Plugin Market</string>
     <string name="source_market_refresh">Refresh Plugin Market</string>
     <string name="source_market_empty">No plugins available</string>
+    <string name="source_market_partial">Some plugins could not be loaded.</string>
     <string name="source_market_official">MeiloX Official</string>
     <string name="source_market_third_party">Third-party</string>
     <string name="source_market_installed">Installed</string>
@@ -714,6 +719,7 @@
     <string name="source_search_set_default">Set as Default Search Source</string>
     <string name="source_network_permissions">Network Permissions</string>
     <string name="source_network_domains_none">No allowed domains</string>
+    <string name="source_network_requested_domain">Requested domain: %1$s</string>
     <string name="source_network_save">Save</string>
     <string name="source_import_from_link">Import from Link</string>
     <string name="source_update_from_link">Update from Link</string>
@@ -724,7 +730,7 @@
     <string name="source_import_install">Install</string>
     <string name="source_import_update">Update</string>
     <string name="source_import_domains">Allowed domains</string>
-    <string name="source_import_domains_invalid">Enter domain names separated by commas, without URLs or wildcards.</string>
+    <string name="source_import_domains_invalid">Enter hostnames separated by commas, such as api.example.com or *.music.126.net.</string>
     <string name="source_format_lx">LX Music · Backup playback</string>
     <string name="source_format_musicfree">MusicFree · Search and playback</string>
     <string name="source_enable_lx">Use for Backup Playback</string>

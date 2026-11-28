@@ -34,6 +34,7 @@ import androidx.media3.common.util.StuckPlayerException
 import androidx.media3.common.util.UnstableApi
 import com.ljyh.mei.source.api.*
 import com.ljyh.mei.source.core.AppleArtistLogoResolver
+import com.ljyh.mei.source.core.PlaybackResolutionException
 import com.ljyh.mei.source.core.SourceFeatureClient
 import com.ljyh.mei.source.api.TrackRefCodec
 import com.ljyh.mei.source.core.SourceRouter
@@ -1895,17 +1896,17 @@ class MusicService : MediaLibraryService(),
         failureProgressJob?.cancel()
         failureProgressJob = null
         playbackFailures.resetProgress()
-        val causeTypes = generateSequence(error.cause) { it.cause }.take(16)
-            .joinToString(" -> ") { cause ->
-                val message = cause.message
-                    ?.replace(Regex("https?://\\S+"), "<url>")
-                    ?.take(240)
-                    ?.takeIf(String::isNotBlank)
-                buildString {
-                    append(cause.javaClass.simpleName)
-                    if (message != null) append(":").append(message)
-                }
+        val causes = generateSequence(error.cause) { it.cause }.take(16).toList()
+        val causeTypes = causes.joinToString(" -> ") { cause ->
+            val message = cause.message
+                ?.replace(Regex("https?://\\S+"), "<url>")
+                ?.take(240)
+                ?.takeIf(String::isNotBlank)
+            buildString {
+                append(cause.javaClass.simpleName)
+                if (message != null) append(":").append(message)
             }
+        }
         val resolution = currentPlaybackResolution.value
         val resource = resolution?.resource
         Timber.tag("MusicService").e(
@@ -1934,10 +1935,14 @@ class MusicService : MediaLibraryService(),
                 player.currentPosition, player.bufferedPosition, stuck.stuckType, stuck.timeoutMs,
             )
         }
-        if (isTemporaryPlaybackFailure(error.errorCode, error.cause)) {
-            if (!scheduleSourceRecovery(preserveCache = true, temporaryFailure = true)) {
-                pauseFailedPlayback("播放源暂时不可用，请稍后重试")
-            }
+        val temporaryFailure = isTemporaryPlaybackFailure(error.errorCode, error.cause)
+        if (temporaryFailure && scheduleSourceRecovery(preserveCache = true, temporaryFailure = true)) return
+        if (causes.any { it is SourceException && it.code == SourceErrorCode.PERMISSION_DENIED }) {
+            pauseFailedPlayback(context.getString(R.string.source_playback_permission_denied))
+            return
+        }
+        if (temporaryFailure) {
+            pauseFailedPlayback("播放源暂时不可用，请稍后重试")
             return
         }
         if (stalled) {
@@ -1973,14 +1978,13 @@ class MusicService : MediaLibraryService(),
             }
         }
 
-        val isSourceError = shouldRetryOnlinePlaybackSource(error.errorCode) ||
-                generateSequence(error.cause) { it.cause }.take(16).any {
-                    it is SourceNotFoundException || it is com.ljyh.mei.source.api.SourceException
-                }
+        val isSourceError = shouldRetryOnlinePlaybackSource(error.errorCode) || causes.any { it is SourceException }
 
         if (isSourceError) {
             val mediaId = player.currentMediaItem?.mediaId
-            if (mediaId != null) {
+            // A completed resolution already tried the configured sources and quality ladders.
+            // Refresh only when an actual audio resource failed while opening or playing.
+            if (mediaId != null && causes.none { it is PlaybackResolutionException }) {
                 if (scheduleSourceRecovery(preserveCache = true)) return
                 if (mediaUriProvider.rejectCurrentSource(mediaId) && scheduleSourceRecovery(qualityFallback = true)) return
             }

@@ -13,13 +13,23 @@ import androidx.media3.common.Timeline
 import androidx.media3.common.util.StuckPlayerException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ljyh.mei.constants.MusicQuality
 import com.ljyh.mei.constants.MusicQualityKey
 import com.ljyh.mei.data.model.metadata
+import com.ljyh.mei.data.model.toMediaItem
+import com.ljyh.mei.data.model.toMediaMetadata
+import com.ljyh.mei.source.api.ProviderIds
+import com.ljyh.mei.source.api.ProviderInstanceId
+import com.ljyh.mei.source.api.ResolutionAttempt
+import com.ljyh.mei.source.api.SourceErrorCode
+import com.ljyh.mei.source.api.SourceException
 import com.ljyh.mei.source.api.SourceRuntimeUnavailableException
+import com.ljyh.mei.source.api.Track
+import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.source.api.TrackRefCodec
 import com.ljyh.mei.source.core.PlaybackResolutionException
 import com.ljyh.mei.source.script.QuickJsSandbox
@@ -409,14 +419,26 @@ class MusicServiceQualityRecoveryTest {
             ),
             PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
         )
+        val mixedOutage = PlaybackException(
+            "One source timed out while another needs permission",
+            SourceNotFoundException("No playable source is available", PlaybackResolutionException(
+                listOf(
+                    ResolutionAttempt(ProviderInstanceId("netease"), null, SourceErrorCode.TIMEOUT),
+                    ResolutionAttempt(ProviderInstanceId("compat.lx.test"), null, SourceErrorCode.PERMISSION_DENIED),
+                ),
+                SourceException(SourceErrorCode.PERMISSION_DENIED),
+            )),
+            PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        )
         verifyPausedSourceRecovery(
             listOf(
                 RecoveryFailure(outage, rejectsIdentity = false),
-                RecoveryFailure(outage, rejectsIdentity = false),
-                RecoveryFailure(outage, rejectsIdentity = false, recovers = false),
+                RecoveryFailure(mixedOutage, rejectsIdentity = false),
+                RecoveryFailure(mixedOutage, rejectsIdentity = false, recovers = false),
             ),
             verifyCache = true,
             verifyEntryChangeCancelsRecovery = true,
+            useCachedQueue = true,
         )
     }
 
@@ -515,6 +537,7 @@ class MusicServiceQualityRecoveryTest {
         failures: List<RecoveryFailure>,
         verifyCache: Boolean = false,
         verifyEntryChangeCancelsRecovery: Boolean = false,
+        useCachedQueue: Boolean = false,
     ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -540,6 +563,8 @@ class MusicServiceQualityRecoveryTest {
         var injected = false
         var preservedQueue: QueueSnapshot? = null
         var preservedItems: List<MediaItem> = emptyList()
+        var fixtureInstalled = false
+        var wasPrepared = false
         val fakeCacheKeys = mutableListOf<String>()
         val retainedProbeKeys = mutableListOf<String>()
         val cache = CacheManager.getSimpleCache(context)
@@ -549,6 +574,11 @@ class MusicServiceQualityRecoveryTest {
             assertNotNull("The application must expose its MusicBinder", currentService)
             service = currentService!!
 
+            runBlocking { kotlinx.coroutines.withTimeout(10_000) { currentService.awaitPlaybackRestore() } }
+            val preferenceBefore = runBlocking { context.dataStore.data.first()[MusicQualityKey] }
+            val fixtureItems = if (useCachedQueue) {
+                cachedRecoveryItems(cache, fakeCacheKeys, preferenceBefore?.let(::normalizePlaybackQuality) ?: MusicQuality.EXHIGH.text)
+            } else emptyList()
             val initialReady = CountDownLatch(1)
             val readyListener = object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -557,12 +587,22 @@ class MusicServiceQualityRecoveryTest {
             }
             listener = readyListener
             instrumentation.runOnMainSync {
-                currentService.player.addListener(readyListener)
-                if (currentService.player.playbackState == Player.STATE_READY) initialReady.countDown()
+                val player = currentService.player
+                if (useCachedQueue) {
+                    assertFalse("The fixture may only replace a paused queue", player.playWhenReady)
+                    preservedQueue = QueueSnapshot.capture(player)
+                    preservedItems = List(player.mediaItemCount) { player.getMediaItemAt(it) }
+                    wasPrepared = player.playbackState != Player.STATE_IDLE
+                    fixtureInstalled = true
+                    player.stop()
+                    player.setMediaItems(fixtureItems, 0, 0L)
+                }
+                player.addListener(readyListener)
+                if (useCachedQueue) player.prepare()
+                if (player.playbackState == Player.STATE_READY) initialReady.countDown()
             }
-            assertTrue("A saved paused online song must become READY", initialReady.await(10, TimeUnit.SECONDS))
+            assertTrue("The paused online queue must become READY", initialReady.await(10, TimeUnit.SECONDS))
 
-            val preferenceBefore = runBlocking { context.dataStore.data.first()[MusicQualityKey] }
             lateinit var before: QueueSnapshot
             lateinit var mediaId: String
             instrumentation.runOnMainSync {
@@ -576,8 +616,10 @@ class MusicServiceQualityRecoveryTest {
                 assertFalse("Local files cannot verify the online resolver", item.metadata?.isLocal == true)
                 assertFalse("Podcast episodes have no music quality catalog", item.metadata?.isPodcast == true)
                 before = QueueSnapshot.capture(player)
-                preservedQueue = before
-                preservedItems = List(player.mediaItemCount) { player.getMediaItemAt(it) }
+                if (!useCachedQueue) {
+                    preservedQueue = before
+                    preservedItems = List(player.mediaItemCount) { player.getMediaItemAt(it) }
+                }
                 assertTrue("Every queue entry must retain its stable identity", before.entryIds.all { it != null })
                 player.removeListener(readyListener)
             }
@@ -721,22 +763,24 @@ class MusicServiceQualityRecoveryTest {
                     instrumentation.runOnMainSync {
                         listener?.let(currentService.player::removeListener)
                         if (observerInstalled) currentService.mediaUriProvider.onSourceResolved = previousObserver
-                        if (injected) {
+                        if (injected || fixtureInstalled) {
                             currentService.resetRejectedPlaybackSources()
                             preservedQueue?.let { original ->
                                 val player = currentService.player
                                 val after = QueueSnapshot.capture(player)
-                                if (!failures.last().recovers || original.copy(positionMs = after.positionMs) != after ||
+                                if (fixtureInstalled || !failures.last().recovers || original.copy(positionMs = after.positionMs) != after ||
                                     abs(original.positionMs - after.positionMs) > 500L || player.playWhenReady
                                 ) {
-                                    currentService.mediaUriProvider.invalidate(original.mediaIds[original.index])
+                                    player.currentMediaItem?.let { currentService.mediaUriProvider.invalidate(it.mediaId) }
                                     currentService.resetPlaybackSourcesForQualityChange()
-                                    player.activeDeck.setMediaItems(preservedItems, original.index, original.positionMs)
+                                    if (fixtureInstalled) player.stop()
+                                    if (preservedItems.isEmpty()) player.clearMediaItems()
+                                    else player.activeDeck.setMediaItems(preservedItems, original.index, original.positionMs)
                                     player.setPlaybackOrder(original.shuffleOrder)
                                     player.shuffleModeEnabled = original.shuffleEnabled
                                     player.repeatMode = original.repeatMode
                                     player.playWhenReady = false
-                                    player.prepare()
+                                    if (preservedItems.isNotEmpty() && (!fixtureInstalled || wasPrepared)) player.prepare()
                                 }
                             }
                         }
@@ -746,6 +790,32 @@ class MusicServiceQualityRecoveryTest {
                 fakeCacheKeys.forEach(cache::removeResource)
                 context.unbindService(connection)
             }
+        }
+    }
+
+    private fun cachedRecoveryItems(cache: SimpleCache, keys: MutableList<String>, quality: String): List<MediaItem> {
+        val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("download-tags/blank.mp3").use { it.readBytes() }
+        val size = audio.size.toLong()
+        val qualities = if (quality == MusicQuality.DOLBY.text) listOf(quality, MusicQuality.SKY.text) else listOf(quality)
+        val baseId = System.currentTimeMillis() * 10
+        return (1..2).map { index ->
+            val id = (baseId + index).toString()
+            for (tier in qualities) {
+                val key = playbackCacheKey(id, tier, "recovery-fixture", size)
+                keys += key
+                val hole = cache.startReadWrite(key, 0L, size)
+                try {
+                    val file = cache.startFile(key, 0L, size)
+                    file.writeBytes(audio)
+                    cache.commitFile(file, size)
+                    val metadata = ContentMetadataMutations()
+                    ContentMetadataMutations.setContentLength(metadata, size)
+                    cache.applyContentMetadataMutations(key, metadata)
+                } finally {
+                    cache.releaseHoleSpan(hole)
+                }
+            }
+            Track(TrackRef(ProviderIds.NETEASE, id), "Recovery fixture $index", emptyList()).toMediaMetadata().toMediaItem()
         }
     }
 

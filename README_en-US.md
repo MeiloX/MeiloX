@@ -40,7 +40,7 @@ The project focuses on three goals:
 - Apple Music-style full-screen player, mini player, and floating lyrics;
 - Light and dark themes, dynamic album backgrounds, and Liquid Glass effects;
 - A preinstalled, removable NetEase Cloud Music source, a separate QQ Music plugin, and automatic playback source fallback in user-defined order;
-- A [plugin marketplace](https://github.com/NEORUAA/MeiloX-Source-Registry), version checks on launch, and automatic updates, with plugin submissions accepted via pull requests.
+- A [plugin marketplace](https://github.com/MeiloX/MeiloX-Source-Registry), version checks on launch, and automatic updates, with plugin submissions accepted via pull requests.
 
 Features are still evolving, and availability may change with app versions and music source APIs.
 

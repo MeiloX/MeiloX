@@ -29,7 +29,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.ljyh.mei.R
 import com.ljyh.mei.source.api.*
 import com.ljyh.mei.source.core.*
+import com.ljyh.mei.source.script.InstalledPlugin
 import com.ljyh.mei.source.script.PluginManifest
+import com.ljyh.mei.source.script.ScriptNetworkPolicy
 import com.ljyh.mei.source.update.SourceMarketItem
 import com.ljyh.mei.source.update.SourceUpdateReviewReason
 import com.ljyh.mei.ui.component.MeiloXSwitch
@@ -61,6 +63,9 @@ fun SourceManagementScreen(
     val pendingUpdate by viewModel.pendingUpdate.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
     val compatibilityMarket by viewModel.compatibilityMarket.collectAsState()
+    val preparingCompatibilityId by viewModel.preparingCompatibilityId.collectAsState()
+    val refreshingCompatibilityMarket by viewModel.refreshingCompatibilityMarket.collectAsState()
+    val marketRefreshFailed by viewModel.marketRefreshFailed.collectAsState()
     val message by viewModel.message.collectAsState()
     val busy by viewModel.busy.collectAsState()
     val linkImportFailed by viewModel.linkImportFailed.collectAsState()
@@ -85,10 +90,11 @@ fun SourceManagementScreen(
     var removing by remember { mutableStateOf(false) }
     var showLinkImport by remember { mutableStateOf(false) }
     var importLink by remember { mutableStateOf(TextFieldValue()) }
-    var editNetwork by remember(pluginId) { mutableStateOf(false) }
+    var networkReview by remember(pluginId, plugin?.revision, plugin?.manifest) { mutableStateOf<InstalledPlugin?>(null) }
     var networkDraft by remember(pluginId) { mutableStateOf(TextFieldValue()) }
     val update = updateState.items.firstOrNull { it.entry.packageId == pluginId && it.updateAvailable }
     val working = busy || updateState.checking || updateState.busyPackageId != null
+    val refreshing = updateState.checking || (market && refreshingCompatibilityMarket)
     val reviewHeight = (LocalConfiguration.current.screenHeightDp.dp * 0.4f).coerceAtMost(360.dp)
     val openLinkImport = {
         importLink = TextFieldValue()
@@ -111,9 +117,9 @@ fun SourceManagementScreen(
                 key = if (market) "source-market-refresh" else "source-check-updates",
                 contentDescription = if (market) stringResource(R.string.source_market_refresh) else "检查更新",
                 onClick = if (market) viewModel::refreshMarket else viewModel::checkUpdates,
-                enabled = !working,
+                enabled = !working && !refreshing,
             ) {
-                if (updateState.checking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 else SfIcon("arrow.clockwise", null)
             }) else emptyList()
         },
@@ -123,8 +129,12 @@ fun SourceManagementScreen(
         }
         if (market) {
             val (official, thirdParty) = updateState.items.partition { it.entry.isOfficial }
-            if (official.isEmpty() && thirdParty.isEmpty() && compatibilityMarket.isEmpty()) item("source-market-empty") {
-                if (working) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+            if (marketRefreshFailed && !refreshing) item("source-market-load-error") {
+                GlasmioGroupedList {
+                    GlasmioListRow(stringResource(R.string.source_market_partial), showDisclosure = false, onClick = viewModel::refreshMarket)
+                }
+            } else if (official.isEmpty() && thirdParty.isEmpty() && compatibilityMarket.isEmpty()) item("source-market-empty") {
+                if (working || refreshing) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 } else GlasmioGroupedList {
                     GlasmioListRow(stringResource(R.string.source_market_empty), showDisclosure = false)
@@ -150,7 +160,8 @@ fun SourceManagementScreen(
                             subtitle = listOfNotNull(compatibilityBrand(entry.format), entry.version).joinToString(" · "),
                             installed = installedId != null,
                             updateAvailable = item.updateAvailable,
-                            enabled = !working,
+                            enabled = !busy,
+                            processing = preparingCompatibilityId == entry.id,
                             onClick = {
                                 if (item.updateAvailable || installedId == null) viewModel.prepareCompatibilityMarketInstall(entry.id)
                                 else Screen.SourcePluginSettings.navigate(nav) { addPath(Uri.encode(installedId)) }
@@ -228,15 +239,17 @@ fun SourceManagementScreen(
                             if (isCompatible) {
                                 GlasmioListRow(
                                     title = stringResource(R.string.source_network_permissions),
-                                    subtitle = plugin.manifest.permissions.network.joinToString().ifEmpty {
+                                    subtitle = plugin.requestedDomain?.let { stringResource(R.string.source_network_requested_domain, it) }
+                                        ?: plugin.manifest.permissions.network.joinToString().ifEmpty {
                                         stringResource(R.string.source_network_domains_none)
                                     },
                                     systemName = "network",
                                     enabled = !working,
                                     onClick = {
-                                        networkDraft = TextFieldValue(plugin.manifest.permissions.network.joinToString())
+                                        networkDraft = TextFieldValue((plugin.manifest.permissions.network +
+                                            listOfNotNull(plugin.requestedDomain?.let(ScriptNetworkPolicy::suggestedCompatibilityGrant))).distinct().joinToString())
                                         viewModel.invalidCompatibilityDomains.value = false
-                                        editNetwork = true
+                                        networkReview = plugin
                                     },
                                 )
                             }
@@ -332,7 +345,14 @@ fun SourceManagementScreen(
                 )
             } }
             displayedOrder?.takeIf { it.isNotEmpty() }?.let { order ->
-                item { Text("切换顺序", Modifier.padding(start = 16.dp, top = 12.dp)) }
+                item {
+                    val title = when {
+                        !settings.autoFallbackEnabled -> R.string.source_order_when_enabled
+                        settings.preferOriginalProvider -> R.string.source_order_after_original
+                        else -> R.string.source_playback_order
+                    }
+                    Text(stringResource(title), Modifier.padding(start = 16.dp, top = 12.dp))
+                }
                 item {
                     GlasmioReorderableGroup(
                         items = order,
@@ -377,10 +397,11 @@ fun SourceManagementScreen(
     val reviewing = pending != null
     val manifest = displayedReview?.first?.manifest?.takeIf { showingReview }
     val compatibility = manifest?.compatibility != null
+    val importBusy = if (reviewing && compatibility) busy else working
     val updating = manifest != null && plugins.any { it.manifest.id == manifest.id }
     var domains by remember(manifest) { mutableStateOf(TextFieldValue(manifest?.permissions?.network.orEmpty().joinToString())) }
     val url = importLink.text.trim()
-    val validLink = url.length in 9..8192 && url.startsWith("https://", ignoreCase = true)
+    val validLink = url.length in 8..8192 && (url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true))
     fun dismissImport() {
         if (reviewing && busy) return
         showLinkImport = false
@@ -403,7 +424,7 @@ fun SourceManagementScreen(
                     updating -> R.string.source_import_update
                     else -> R.string.source_import_install
                 }),
-                enabled = !working && (reviewing || showLinkImport && validLink),
+                enabled = !importBusy && (reviewing || showLinkImport && validLink),
                 onClick = {
                     if (reviewing) {
                         viewModel.install(if (compatibility) parseCompatibilityDomains(domains.text) else null) { installed ->
@@ -449,7 +470,7 @@ fun SourceManagementScreen(
                 )
                 if (compatibility) {
                     Spacer(Modifier.height(12.dp))
-                    SourceDomainField(domains, working, invalidImportDomains) {
+                    SourceDomainField(domains, importBusy, invalidImportDomains) {
                         domains = it
                         viewModel.invalidImportDomains.value = false
                     }
@@ -457,19 +478,20 @@ fun SourceManagementScreen(
             }
         }
     }
-    val dismissNetwork = { if (!busy) editNetwork = false }
+    val dismissNetwork = { if (!busy) networkReview = null }
     GlasmioAlertDialog(
-        visible = editNetwork && plugin != null,
+        visible = networkReview != null,
         onDismissRequest = dismissNetwork,
         title = stringResource(R.string.source_network_permissions),
+        message = networkReview?.requestedDomain?.let { stringResource(R.string.source_network_requested_domain, it) },
         buttons = listOf(
             GlasmioAlertButtonSpec(stringResource(R.string.cancel), role = GlasmioAlertButtonRole.Cancel, enabled = !busy, onClick = dismissNetwork),
             GlasmioAlertButtonSpec(
                 stringResource(R.string.source_network_save),
                 enabled = !working,
                 onClick = {
-                    plugin?.let { installed ->
-                        viewModel.saveCompatibilityDomains(installed, parseCompatibilityDomains(networkDraft.text)) { editNetwork = false }
+                    networkReview?.let { installed ->
+                        viewModel.saveCompatibilityDomains(installed, parseCompatibilityDomains(networkDraft.text)) { networkReview = null }
                     }
                 },
             ),

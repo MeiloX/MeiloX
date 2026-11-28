@@ -40,7 +40,7 @@ MeiloX は [Mei](https://github.com/ljyh223/Mei) をベースに改良と複数�
 - Apple Music スタイルのフルスクリーンプレーヤー、ミニプレーヤー、歌詞のフローティング表示
 - ライト/ダークテーマ、動的なアルバム背景、Liquid Glass のインタラクション効果
 - デフォルトでインストールされ削除も可能な NetEase 音源、独立した QQ Music プラグイン、ユーザーが指定した順序による再生音源の自動切り替え
-- [プラグインマーケット](https://github.com/NEORUAA/MeiloX-Source-Registry)、起動時のバージョンチェックと自動更新。開発者は PR を提出して掲載できます
+- [プラグインマーケット](https://github.com/MeiloX/MeiloX-Source-Registry)、起動時のバージョンチェックと自動更新。開発者は PR を提出して掲載できます
 
 機能は継続的に調整中であり、実際に利用できる範囲はバージョンや音楽ソースのインターフェースの状態によって変わります。
 

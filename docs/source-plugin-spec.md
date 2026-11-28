@@ -49,7 +49,7 @@ API 1 may declare only `catalog.search`, `catalog.track`, `playback.resolve` and
 
 ## Marketplace and updates
 
-The [source registry](https://github.com/NEORUAA/MeiloX-Source-Registry) publishes a bounded, declarative `index.json`. Entries bind package/provider identity, a relative `.meisource` path, and API version to a declared GitHub repository. The host resolves the latest commit touching that package (falling back to the repository `HEAD` when the unauthenticated API is rate-limited), downloads the archive, and derives its SemVer version and SHA-256 from the actual package before review. Submission and metadata validation are maintained in that repository; the host never executes index content.
+The [source registry](https://github.com/MeiloX/MeiloX-Source-Registry) publishes a bounded, declarative `index.json`. Entries bind package/provider identity, a relative `.meisource` path, and API version to a declared GitHub repository. The host resolves the latest commit touching the package. When the commit API times out, is unavailable or rate-limits the request, the host reads the package at `HEAD`. In both cases it reads the version from the manifest and records the archive’s SHA-256. Installation verifies the reviewed digest again.
 
 Startup checks run after source initialization in the background. Automatic updates require a matching, payload-bound repository origin and no additional permissions, capabilities or required configuration. Session fingerprint contract changes also require review. A file-imported source can acquire origin only after its exact current payload matches the digest-verified same-version market package, or after an explicit reviewed market update. Reimporting a file clears market origin.
 
@@ -288,7 +288,7 @@ Declare account-bearing keys in `sessionKeys` (at most 32). Their storage value 
 
 Updates, configuration edits, enable/disable and uninstall replace source revision gates. Old calls cannot commit stale storage or diagnostics after a replacement. Import/update approval is bound to reviewed package bytes. Reimport preserves that package's configuration and music data; uninstall removes its code/configuration but leaves Room rows and downloaded audio.
 
-The separate [MeiloX-Netease-Source](https://github.com/NEORUAA/MeiloX-Netease-Source) repository maintains the default NetEase package. The host vendors its artifact and SHA-256 in `BundledSourceProvisioner`. Only those exact first-install bytes can receive the former built-in account through a one-time encrypted migration. A pre-existing imported package never inherits those credentials. The persistent default marker records migration or explicit removal, so uninstalling does not cause automatic restoration. Other sources continue loading if default provisioning fails.
+The separate [MeiloX-Netease-Source](https://github.com/MeiloX/MeiloX-Netease-Source) repository maintains the default NetEase package. The host vendors its artifact and SHA-256 in `BundledSourceProvisioner`. Only those exact first-install bytes can receive the former built-in account through a one-time encrypted migration. A pre-existing imported package never inherits those credentials. The persistent default marker records migration or explicit removal, so uninstalling does not cause automatic restoration. Other sources continue loading if default provisioning fails.
 
 ## Links and lyrics
 
@@ -305,4 +305,4 @@ python3 samples/music-source-plugin/package.py
 
 The sample is an offline API 1 fixture with an authored one-second tone. It exercises portable search/detail/audio/lyrics behavior. Real Android sandbox, profile, SDK, source migration and account behavior require their corresponding checks. Dated build/device evidence is maintained in [source-validation.md](source-validation.md).
 
-The [QQ adapter](https://github.com/NEORUAA/MeiloX-QQMusic-Source) is maintained independently from the host's QQ lyric extension. It uses the same source boundary and shared UI. Host source management is under **Settings → General → Audio Sources**.
+The [QQ adapter](https://github.com/MeiloX/MeiloX-QQMusic-Source) is maintained independently from the host's QQ lyric extension. It uses the same source boundary and shared UI. Host source management is under **Settings → General → Audio Sources**.

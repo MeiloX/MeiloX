@@ -19,7 +19,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -81,6 +80,10 @@ class SourceManagementViewModel @Inject constructor(
     private val fallbackOrderMutex = Mutex()
     private val actionMutex = Mutex()
     private var linkInspection: Job? = null
+    private var marketRefresh: Job? = null
+    val refreshingCompatibilityMarket = MutableStateFlow(false)
+    val marketRefreshFailed = MutableStateFlow(false)
+    val preparingCompatibilityId = MutableStateFlow<String?>(null)
 
     init {
         viewModelScope.launch {
@@ -143,16 +146,22 @@ class SourceManagementViewModel @Inject constructor(
         }
         pending.value = prepared
     }
-    fun refreshMarket() = action {
-        coroutineScope {
+    fun refreshMarket() {
+        if (marketRefresh?.isActive == true) return
+        marketRefresh = viewModelScope.launch {
+            marketRefreshFailed.value = false
             launch {
+                refreshingCompatibilityMarket.value = true
                 try { compatibleSources.refresh()?.let { remoteCompatibility.value = it } }
                 catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { /* Retain the last catalog while a registry request fails. */ }
+                catch (_: Exception) { marketRefreshFailed.value = true }
+                finally { refreshingCompatibilityMarket.value = false }
             }
-            updates.refreshMarket()
+            try {
+                if (!updates.refreshMarket()) marketRefreshFailed.value = true
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { marketRefreshFailed.value = true }
         }
-        message.value = updates.state.value.message
     }
     fun checkUpdates() = action {
         updates.checkNow()
@@ -176,7 +185,13 @@ class SourceManagementViewModel @Inject constructor(
         val item = compatibilityMarket.value.firstOrNull { it.entry.id == id }
             ?: throw SourceException(SourceErrorCode.UNAVAILABLE)
         val entry = item.entry
-        showPreparedImport(manager.inspectMarketScript(entry) { compatibleSources.download(entry, it) }, item.installedPackageId)
+        preparingCompatibilityId.value = id
+        try {
+            val prepared = manager.inspectMarketScript(entry) { compatibleSources.download(entry, it) }
+            showPreparedImport(prepared, item.installedPackageId)
+        } finally {
+            preparingCompatibilityId.value = null
+        }
     }
     fun cancelImport() {
         linkInspection?.cancel()
@@ -254,7 +269,7 @@ class SourceManagementViewModel @Inject constructor(
     }
     fun saveCompatibilityDomains(plugin: InstalledPlugin, domains: List<String>, onSaved: () -> Unit) = action {
         invalidCompatibilityDomains.value = false
-        val configured = try { manager.configureCompatibilityDomains(plugin.manifest.id, domains) }
+        val configured = try { manager.configureCompatibilityDomains(plugin, domains) }
         catch (error: SourceException) {
             if (error.code != SourceErrorCode.PERMISSION_DENIED) throw error
             invalidCompatibilityDomains.value = true

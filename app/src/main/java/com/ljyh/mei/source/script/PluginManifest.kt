@@ -194,10 +194,12 @@ data class PluginManifest(
                         manifest.providerId == manifest.id)
                     require(manifest.apiVersion == 2 && manifest.permissions.nativeSdks.isEmpty() &&
                         manifest.permissions.effects.isEmpty() && !manifest.permissions.storage && manifest.linkHosts.isEmpty())
-                    require(manifest.permissions.network.none { it.startsWith("*") })
+                    manifest.permissions.network.forEach(ScriptNetworkPolicy::validateCompatibilityGrant)
                     require(manifest.capabilities == if (lx) setOf("playback.resolve") else
                         setOf("catalog.search", "catalog.track", "playback.resolve"))
-                    require(if (lx) manifest.compatibilityPlatforms == setOf("wy") else manifest.compatibilityPlatforms == null)
+                    require(if (lx) manifest.compatibilityPlatforms?.let {
+                        it.isNotEmpty() && LxPlaybackCatalog.platforms.containsAll(it)
+                    } == true else manifest.compatibilityPlatforms == null)
                 } else require(manifest.compatibilityPlatforms == null &&
                     !COMPATIBILITY_ID.matches(manifest.id) && !COMPATIBILITY_ID.matches(manifest.providerId))
                 return manifest
