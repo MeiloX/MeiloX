@@ -75,6 +75,8 @@ internal class AutoMixVisuals(
 ) {
     fun artworkProgress(): Float = autoMixArtworkEasing.transform(afterPivot(3_000f))
 
+    fun lyricProgress(): Float = artworkProgress()
+
     fun backgroundProgress(): Float = autoMixBackgroundEasing.transform(afterPivot(6_000f))
 
     fun progress(): Float = EaseInOut.transform(afterPivot(300f))
@@ -196,6 +198,9 @@ fun BottomSheetPlayer(
         !mixPromoted || (it.incoming.trackRef != currentMetadata?.trackRef && it.outgoing?.trackRef == currentMetadata?.trackRef)
     }
     val upcomingArtworkMetadata = (activeMix?.incoming ?: upcomingMixTrack)?.takeIf { progressUpdatesEnabled }
+    LaunchedEffect(playerConnection.service.lyricManager, upcomingArtworkMetadata?.trackRef) {
+        upcomingArtworkMetadata?.let(playerConnection.service.lyricManager::preloadLyrics)
+    }
     val mixArtworkMetadata = displayedMix?.incoming?.takeIf {
         it.coverUrl.isNotBlank() && (!mixPromoted || it.coverUrl == playingMetadata?.coverUrl)
     }

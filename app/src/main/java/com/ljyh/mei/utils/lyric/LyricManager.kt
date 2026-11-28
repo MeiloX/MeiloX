@@ -128,6 +128,7 @@ class LyricManager @Inject constructor(
 
     /** 预加载协程 Job */
     private var preloadJob: Job? = null
+    private var preloadingSongId: String? = null
 
     // ==================== 三源 StateFlow ====================
 
@@ -813,6 +814,7 @@ class LyricManager @Inject constructor(
         fetchJob?.cancel()
         qqFetchJob?.cancel()
         preloadJob?.cancel()
+        preloadingSongId = null
         searchJob?.cancel()
         currentSongId = null
         settingsReady = false
@@ -837,37 +839,43 @@ class LyricManager @Inject constructor(
         if (knownSettings != null &&
             lyricCache.value[songId]?.matchesLyricPreference(knownSettings.source, knownSettings.variant) == true
         ) return
+        if (preloadJob?.isActive == true && preloadingSongId == songId) return
 
         preloadJob?.cancel()
+        preloadingSongId = songId
         preloadJob = scope.launch {
-            val settings = settingsMutex.withLock { readSettings(songId) }
-            if (lyricCache.value[songId]?.matchesLyricPreference(settings.source, settings.variant) == true) {
-                return@launch
-            }
-            val persisted = try {
-                withContext(Dispatchers.IO) {
-                    cachedLyricRepository.get(songId).firstOrNull()?.toLyricData()
+            try {
+                val settings = settingsMutex.withLock { readSettings(songId) }
+                if (lyricCache.value[songId]?.matchesLyricPreference(settings.source, settings.variant) == true) {
+                    return@launch
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Timber.tag(TAG).w(error, "Unable to read preloaded lyrics")
-                null
-            }?.takeIf { it.matchesLyricPreference(settings.source, settings.variant) }
-            val result = persisted ?: preloader.preload(metadata)
-            currentCoroutineContext().ensureActive()
-            if (result != null && result.source != LyricSource.Empty
-                && result.source != LyricSource.Loading && result.lyricLine.lines.isNotEmpty()
-                && result.matchesLyricPreference(settings.source, settings.variant)
-            ) {
-                // A late preload must not replace an already aligned foreground cache.
-                val compatible = lyricCache.value[songId]?.takeIf {
-                    it.matchesLyricPreference(settings.source, settings.variant)
+                val persisted = try {
+                    withContext(Dispatchers.IO) {
+                        cachedLyricRepository.get(songId).firstOrNull()?.toLyricData()
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Timber.tag(TAG).w(error, "Unable to read preloaded lyrics")
+                    null
+                }?.takeIf { it.matchesLyricPreference(settings.source, settings.variant) }
+                val result = persisted ?: preloader.preload(metadata)
+                currentCoroutineContext().ensureActive()
+                if (result != null && result.source != LyricSource.Empty
+                    && result.source != LyricSource.Loading && result.lyricLine.lines.isNotEmpty()
+                    && result.matchesLyricPreference(settings.source, settings.variant)
+                ) {
+                    // A late preload must not replace an already aligned foreground cache.
+                    val compatible = lyricCache.value[songId]?.takeIf {
+                        it.matchesLyricPreference(settings.source, settings.variant)
+                    }
+                    val selected = compatible?.let { existing ->
+                        selectLyricUpdate(existing, result, sourcesFinished = false, alignmentFinished = false)
+                    } ?: result
+                    cacheLyrics(songId, selected)
                 }
-                val selected = compatible?.let { existing ->
-                    selectLyricUpdate(existing, result, sourcesFinished = false, alignmentFinished = false)
-                } ?: result
-                cacheLyrics(songId, selected)
+            } finally {
+                if (preloadingSongId == songId) preloadingSongId = null
             }
         }
     }
@@ -875,11 +883,15 @@ class LyricManager @Inject constructor(
     internal fun preloadedLyrics(metadata: MediaMetadata): Flow<LyricData?> = flow {
         val songId = metadata.lyricStorageKey()
         val settings = settingsMutex.withLock { readSettings(songId) }
+        val cached = lyricCache.value[songId]
+        if (cached == null || !cached.matchesLyricPreference(settings.source, settings.variant)) {
+            preloadLyrics(metadata)
+        }
         emitAll(
             lyricCache.map { it[songId] }
                 .distinctUntilChanged()
-                .map { cached ->
-                    cached?.takeIf { it.matchesLyricPreference(settings.source, settings.variant) }
+                .map { entry ->
+                    entry?.takeIf { it.matchesLyricPreference(settings.source, settings.variant) }
                         ?.let { lyrics ->
                             withContext(Dispatchers.Default) {
                                 try {

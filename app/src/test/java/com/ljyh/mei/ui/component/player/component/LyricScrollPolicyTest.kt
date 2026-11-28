@@ -1,5 +1,7 @@
 package com.ljyh.mei.ui.component.player.component
 
+import com.ljyh.mei.data.model.MediaMetadata
+import com.ljyh.mei.ui.component.player.AutoMixVisuals
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeAlignment
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine
 import com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine
@@ -349,6 +351,40 @@ class LyricScrollPolicyTest {
     @Test
     fun zeroHeightRowsDoNotCountAsVisible() {
         assertFalse(isLyricLineVisible(500, 0, 0, 1_000, 200))
+    }
+
+    @Test
+    fun autoMixLyricProgressMatchesArtworkProgressAcrossLongAndShortMixes() {
+        val incoming = MediaMetadata(
+            id = 2L,
+            title = "Next",
+            coverUrl = "",
+            artists = emptyList(),
+            duration = 180_000,
+            album = MediaMetadata.Album(2L, "Album"),
+        )
+        for (durationMs in listOf(2_000L, 8_000L, 12_000L)) {
+            var audioProgress = 0f
+            val visuals = AutoMixVisuals(
+                incoming = incoming,
+                audioProgress = { audioProgress },
+                durationMs = durationMs,
+                incomingPositionMs = { 0L },
+            )
+            for (step in 0..20) {
+                audioProgress = step / 20f
+                assertEquals(
+                    "duration=$durationMs step=$step",
+                    visuals.artworkProgress(),
+                    visuals.lyricProgress(),
+                    0f,
+                )
+            }
+            audioProgress = 0.5f
+            assertEquals(0f, visuals.lyricProgress(), 0f)
+            audioProgress = 1f
+            assertEquals(1f, visuals.lyricProgress(), 0f)
+        }
     }
 
     private fun mainLine(

@@ -97,6 +97,7 @@ import io.github.neoruaa.glasmio.glass.render.backdrops.emptyBackdrop
 import com.ljyh.mei.R
 import com.ljyh.mei.constants.MusicQuality
 import com.ljyh.mei.data.model.MediaMetadata
+import com.ljyh.mei.ui.component.player.AutoMixVisuals
 import com.ljyh.mei.ui.component.player.FloatingLyricsPipContent
 import com.ljyh.mei.ui.component.player.component.applemusic.playerAdditiveBlend
 import com.ljyh.mei.ui.component.player.component.applemusic.playerContentFade
@@ -2062,5 +2063,99 @@ class PlayerLyricsRenderingTest {
         assertEquals(background.red, brightestRed(), 0.02f)
         compose.runOnIdle { controlsVisible.value = false }
         assertTrue("Lyrics must reappear when controls leave", brightestRed() > background.red + 0.6f)
+    }
+
+    @Test
+    fun incomingAutoMixLyricsCrossfadeInSyncWithArtworkWithoutBlankGap() {
+        val audioProgress = mutableStateOf(0f)
+        val incomingPos = mutableStateOf(1_500L)
+        val outgoingLyrics = SyncedLyrics(lines = listOf(SyncedLine("MMMM", null, 1_000, 5_000)))
+        val incomingLyrics = LyricData(
+            lyricLine = SyncedLyrics(lines = listOf(SyncedLine("WWWW", null, 1_000, 5_000))),
+            source = LyricSource.NetEaseCloudMusic,
+            isVerbatim = false,
+            isPureMusic = false,
+        )
+        val autoMix = AutoMixVisuals(
+            incoming = MediaMetadata(
+                id = 2L,
+                title = "Next",
+                coverUrl = "",
+                artists = emptyList(),
+                duration = 180_000,
+                album = MediaMetadata.Album(2L, "Album"),
+            ),
+            audioProgress = { audioProgress.value },
+            durationMs = 8_000L,
+            incomingPositionMs = { incomingPos.value },
+        )
+        compose.setContent {
+            MaterialTheme {
+                Box(Modifier.width(280.dp).height(220.dp).background(Color.Black).testTag("automix-lyrics")) {
+                    Box(Modifier.fillMaxSize()) {
+                        PlayerLyricsView(
+                            listState = rememberLazyListState(),
+                            lyrics = outgoingLyrics,
+                            currentPosition = { 2_000 },
+                            onLineClicked = {}, onLinePressed = {}, isManualScrolling = false,
+                            modifier = Modifier.playerAdditiveLayer(opacity = { 1f - autoMix.lyricProgress() }),
+                            listModifier = Modifier.clipToBounds(),
+                            normalLineTextStyle = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold),
+                            useBlurEffect = false, showPhonetic = false,
+                            offset = 24.dp, keepAliveZone = 0.dp,
+                            topFadeHeight = 0.dp, bottomFadeHeight = 0.dp,
+                            isolateFadeLayer = false,
+                        )
+                    }
+                    Box(Modifier.fillMaxSize()) {
+                        IncomingLyricLayer(
+                            lyricData = incomingLyrics,
+                            positionMs = autoMix.incomingPositionMs,
+                            trackFocus = true,
+                            animateFrames = autoMix.lyricProgress() > 0f,
+                            modifier = Modifier.fillMaxSize()
+                                .playerAdditiveLayer(opacity = autoMix::lyricProgress),
+                            contentModifier = Modifier,
+                            normalTextStyle = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold),
+                            translationTextStyle = TextStyle(fontSize = 18.sp),
+                            translationEnabled = false,
+                            romanizationEnabled = false,
+                            glowEnabled = false,
+                            liftEnabled = false,
+                            longToneEnabled = false,
+                            lyricOffset = 100.dp,
+                            mainLyricAnchor = null,
+                            rendererVerticalPadding = 0.dp,
+                            topFadeHeight = 0.dp,
+                            bottomFadeHeight = 0.dp,
+                            controlsFadeRange = { null },
+                        )
+                    }
+                }
+            }
+        }
+        fun brightestInHalf(lowerHalf: Boolean): Float {
+            val pixels = compose.onNodeWithTag("automix-lyrics").captureToImage().toPixelMap()
+            val yRange = if (lowerHalf) (pixels.height / 2) until pixels.height else 0 until (pixels.height / 2)
+            var peak = 0f
+            for (y in yRange) for (x in 0 until pixels.width) {
+                peak = maxOf(peak, pixels[x, y].luminance())
+            }
+            return peak
+        }
+
+        // Before pivot (0.0): outgoing visible in upper half, incoming invisible in lower half.
+        assertTrue("Outgoing lyrics must be visible before pivot", brightestInHalf(lowerHalf = false) > 0.8f)
+        assertTrue("Incoming lyrics must stay hidden before pivot", brightestInHalf(lowerHalf = true) < 0.05f)
+
+        // Mid artwork crossfade (~0.75): both outgoing and incoming are visibly crossfading (never blank).
+        compose.runOnIdle { audioProgress.value = 0.75f }
+        assertTrue("Outgoing must still be fading mid-crossfade", brightestInHalf(lowerHalf = false) > 0.1f)
+        assertTrue("Incoming must already fade in mid-crossfade", brightestInHalf(lowerHalf = true) > 0.2f)
+
+        // End of artwork crossfade (0.95): incoming is fully visible BEFORE track promotion.
+        compose.runOnIdle { audioProgress.value = 0.95f }
+        assertTrue("Outgoing must be faded out at end of crossfade", brightestInHalf(lowerHalf = false) < 0.05f)
+        assertTrue("Incoming lyrics must be fully visible before promotion (never blank)", brightestInHalf(lowerHalf = true) > 0.8f)
     }
 }

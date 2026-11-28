@@ -208,14 +208,22 @@ fun LyricScreen(
     val foregroundLyricsReady = promotedIncoming != null &&
         lyricManager.songId == promotedIncoming.first && lyricData == lyricManager.lyricData.value &&
         lyricData.source != LyricSource.Loading
-    val displayedLyrics = if (promotedIncoming != null && !foregroundLyricsReady) promotedIncoming.second else lyricData
+    val displayedLyrics = when {
+        promotedIncoming == null -> lyricData
+        !foregroundLyricsReady -> promotedIncoming.second
+        // Keep the promoted SyncedLyrics object identity when foreground resolves identical lines
+        // (e.g. non-zero offset re-derivation or DB reload), avoiding a teardown/fade blink.
+        lyricData.lyricLine == promotedIncoming.second.lyricLine ->
+            lyricData.copy(lyricLine = promotedIncoming.second.lyricLine)
+        else -> lyricData
+    }
     val foregroundLyricKey = promotedIncoming?.first
         ?: lyricManager.songId.takeIf { displayedLyrics == lyricManager.lyricData.value }
     val incomingVisible by remember(autoMix, incomingLyrics) {
-        derivedStateOf { autoMix != null && incomingLyrics != null && autoMix.progress() > 0f }
+        derivedStateOf { autoMix != null && incomingLyrics != null && autoMix.lyricProgress() > 0f }
     }
     val incomingDominant by remember(autoMix, incomingLyrics) {
-        derivedStateOf { autoMix != null && incomingLyrics != null && autoMix.progress() >= 0.5f }
+        derivedStateOf { autoMix != null && incomingLyrics != null && autoMix.lyricProgress() >= 0.5f }
     }
     val foregroundInteractive = foregroundLyricKey != null && !incomingDominant
     fun canActOnForegroundLyrics(): Boolean =
@@ -225,7 +233,9 @@ fun LyricScreen(
     SideEffect {
         if (incomingMetadata != null && incomingLyrics != null) {
             retainedIncoming = incomingMetadata.lyricStorageKey() to incomingLyrics
-        } else if (promotedIncoming == null || foregroundLyricsReady) {
+        } else if (promotedIncoming == null ||
+            (foregroundLyricsReady && lyricData.lyricLine != promotedIncoming.second.lyricLine)
+        ) {
             retainedIncoming = null
         }
     }
@@ -327,7 +337,17 @@ fun LyricScreen(
                     // Warm the visible window near playback even before this host is shown.
                     val initialPosition = remember(player) { player.currentPosition.coerceAtLeast(0L) }
                     val listState = remember(player) {
-                        LazyListState(firstVisibleItemIndex = lyricFocusLineIndex(lines, initialPosition.toInt(), accompanimentToMainMap))
+                        val initialIndex = lyricFocusLineIndex(lines, initialPosition.toInt(), accompanimentToMainMap)
+                        val initialScrollOffset = if (mainLyricAnchor == null || lyricWidthPx <= 0) 0 else {
+                            mainLyricAnchorOffset(
+                                lines[initialIndex], displayedLyrics.isVerbatim, mainTextStyle,
+                                romanizationEnabled, lyricWidthPx, textMeasurer, density, mainLyricAnchor,
+                            ).roundToInt()
+                        }
+                        LazyListState(
+                            firstVisibleItemIndex = initialIndex,
+                            firstVisibleItemScrollOffset = initialScrollOffset,
+                        )
                     }
                     // Rows revealed by a within-screen jump need an existing placement
                     // to animate from. Keep a full window laid out beyond each edge.
@@ -607,7 +627,9 @@ fun LyricScreen(
                                         opacity = {
                                             // The former nested layers applied this entry fade twice.
                                             val fraction = lyricAlpha.value
-                                            val incomingAlpha = if (autoMix != null && incomingLyrics != null) autoMix.progress() else 0f
+                                            val incomingAlpha = if (autoMix != null && incomingLyrics != null) {
+                                                autoMix.lyricProgress()
+                                            } else 0f
                                             fraction * fraction * (1f - incomingAlpha)
                                         },
                                     ),
@@ -649,33 +671,38 @@ fun LyricScreen(
             }
 
             if (autoMix != null && incomingLyrics != null) {
-                IncomingLyricLayer(
-                    lyricData = incomingLyrics,
-                    positionMs = autoMix.incomingPositionMs,
-                    updatePosition = incomingVisible && isPlaying,
-                    modifier = Modifier.matchParentSize()
-                        .padding(contentPadding)
-                        .padding(vertical = rendererVerticalPadding)
-                        .then(
-                            if (incomingDominant) Modifier
-                            else Modifier.clearAndSetSemantics { hideFromAccessibility() },
-                        )
-                        .playerAdditiveLayer(opacity = autoMix::progress),
-                    contentModifier = lyricContentModifier,
-                    normalTextStyle = mainTextStyle,
-                    translationTextStyle = translationTextStyle,
-                    translationEnabled = translationEnabled,
-                    romanizationEnabled = romanizationEnabled,
-                    glowEnabled = glowEnabled,
-                    liftEnabled = liftEnabled,
-                    longToneEnabled = longToneEnabled,
-                    lyricOffset = lyricOffset,
-                    mainLyricAnchor = mainLyricAnchor,
-                    rendererVerticalPadding = rendererVerticalPadding,
-                    topFadeHeight = topFadeHeight,
-                    bottomFadeHeight = bottomFadeHeight,
-                    controlsFadeRange = controlsFadeRange,
-                )
+                // Keep the container sizing outside PlayerLyricsView's Crossfade so incoming
+                // lyrics measure to the full viewport (matchParentSize inside Crossfade collapses to 0x0).
+                Box(Modifier.fillMaxSize().padding(contentPadding)) {
+                    IncomingLyricLayer(
+                        lyricData = incomingLyrics,
+                        positionMs = autoMix.incomingPositionMs,
+                        trackFocus = isPlaying,
+                        animateFrames = incomingVisible && isPlaying,
+                        initialWidthPx = lyricWidthPx,
+                        modifier = Modifier.fillMaxSize()
+                            .padding(vertical = rendererVerticalPadding)
+                            .then(
+                                if (incomingDominant) Modifier
+                                else Modifier.clearAndSetSemantics { hideFromAccessibility() },
+                            )
+                            .playerAdditiveLayer(opacity = autoMix::lyricProgress),
+                        contentModifier = lyricContentModifier,
+                        normalTextStyle = mainTextStyle,
+                        translationTextStyle = translationTextStyle,
+                        translationEnabled = translationEnabled,
+                        romanizationEnabled = romanizationEnabled,
+                        glowEnabled = glowEnabled,
+                        liftEnabled = liftEnabled,
+                        longToneEnabled = longToneEnabled,
+                        lyricOffset = lyricOffset,
+                        mainLyricAnchor = mainLyricAnchor,
+                        rendererVerticalPadding = rendererVerticalPadding,
+                        topFadeHeight = topFadeHeight,
+                        bottomFadeHeight = bottomFadeHeight,
+                        controlsFadeRange = controlsFadeRange,
+                    )
+                }
             }
 
             if (showSourceBadge && foregroundInteractive && displayedLyrics.lyricLine.lines.isNotEmpty()) {
@@ -718,10 +745,12 @@ fun LyricScreen(
 }
 
 @Composable
-private fun IncomingLyricLayer(
+internal fun IncomingLyricLayer(
     lyricData: LyricData,
     positionMs: () -> Long,
-    updatePosition: Boolean,
+    trackFocus: Boolean,
+    animateFrames: Boolean,
+    initialWidthPx: Int = 0,
     modifier: Modifier,
     contentModifier: Modifier,
     normalTextStyle: TextStyle,
@@ -742,6 +771,8 @@ private fun IncomingLyricLayer(
     if (lines.isEmpty()) return
 
     val position by rememberUpdatedState(positionMs)
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
     val hasKaraoke = remember(lines, lyricData.isVerbatim) {
         lyricData.isVerbatim && lines.any { it.hasTimedVocals() }
     }
@@ -752,10 +783,21 @@ private fun IncomingLyricLayer(
     val accompanimentOwners = remember(lines) { lyricAccompanimentOwners(lines) }
     val quietIntervals = remember(lines) { lyricQuietIntervals(lines, accompanimentOwners) }
     val motionBoundaries = remember(lines) { lyricMotionBoundaries(lines) }
+    var lyricWidthPx by remember(lines) { mutableIntStateOf(initialWidthPx) }
     val listState = remember(lines) {
-        LazyListState(firstVisibleItemIndex = lyricFocusLineIndex(lines, position().toInt(), accompanimentOwners))
+        val initialIndex = lyricFocusLineIndex(lines, position().toInt(), accompanimentOwners)
+        val initialScrollOffset = if (mainLyricAnchor == null || lyricWidthPx <= 0) 0 else {
+            mainLyricAnchorOffset(
+                lines[initialIndex], lyricData.isVerbatim, normalTextStyle, romanizationEnabled,
+                lyricWidthPx, textMeasurer, density, mainLyricAnchor,
+            ).roundToInt()
+        }
+        LazyListState(
+            firstVisibleItemIndex = initialIndex,
+            firstVisibleItemScrollOffset = initialScrollOffset,
+        )
     }
-    LifecycleStartedEffect(lines, listState, updatePosition, hasKaraoke) {
+    LifecycleStartedEffect(lines, listState, trackFocus, animateFrames, hasKaraoke) {
         var renderFrames: Job? = null
         var lastBoundary = lyricMotionBoundaryIndex(motionBoundaries, lyricTime)
         do {
@@ -765,7 +807,7 @@ private fun IncomingLyricLayer(
                 lastBoundary = boundary
                 lyricTime = time
             }
-            val advancesOnFrames = updatePosition && (lyricQuietIntervalAt(quietIntervals, time) != null ||
+            val advancesOnFrames = animateFrames && (lyricQuietIntervalAt(quietIntervals, time) != null ||
                 (hasKaraoke && hasVisibleTimedVocals(lines, listState, 0, renderWindows, time)))
             if (!advancesOnFrames) {
                 renderFrames?.cancel()
@@ -784,14 +826,14 @@ private fun IncomingLyricLayer(
                     }
                 }
             }
-            if (updatePosition) awaitLyricMotionUpdate(
-                motionBoundaries, if (renderFrames == null) renderStarts else emptyList(), time, 1f,
+            if (trackFocus || animateFrames) awaitLyricMotionUpdate(
+                motionBoundaries,
+                if (animateFrames && renderFrames == null) renderStarts else emptyList(),
+                time,
+                1f,
             )
-        } while (updatePosition && isActive)
+        } while ((trackFocus || animateFrames) && isActive)
     }
-    val density = LocalDensity.current
-    val textMeasurer = rememberTextMeasurer()
-    var lyricWidthPx by remember { mutableIntStateOf(0) }
     LifecycleStartedEffect(
         listState, mainLyricAnchor, density, textMeasurer, lyricData.isVerbatim,
         normalTextStyle, romanizationEnabled,
@@ -830,7 +872,7 @@ private fun IncomingLyricLayer(
         translationLineTextStyle = translationTextStyle,
         offset = lyricOffset,
         keepAliveZone = 0.dp,
-        useBlurEffect = false,
+        useBlurEffect = true,
         showTranslation = translationEnabled,
         showPhonetic = romanizationEnabled,
         isVerbatim = lyricData.isVerbatim,
