@@ -18,6 +18,7 @@ import androidx.core.graphics.ColorUtils
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ljyh.mei.playback.PlaybackSpectrum
 import kotlin.math.abs
+import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -126,7 +127,7 @@ class MeshAudioResponseTest {
             val pixels = host.capture {
                 renderer.setAlbum(album)
                 renderer.audioStrength = 1f
-                renderer.spectrum = PlaybackSpectrum(1f, 1f, 1f, 1f)
+                renderer.spectrum = PlaybackSpectrum(1f, 1f, 1f)
                 repeat(20) {
                     frameNanos += FrameNanos
                     renderer.advanceFrame(frameNanos)
@@ -159,7 +160,7 @@ class MeshAudioResponseTest {
         val neutral = host.capture()
         val peak = host.capture {
             renderer.audioStrength = 1f
-            renderer.spectrum = PlaybackSpectrum(1f, 1f, 1f, 1f)
+            renderer.spectrum = PlaybackSpectrum(1f, 1f, 1f)
             repeat(12) { renderer.advanceFrame(StartNanos + (it + 1) * FrameNanos) }
         }
         neutral.indices.forEach { index ->
@@ -177,12 +178,16 @@ class MeshAudioResponseTest {
             repeat(10) { renderer.advanceFrame(StartNanos + (it + 13) * FrameNanos) }
         }
         val expanded = host.capture {
-            renderer.audioStrength = 1f
-            renderer.spectrum = PlaybackSpectrum(1f, 1f, 1f, 1f)
+            renderer.audioStrength = .2f
+            renderer.spectrum = PlaybackSpectrum(0f, 0f, 0f, zoomEnergy = 1f)
             repeat(12) { renderer.advanceFrame(StartNanos + (it + 23) * FrameNanos) }
         }
         val changed = colored.indices.count { colorDistance(colored[it], expanded[it]) > 5 }
         assertTrue("Audio must move the artwork spatially", changed > colored.size / 4)
+        val side = sqrt(colored.size.toDouble()).toInt()
+        val center = (side / 2) * side + side / 2
+        assertTrue("The shared zoom must leave the viewport center anchored",
+            colorDistance(colored[center], expanded[center]) <= 2)
         assertTrue("RuntimeShader must render visible artwork", colored.any {
             Color.red(it) > 24 || Color.green(it) > 24 || Color.blue(it) > 24
         })
@@ -201,12 +206,87 @@ class MeshAudioResponseTest {
         }
         val expected = source.getPixel(0, 0)
         try {
-            MeshGradientRenderer.prepareAlbum(source, 50, IdentityPreset)
+            MeshGradientRenderer.prepareAlbum(source, PlayerMeshGeometry(50))
             assertFalse("Texture preparation must not recycle a borrowed 32px cover", source.isRecycled)
             assertEquals("Texture preparation must not modify the source pixels", expected, source.getPixel(0, 0))
         } finally {
             source.recycle()
         }
+    }
+
+    @Test
+    fun lyricsTextureKeepsMoreArtworkDetailAtTheSameColorEndpoints() {
+        val source = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply {
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    setPixel(x, y, if (x < width / 2) Color.DKGRAY else Color.LTGRAY)
+                }
+            }
+        }
+        val baseline = AlbumTextureProcessor.process(source)
+        val (artwork, lyrics) = AlbumTextureProcessor.processVariants(source)
+        try {
+            assertTrue("The normal endpoint must retain the original artwork blur", baseline.sameAs(artwork))
+            assertEquals(artwork.getPixel(0, 16), lyrics.getPixel(0, 16))
+            assertEquals(artwork.getPixel(31, 16), lyrics.getPixel(31, 16))
+            fun localContrast(bitmap: Bitmap): Int =
+                Color.red(bitmap.getPixel(18, 16)) - Color.red(bitmap.getPixel(13, 16))
+            assertTrue("Lyrics must retain the stronger boundary between the two colors",
+                localContrast(lyrics) > localContrast(artwork))
+        } finally {
+            source.recycle()
+            baseline.recycle()
+            artwork.recycle()
+            lyrics.recycle()
+        }
+    }
+
+    @Test
+    fun identicalArtworkStaysAtTheSameBrightnessDuringSourceMixes() {
+        val color = Color.rgb(80, 125, 180)
+        val first = meshTestAlbum(color)
+        val second = meshTestAlbum(color)
+        val renderer = compose.runOnIdle {
+            MeshGradientRenderer().apply {
+                isPlaying = false
+                setAlbum(first)
+                advanceFrame(StartNanos)
+            }
+        }
+        val host = MeshRenderTestHost(compose, renderer)
+        host.show()
+        val baseline = host.capture()
+        assertTrue("A visible field is required to detect a crossfade brightness dip",
+            baseline.any { Color.blue(it) > 48 })
+
+        val fading = host.capture {
+            renderer.setAlbum(second)
+            repeat(3) { renderer.advanceFrame(StartNanos + (it + 1) * FrameNanos) }
+            assertTrue("The capture must be inside an active crossfade", renderer.needsAnimation)
+        }
+        assertArrayEquals("Mixing equal artwork must preserve the displayed colors", baseline, fading)
+
+        val mixing = host.capture {
+            repeat(7) { renderer.advanceFrame(StartNanos + (it + 4) * FrameNanos) }
+            renderer.setAutoMixAlbum(first)
+            assertTrue(renderer.setAutoMixProgress(0.5f))
+        }
+        assertArrayEquals("AutoMix must also preserve equal artwork colors", baseline, mixing)
+
+        val transparent = meshTestAlbum(Color.TRANSPARENT)
+        val halfCoverage = host.capture {
+            renderer.setAutoMixAlbum(transparent)
+            assertTrue(renderer.setAutoMixProgress(0.5f))
+        }
+        assertTrue("Half-transparent source mixing must apply coverage once over opaque black",
+            baseline.indices.all { index ->
+                val original = baseline[index]
+                val half = halfCoverage[index]
+                Color.alpha(half) == 255 &&
+                    abs(Color.red(original) - 2 * Color.red(half)) <= 3 &&
+                    abs(Color.green(original) - 2 * Color.green(half)) <= 3 &&
+                    abs(Color.blue(original) - 2 * Color.blue(half)) <= 3
+            })
     }
 
     @Test
@@ -282,6 +362,15 @@ class MeshAudioResponseTest {
             renderer.setAlbum(albums[2])
             advanceFrames(10)
         })
+
+        val mixPreview = host.capture {
+            renderer.setAutoMixAlbum(albums[1])
+            renderer.setAutoMixProgress(0.45f)
+        }
+        assertArrayEquals("Promoting before the mix ends must start on the displayed source", mixPreview,
+            host.capture { renderer.setAlbum(albums[1]) })
+        assertArrayEquals("The promoted mix must settle at the same blue endpoint", blue,
+            host.capture { advanceFrames(10) })
     }
 }
 
@@ -322,7 +411,7 @@ internal fun meshTestAlbum(solidColor: Int? = null): MeshAlbum {
             64 + ((index % size + index / size) % size) * 2)
     }, 0, size, 0, 0, size, size)
     return try {
-        MeshGradientRenderer.prepareAlbum(source, 50, IdentityPreset)
+        MeshGradientRenderer.prepareAlbum(source, PlayerMeshGeometry(50))
     } finally {
         source.recycle()
     }
@@ -336,10 +425,3 @@ internal fun colorDistance(first: Int, second: Int): Int = maxOf(
 
 internal const val StartNanos = 1_000_000_000L
 internal const val FrameNanos = 100_000_000L
-
-private val IdentityPreset = ControlPointPreset(2, 2, listOf(
-    ControlPointConf(0, 0, -1f, -1f, 0f, 0f, 1f, 1f),
-    ControlPointConf(1, 0, 1f, -1f, 0f, 0f, 1f, 1f),
-    ControlPointConf(0, 1, -1f, 1f, 0f, 0f, 1f, 1f),
-    ControlPointConf(1, 1, 1f, 1f, 0f, 0f, 1f, 1f),
-))

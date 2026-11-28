@@ -7,6 +7,9 @@ import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeSyllable
 import com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine
 import com.mocharealm.accompanist.lyrics.core.model.synced.UncheckedSyncedLine
 
+// The media-time spring is exactly settled after this interval.
+internal const val KaraokeSyllableLiftSettleMs = 700
+
 /** Renderer time may stop changing only after every visible animation has saturated. */
 internal class KaraokeRenderTimeWindow(
     val first: Int,
@@ -14,6 +17,9 @@ internal class KaraokeRenderTimeWindow(
     private val safeRawFirst: Int,
     private val safeRawLast: Int,
 ) {
+    fun canChangeAt(timeMs: Int): Boolean =
+        timeMs < safeRawFirst || timeMs > safeRawLast || (timeMs >= first && timeMs < last)
+
     fun sample(timeMs: Int): Int {
         // lyrics-ui's simple float uses Int subtraction. Preserve its original
         // arithmetic for unusual clock values which would overflow that subtraction.
@@ -23,8 +29,8 @@ internal class KaraokeRenderTimeWindow(
 }
 
 /**
- * Static bounds audited against lyrics-ui 1.0.19: karaoke fill, 700ms simple
- * float, word/glyph/phonetic animations, and nested vocals' inclusive +/-600ms
+ * Static bounds for karaoke fill, syllable lift, word/glyph/phonetic animations,
+ * and nested vocals' inclusive +/-600ms
  * visibility. Focus, scrolling and breathing dots must keep the original clock.
  */
 internal fun karaokeRenderTimeWindow(line: KaraokeLine): KaraokeRenderTimeWindow? {
@@ -48,7 +54,7 @@ internal fun karaokeRenderTimeWindow(line: KaraokeLine): KaraokeRenderTimeWindow
             earliestSyllable = minOf(earliestSyllable, start)
             latestSyllable = maxOf(latestSyllable, start)
             first = minOf(first, start)
-            last = maxOf(last, syllable.end.toLong(), start + 700L)
+            last = maxOf(last, syllable.end.toLong(), start + KaraokeSyllableLiftSettleMs)
         }
     }
 

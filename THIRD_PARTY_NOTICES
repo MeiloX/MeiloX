@@ -48,8 +48,9 @@ https://github.com/Andrea-lyz/ColorOS-Live-Lyrics-Bridge/blob/main/docs/PLAYER_I
 Accompanist Lyrics UI
 ---------------------
 `PlayerLyricsView.kt` adapts the top-level `KaraokeLyricsView` from
-`com.mocharealm.accompanist:lyrics-ui:1.0.19` while reusing its line renderers.
-Scrolling is managed by the player to support timed manual lyric browsing.
+`com.mocharealm.accompanist:lyrics-ui:1.0.19` for player-managed scrolling.
+`PlayerKaraokeLineText.kt` adapts its `KaraokeLineText` renderer for eased glyph
+motion using the library's layout helpers.
 Copyright 2025 6xingyv. Licensed under the Apache License, Version 2.0:
 https://github.com/6xingyv/accompanist-lyrics-ui
 License: https://www.apache.org/licenses/LICENSE-2.0

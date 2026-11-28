@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.IBinder
+import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.net.Uri
 import android.util.Log
@@ -1003,8 +1004,12 @@ class MainActivity : ComponentActivity() {
                         window.navigationBarDividerColor = transparent
                         onDispose { }
                     }
-                    DisposableEffect(windowInsetsController, statusBarDark) {
-                        windowInsetsController.isAppearanceLightStatusBars = !statusBarDark
+                    DisposableEffect(window, windowConfiguration, effectiveDark, statusBarDark) {
+                        val lightStatusBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        window.insetsController?.setSystemBarsAppearance(
+                            if (statusBarDark) 0 else lightStatusBars,
+                            lightStatusBars,
+                        )
                         onDispose { }
                     }
                     val keepScreenOnSettled by remember(playerBottomSheetState) {

@@ -433,6 +433,7 @@ fun AppleMusicPlayer(
                     isPlaying = isPlaying,
                     alpha = 1f,
                     backdrop = playerBackgroundBackdrop,
+                    behindLyrics = showLyrics,
                 )
             },
             collapsedContent = { gestures ->

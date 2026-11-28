@@ -9,7 +9,26 @@ object AlbumTextureProcessor {
     // Leave headroom for the shader's audio-reactive contrast and saturation.
     private const val MAX_RED_LUMINANCE = 0.16
 
-    fun process(bitmap: Bitmap): Bitmap {
+    fun process(bitmap: Bitmap): Bitmap = soften(prepareTexture(bitmap), passes = 4)
+
+    internal fun processVariants(bitmap: Bitmap): Pair<Bitmap, Bitmap> {
+        // Keep a little more spatial detail behind lyrics. Both endpoints come from
+        // the same color treatment and can be interpolated in the source texture.
+        val lyricsTexture = soften(prepareTexture(bitmap), passes = 2)
+        val artworkTexture = soften(
+            checkNotNull(lyricsTexture.copy(Bitmap.Config.ARGB_8888, false)),
+            passes = 2,
+        )
+        return artworkTexture to lyricsTexture
+    }
+
+    private fun soften(bitmap: Bitmap, passes: Int): Bitmap {
+        var texture = bitmap
+        repeat(passes) { texture = stackBlur(texture, 2) }
+        return texture
+    }
+
+    private fun prepareTexture(bitmap: Bitmap): Bitmap {
         if (bitmap.isRecycled) {
             val fallback = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
             fallback.eraseColor(Color.BLACK)
@@ -17,9 +36,13 @@ object AlbumTextureProcessor {
         }
         val w = 32
         val h = 32
-        var img = Bitmap.createScaledBitmap(bitmap, w, h, true)
+        val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
         val pixels = IntArray(w * h)
-        img.getPixels(pixels, 0, w, 0, 0, w, h)
+        try {
+            scaled.getPixels(pixels, 0, w, 0, 0, w, h)
+        } finally {
+            if (scaled !== bitmap) scaled.recycle()
+        }
 
         val hsl = FloatArray(3)
         // Only vivid reds and rose hues need correction. All other colors retain
@@ -65,16 +88,9 @@ object AlbumTextureProcessor {
             )
         }
 
-        img.recycle()
-        img = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        img.setPixels(pixels, 0, w, 0, 0, w, h)
-
-        // 5. stack blur 4x with radius 2
-        for (i in 0 until 4) {
-            img = stackBlur(img, 2)
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply {
+            setPixels(pixels, 0, w, 0, 0, w, h)
         }
-
-        return img
     }
 
     private fun redCorrectionStrength(hue: Float, saturation: Float): Float {

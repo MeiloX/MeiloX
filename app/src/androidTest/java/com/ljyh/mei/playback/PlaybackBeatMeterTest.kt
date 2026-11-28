@@ -65,9 +65,11 @@ class PlaybackBeatMeterTest {
         try {
             // Output buffering can already contain several seconds when the UI becomes visible.
             // Wait for freshly analyzed frames to reach the playback head, not just the decoder.
-            val levels = withTimeout(8_000) { meter.spectrum.take(150).toList() }
+            val levels = withTimeout(8_000) { meter.observeSpectrum { .2f }.take(150).toList() }
             assertTrue("Real output PCM must drive the background", levels.maxOf { it.low } > .05f)
             assertTrue(levels.maxOf { it.mid } > .05f && levels.maxOf { it.high } > .05f)
+            val normalZoom = levels.maxOf { it.zoomEnergy }
+            assertTrue("Regular playback must have a low zoom ceiling", normalZoom > 0f && normalZoom <= .058f)
             assertEquals(0, field(meter, "epoch"))
             SystemClock.sleep(300)
             val outputs = field(meter, "outputs") as CopyOnWriteArrayList<*>
@@ -83,6 +85,8 @@ class PlaybackBeatMeterTest {
             instrumentation.runOnMainSync { assertTrue(deck.isPlaying) }
             val resumed = withTimeout(8_000) { meter.spectrum.take(150).toList() }
             assertTrue(resumed.maxOf { it.low } > .05f)
+            assertTrue("Lyrics intensity must carry more zoom energy from the same PCM",
+                resumed.maxOf { it.zoomEnergy } > normalZoom)
             instrumentation.runOnMainSync { deck.pause() }
             val paused = withTimeout(2_000) { meter.spectrum.take(5).toList() }
             assertTrue(paused.all { it == PlaybackSpectrum.Zero })
@@ -102,8 +106,11 @@ class PlaybackBeatMeterTest {
         val observation = launch(start = CoroutineStart.UNDISPATCHED) { meter.spectrum.collect { levels += it } }
         try {
             instrumentation.runOnMainSync { second.volume = 0f }
-            delay(4_000)
-            assertTrue(levels.maxOf { it.low } > .05f)
+            // Start the handoff once analyzed PCM reaches the playback head. A device's
+            // initial output buffer can already occupy four seconds before analysis starts.
+            withTimeout(8_000) {
+                while (levels.none { it.low > .05f }) delay(40)
+            }
             levels.clear()
             repeat(10) { step ->
                 instrumentation.runOnMainSync {

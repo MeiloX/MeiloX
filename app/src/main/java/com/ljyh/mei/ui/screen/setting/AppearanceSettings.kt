@@ -30,8 +30,6 @@ import com.ljyh.mei.R
 import com.ljyh.mei.constants.AccompanimentLyricTextBoldKey
 import com.ljyh.mei.constants.AccentColorKey
 import com.ljyh.mei.constants.AccompanimentLyricTextSizeKey
-import com.ljyh.mei.constants.CoverStyle
-import com.ljyh.mei.constants.CoverStyleKey
 import com.ljyh.mei.constants.ColorfulDetailBackgroundsKey
 import com.ljyh.mei.constants.DebugKey
 import com.ljyh.mei.constants.DefaultAccentColorArgb
@@ -49,7 +47,6 @@ import com.ljyh.mei.constants.MeshSubdivisionKey
 import com.ljyh.mei.constants.NormalLyricTextBoldKey
 import com.ljyh.mei.constants.NormalLyricTextSizeKey
 import com.ljyh.mei.constants.OriginalCoverKey
-import com.ljyh.mei.constants.PlayerStyle
 import com.ljyh.mei.constants.LibraryStyle
 import com.ljyh.mei.constants.LibraryStyleKey
 import com.ljyh.mei.constants.LibraryDefaultPageKey
@@ -67,14 +64,11 @@ import com.ljyh.mei.constants.DownloadsEnabledKey
 import com.ljyh.mei.constants.CloudMusicEnabledKey
 import com.ljyh.mei.constants.ListeningHistoryEnabledKey
 import com.ljyh.mei.constants.PlayerKeepScreenOnKey
-import com.ljyh.mei.constants.PlayerStyleKey
 import com.ljyh.mei.constants.PlaylistCoverStyle
 import com.ljyh.mei.constants.PlaylistCoverStyleKey
 import com.ljyh.mei.constants.PlaylistTrackTableHeaderKey
 import com.ljyh.mei.constants.ProgressBarStyle
 import com.ljyh.mei.constants.ProgressBarStyleKey
-import com.ljyh.mei.constants.TabletAnimationStyle
-import com.ljyh.mei.constants.TabletAnimationStyleKey
 import io.github.neoruaa.glasmio.ui.GlasmioSlider
 import com.ljyh.mei.ui.component.MeiloXSwitch
 import io.github.neoruaa.glasmio.icons.SfIcon
@@ -140,12 +134,9 @@ fun AppearanceSettings(
         libraryDefaultPage in libraryDefaultPages -> libraryDefaultPage
         else -> ""
     }
-    val (playerStyle, setPlayerStyle) = rememberEnumPreference(PlayerStyleKey, PlayerStyle.AppleMusic)
     val (keepScreenOn, setKeepScreenOn) = rememberPreference(PlayerKeepScreenOnKey, false)
     val (originalCover, setOriginalCover) = rememberPreference(OriginalCoverKey, false)
-    val (coverStyle, setCoverStyle) = rememberEnumPreference(CoverStyleKey, CoverStyle.Square)
     val (progressStyle, setProgressStyle) = rememberEnumPreference(ProgressBarStyleKey, ProgressBarStyle.LINEAR)
-    val (tabletAnimation, setTabletAnimation) = rememberEnumPreference(TabletAnimationStyleKey, TabletAnimationStyle.FLIP_3D)
     val (meshFlowSpeed, setMeshFlowSpeed) = rememberPreference(MeshFlowSpeedKey, 0.25f)
     val (meshRenderScale, setMeshRenderScale) = rememberPreference(MeshRenderScaleKey, 0.75f)
     val (meshLowFrequency, setMeshLowFrequency) = rememberPreference(MeshLowFreqVolumeKey, 0.1f)
@@ -284,10 +275,6 @@ fun AppearanceSettings(
         }
         item {
             SettingsGroup(stringResource(R.string.appearance_player)) {
-                AppearanceChoice(
-                    R.string.appearance_player_style, "music.note.house", playerStyle, PlayerStyle.entries,
-                    { if (it == PlayerStyle.AppleMusic) "Apple Music" else stringResource(R.string.appearance_player_classic) }, setPlayerStyle,
-                )
                 AppearanceToggle(
                     R.string.appearance_keep_screen_on,
                     R.string.appearance_keep_screen_on_description,
@@ -297,22 +284,8 @@ fun AppearanceSettings(
                 )
                 AppearanceToggle(R.string.appearance_original_cover, R.string.appearance_original_cover_description, "photo", originalCover, setOriginalCover)
                 AppearanceChoice(
-                    R.string.appearance_song_cover, "square.on.circle", coverStyle, CoverStyle.entries,
-                    { if (it == CoverStyle.Circle) stringResource(R.string.appearance_circle) else stringResource(R.string.appearance_square) },
-                    setCoverStyle, enabled = playerStyle == PlayerStyle.Classic,
-                )
-                AppearanceChoice(
                     R.string.appearance_progress_style, "waveform.path", progressStyle, ProgressBarStyle.entries,
                     { if (it == ProgressBarStyle.WAVE) stringResource(R.string.appearance_progress_wave) else stringResource(R.string.appearance_progress_linear) }, setProgressStyle,
-                )
-                AppearanceChoice(
-                    R.string.appearance_tablet_animation, "rectangle.landscape.rotate", tabletAnimation, TabletAnimationStyle.entries,
-                    { style -> stringResource(when (style) {
-                        TabletAnimationStyle.SLIDE -> R.string.appearance_animation_slide
-                        TabletAnimationStyle.CROSSFADE -> R.string.appearance_animation_crossfade
-                        TabletAnimationStyle.ZOOM -> R.string.appearance_animation_zoom
-                        TabletAnimationStyle.FLIP_3D -> R.string.appearance_animation_flip
-                    }) }, setTabletAnimation,
                 )
             }
         }
@@ -322,7 +295,8 @@ fun AppearanceSettings(
                     AppearanceFloatChoice(R.string.appearance_flow_speed, "gauge.with.dots.needle.33percent", meshFlowSpeed, listOf(.05f, .1f, .15f, .25f, .5f), setMeshFlowSpeed, enabled = shaderEffectsSupported)
                     AppearanceFloatChoice(R.string.appearance_render_scale, "eye", meshRenderScale, listOf(.25f, .5f, .75f, 1f), setMeshRenderScale, enabled = shaderEffectsSupported)
                     AppearanceFloatChoice(R.string.appearance_beat_sensitivity, "waveform.path.ecg", meshLowFrequency, listOf(0f, .1f, .2f, .3f, .4f, .5f), setMeshLowFrequency, enabled = shaderEffectsSupported)
-                    AppearanceChoice(R.string.appearance_mesh_subdivision, "circle.grid.2x2.fill", meshSubdivision, (1..8).map { it * 10 }, { it.toString() }, setMeshSubdivision, enabled = shaderEffectsSupported)
+                    val displayedMeshSubdivision = ((meshSubdivision.coerceIn(10, 50) + 5) / 10) * 10
+                    AppearanceChoice(R.string.appearance_mesh_subdivision, "circle.grid.2x2.fill", displayedMeshSubdivision, (1..5).map { it * 10 }, { it.toString() }, setMeshSubdivision, enabled = shaderEffectsSupported)
                     AppearanceToggle(R.string.appearance_static_mode, R.string.appearance_static_mode_description.takeIf { shaderEffectsSupported }, "pause.circle", meshStatic && shaderEffectsSupported, setMeshStatic, enabled = shaderEffectsSupported)
                     AppearanceToggle(R.string.appearance_background_animation, R.string.appearance_background_animation_description.takeIf { shaderEffectsSupported }, "play.circle", meshPlaying && shaderEffectsSupported, setMeshPlaying, enabled = shaderEffectsSupported)
                 }

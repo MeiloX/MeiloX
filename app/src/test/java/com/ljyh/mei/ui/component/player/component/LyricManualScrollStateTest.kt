@@ -1,30 +1,46 @@
 package com.ljyh.mei.ui.component.player.component
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class LyricManualScrollStateTest {
     @Test
-    fun hidingDuringADragReopensFollowingPlaybackWithoutTheOldGracePeriod() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 1_000)
+    fun hidingCancelsFollowAndClearsDragState() = runTest {
+        val state = followState()
+        state.onDragStarted()
+        state.onDragStopped()
+        advanceBy(4_999)
 
         state.onHidden()
-        state.resumeIfIdle(nowMs = 1_001, isScrollInProgress = false)
+        advanceBy(1)
 
         assertFalse(state.isDragging)
         assertFalse(state.isBrowsing)
         assertTrue(state.returnToPlaybackPending)
         state.onPlaybackPositioned()
         assertFalse(state.returnToPlaybackPending)
+
+        state.onDragStarted()
+        state.onHidden()
+        assertFalse(state.isDragging)
+        assertFalse(state.isBrowsing)
     }
 
     @Test
-    fun initialPlaybackDoesNotBrowseOrRequestRepositioning() {
-        val state = LyricManualScrollState()
-
-        state.resumeIfIdle(nowMs = 10_000, isScrollInProgress = false)
+    fun initialPlaybackDoesNotBrowseOrRequestRepositioning() = runTest {
+        val state = followState()
+        advanceBy(10_000)
 
         assertFalse(state.isBrowsing)
         assertFalse(state.isDragging)
@@ -32,91 +48,126 @@ class LyricManualScrollStateTest {
     }
 
     @Test
-    fun dragReleaseAllowsFiveFullSecondsBeforeReturning() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 1_000)
-        state.onDragStopped(nowMs = 2_000)
+    fun dragReleaseAllowsFiveFullSecondsBeforeReturning() = runTest {
+        val state = followState()
+        state.onDragStarted()
+        state.onDragStopped()
 
-        state.resumeIfIdle(nowMs = 6_999, isScrollInProgress = false)
+        advanceBy(4_999)
         assertTrue(state.isBrowsing)
         assertFalse(state.isDragging)
 
-        state.resumeIfIdle(nowMs = 7_000, isScrollInProgress = false)
+        advanceBy(1)
         assertFalse(state.isBrowsing)
     }
 
     @Test
-    fun anotherDragReplacesThePreviousReturnDeadline() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 0)
-        state.onDragStopped(nowMs = 1_000)
-        state.onDragStarted(nowMs = 5_000)
-        state.onDragStopped(nowMs = 5_500)
+    fun anotherDragReplacesThePreviousFollowRequest() = runTest {
+        val state = followState()
+        state.onDragStarted()
+        state.onDragStopped()
+        advanceBy(4_000)
+        state.onDragStarted()
 
-        state.resumeIfIdle(nowMs = 6_000, isScrollInProgress = false)
+        advanceBy(1_000)
         assertTrue(state.isBrowsing)
-        state.resumeIfIdle(nowMs = 10_499, isScrollInProgress = false)
-        assertTrue(state.isBrowsing)
+        assertTrue(state.isDragging)
 
-        state.resumeIfIdle(nowMs = 10_500, isScrollInProgress = false)
+        state.onDragStopped()
+        advanceBy(4_999)
+        assertTrue(state.isBrowsing)
+        advanceBy(1)
         assertFalse(state.isBrowsing)
     }
 
     @Test
-    fun holdingADragDoesNotReturnEvenWithoutFurtherScrollDeltas() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 0)
+    fun holdingADragDoesNotReturnEvenWithoutFurtherScrollDeltas() = runTest {
+        val state = followState()
+        state.onDragStarted()
+        state.onUserScroll()
 
-        state.resumeIfIdle(nowMs = 60_000, isScrollInProgress = false)
+        advanceBy(60_000)
         assertTrue(state.isDragging)
         assertTrue(state.isBrowsing)
 
-        state.onDragStopped(nowMs = 60_000)
-        state.resumeIfIdle(nowMs = 64_999, isScrollInProgress = false)
-        assertTrue(state.isBrowsing)
-        state.resumeIfIdle(nowMs = 65_000, isScrollInProgress = false)
+        state.onDragStopped()
+        advanceBy(5_000)
         assertFalse(state.isBrowsing)
     }
 
     @Test
-    fun aFlingThatOutlastsTheDeadlineReturnsWhenItEnds() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 0)
-        state.onDragStopped(nowMs = 1_000)
+    fun latestNonTouchInputRestartsTheFollowDelay() = runTest {
+        val state = followState()
+        state.onUserScroll()
+        advanceBy(4_000)
+        state.onUserScroll()
 
-        state.resumeIfIdle(nowMs = 6_000, isScrollInProgress = true)
+        advanceBy(1_000)
         assertTrue(state.isBrowsing)
-        state.resumeIfIdle(nowMs = 8_000, isScrollInProgress = true)
-        assertTrue(state.isBrowsing)
-
-        state.resumeIfIdle(nowMs = 8_001, isScrollInProgress = false)
+        advanceBy(4_000)
         assertFalse(state.isBrowsing)
     }
 
     @Test
-    fun aShortFlingDoesNotRestartTheGracePeriod() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 0)
-        state.onDragStopped(nowMs = 1_000)
-        state.resumeIfIdle(nowMs = 3_000, isScrollInProgress = true)
-        state.resumeIfIdle(nowMs = 4_000, isScrollInProgress = false)
+    fun aFlingThatOutlastsTheDeadlineReturnsWhenItEnds() = runTest {
+        val isScrolling = MutableStateFlow(true)
+        val state = followState(isScrolling)
+        state.onDragStarted()
+        state.onDragStopped()
+
+        advanceBy(8_000)
         assertTrue(state.isBrowsing)
 
-        state.resumeIfIdle(nowMs = 6_000, isScrollInProgress = false)
+        isScrolling.value = false
+        runCurrent()
         assertFalse(state.isBrowsing)
     }
 
     @Test
-    fun returningStillRequestsPositioningWithoutAPlaybackLineChange() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 0)
-        state.onDragStopped(nowMs = 1_000)
+    fun aNewDragCancelsTheWaitForAnOldFling() = runTest {
+        val isScrolling = MutableStateFlow(true)
+        val state = followState(isScrolling)
+        state.onDragStarted()
+        state.onDragStopped()
+        advanceBy(5_000)
+        assertTrue(state.isBrowsing)
+
+        state.onDragStarted()
+        isScrolling.value = false
+        runCurrent()
+        assertTrue(state.isDragging)
+        assertTrue(state.isBrowsing)
+
+        state.onDragStopped()
+        advanceBy(5_000)
+        assertFalse(state.isBrowsing)
+    }
+
+    @Test
+    fun aShortFlingDoesNotRestartTheGracePeriod() = runTest {
+        val isScrolling = MutableStateFlow(true)
+        val state = followState(isScrolling)
+        state.onDragStarted()
+        state.onDragStopped()
+        advanceBy(2_000)
+        isScrolling.value = false
+
+        advanceBy(2_999)
+        assertTrue(state.isBrowsing)
+        advanceBy(1)
+        assertFalse(state.isBrowsing)
+    }
+
+    @Test
+    fun returningStillRequestsPositioningWithoutAPlaybackLineChange() = runTest {
+        val state = followState()
+        state.onDragStarted()
+        state.onDragStopped()
+
+        advanceBy(5_000)
+        assertFalse(state.isBrowsing)
         assertTrue(state.returnToPlaybackPending)
-
-        state.resumeIfIdle(nowMs = 6_000, isScrollInProgress = false)
-        assertFalse(state.isBrowsing)
-        assertTrue(state.returnToPlaybackPending)
-        state.resumeIfIdle(nowMs = 7_000, isScrollInProgress = false)
+        advanceBy(1_000)
         assertTrue(state.returnToPlaybackPending)
 
         state.onPlaybackPositioned()
@@ -124,20 +175,20 @@ class LyricManualScrollStateTest {
     }
 
     @Test
-    fun stalePositioningCompletionDoesNotClearANewerDragsReturnRequest() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 0)
-        state.onDragStopped(nowMs = 1_000)
-        state.resumeIfIdle(nowMs = 6_000, isScrollInProgress = false)
+    fun stalePositioningCompletionDoesNotClearANewerDragsReturnRequest() = runTest {
+        val state = followState()
+        state.onDragStarted()
+        state.onDragStopped()
+        advanceBy(5_000)
         assertFalse(state.isBrowsing)
 
-        state.onDragStarted(nowMs = 6_100)
+        state.onDragStarted()
         state.onPlaybackPositioned()
         assertTrue(state.isBrowsing)
         assertTrue(state.returnToPlaybackPending)
 
-        state.onDragStopped(nowMs = 6_200)
-        state.resumeIfIdle(nowMs = 11_200, isScrollInProgress = false)
+        state.onDragStopped()
+        advanceBy(5_000)
         assertFalse(state.isBrowsing)
         assertTrue(state.returnToPlaybackPending)
 
@@ -146,18 +197,34 @@ class LyricManualScrollStateTest {
     }
 
     @Test
-    fun selectingALineResumesPlaybackFollowingBeforeTheDeadline() {
-        val state = LyricManualScrollState()
-        state.onDragStarted(nowMs = 0)
-        state.onDragStopped(nowMs = 1_000)
-        state.resumeIfIdle(nowMs = 2_000, isScrollInProgress = false)
+    fun selectingALineResumesPlaybackAndCancelsTheOldFollowRequest() = runTest {
+        val state = followState()
+        state.onDragStarted()
+        state.onDragStopped()
+        advanceBy(1_000)
         assertTrue(state.isBrowsing)
 
         state.onLineSelected()
         assertFalse(state.isBrowsing)
         assertTrue(state.returnToPlaybackPending)
-
         state.onPlaybackPositioned()
+        advanceBy(4_000)
         assertFalse(state.returnToPlaybackPending)
+    }
+
+    private fun TestScope.followState(
+        isScrolling: StateFlow<Boolean> = MutableStateFlow(false),
+    ): LyricManualScrollState {
+        val state = LyricManualScrollState()
+        backgroundScope.launch {
+            state.followAfterManualScroll { isScrolling.first { !it } }
+        }
+        runCurrent()
+        return state
+    }
+
+    private fun TestScope.advanceBy(milliseconds: Long) {
+        advanceTimeBy(milliseconds)
+        runCurrent()
     }
 }

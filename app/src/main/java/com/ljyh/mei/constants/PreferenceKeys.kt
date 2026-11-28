@@ -48,7 +48,6 @@ val NeteaseWebSessionNoticeDismissedKey = booleanPreferencesKey("neteaseWebSessi
 val MusicQualityKey = stringPreferencesKey("musicQuality")
 
 
-val CoverStyleKey = stringPreferencesKey("coverStyle")
 val DynamicThemeKey = booleanPreferencesKey("dynamicTheme")
 const val DefaultAccentColorArgb = 0xFFFF3B30L
 val AccentColorKey = longPreferencesKey("accentColor")
@@ -129,11 +128,9 @@ val ReduceTransparencyKey = booleanPreferencesKey("appearance.reduceTransparency
 val ColorfulDetailBackgroundsKey = booleanPreferencesKey("appearance.colorfulDetailBackgrounds")
 val PredictiveBackAnimationEnabledKey = booleanPreferencesKey("appearance.predictiveBackAnimationEnabled")
 
-val PlayerStyleKey = stringPreferencesKey("playerStyle")
 val PlayerKeepScreenOnKey = booleanPreferencesKey("player.keepScreenOn")
 val PlaylistCoverStyleKey = stringPreferencesKey("playlistCoverStyle")
 val PlaylistTrackTableHeaderKey = booleanPreferencesKey("playlistTrackTableHeader")
-val TabletAnimationStyleKey = stringPreferencesKey("tabletAnimationStyle")
 
 val DownloadPathKey = stringPreferencesKey("downloadPath")
 val DownloadQualityKey = stringPreferencesKey("downloadQuality")
@@ -174,11 +171,6 @@ enum class LibraryStyle {
     Default,
 }
 
-enum class PlayerStyle {
-    AppleMusic,
-    Classic
-}
-
 enum class AppAppearance { System, Light, Dark }
 
 enum class AudioOutputMode { AudioTrack, AAudio, OpenSLES, UsbBitPerfect }
@@ -191,10 +183,6 @@ enum class PlaylistCoverStyle {
     Cover,
     FirstSongImage,
     Combination
-}
-enum class CoverStyle {
-    Circle,
-    Square
 }
 
 enum class LyricTextAlignment {
@@ -273,13 +261,6 @@ enum class LyricTextSize(val text: Int) {
 enum class ProgressBarStyle(val label: String) {
     WAVE("动态波浪"),       // 原来的波浪样式
     LINEAR("正常样式")   // 新写的直线样式
-}
-
-enum class TabletAnimationStyle(val label: String) {
-    SLIDE("水平滑动"),
-    CROSSFADE("渐变"),
-    ZOOM("缩放"),
-    FLIP_3D("3D翻转")
 }
 
 val FlymeStatusBarLyricsEnabledKey = booleanPreferencesKey("lyrics.flymeStatusBarEnabled")

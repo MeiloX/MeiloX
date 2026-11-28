@@ -1,5 +1,6 @@
 package com.ljyh.mei.utils.lyric
 
+import com.ljyh.mei.ui.component.player.component.karaokeLiftOffset
 import com.ljyh.mei.ui.model.LyricData
 import com.ljyh.mei.ui.model.LyricSource
 import com.mocharealm.accompanist.lyrics.core.model.Artist
@@ -14,11 +15,30 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class LyricUpdateSelectionTest {
+    @Test
+    fun syllableLiftSpringAcceleratesThenSettles() {
+        val start = karaokeLiftOffset(0f)
+        val early = karaokeLiftOffset(0.05f)
+        val rising = karaokeLiftOffset(0.1f)
+        val middle = karaokeLiftOffset(0.5f)
+        val tail = karaokeLiftOffset(0.9f)
+        val end = karaokeLiftOffset(1f)
+
+        assertEquals(0f, start, 0f)
+        assertTrue(start > early && early > rising && rising > middle && middle > tail && tail > end)
+        assertTrue(start - early < early - rising)
+        assertTrue(middle - karaokeLiftOffset(0.6f) > tail - end)
+        assertEquals(end, karaokeLiftOffset(0.999f), 0.001f)
+        assertEquals(end, karaokeLiftOffset(1.5f), 0f)
+        assertEquals(start, karaokeLiftOffset(-0.5f), 0f)
+    }
+
     @Test
     fun timestampedPhoneticsKeepTranslationsAndUseEachLineOnlyOnce() {
         val source = SyncedLyrics(lines = listOf(
@@ -328,14 +348,18 @@ class LyricUpdateSelectionTest {
 
         assertEquals(984, window.first)
         assertEquals(1_716, window.last)
+        assertFalse(window.canChangeAt(window.first - 1))
+        assertTrue(window.canChangeAt(window.first))
+        assertTrue(window.canChangeAt(window.last - 1))
+        assertFalse(window.canChangeAt(window.last))
         // Re-entering after a forward or backward seek must immediately return raw time.
         for (time in listOf(5_000, 1_400, 1_000, 0, 1_699, 1_700, 1_701, 1_050)) {
             val sampled = window.sample(time)
             assertEquals(time.coerceIn(window.first, window.last), sampled)
             assertEquals(line.syllables.single().progress(time), line.syllables.single().progress(sampled), 0f)
             assertEquals(
-                ((time - line.start) / 700f).coerceIn(0f, 1f),
-                ((sampled - line.start) / 700f).coerceIn(0f, 1f),
+                karaokeLiftOffset((time - line.start).toFloat() / KaraokeSyllableLiftSettleMs),
+                karaokeLiftOffset((sampled - line.start).toFloat() / KaraokeSyllableLiftSettleMs),
                 0f,
             )
         }
@@ -384,6 +408,8 @@ class LyricUpdateSelectionTest {
         assertEquals(window.last, window.sample(10_000))
         assertEquals(Int.MIN_VALUE, window.sample(Int.MIN_VALUE))
         assertEquals(Int.MAX_VALUE, window.sample(Int.MAX_VALUE))
+        assertTrue(window.canChangeAt(Int.MIN_VALUE))
+        assertTrue(window.canChangeAt(Int.MAX_VALUE))
         for (time in listOf(-500, -401, -400, 0, 300, 999, 1_000)) {
             assertEquals(time, window.sample(time))
         }

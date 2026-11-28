@@ -1,12 +1,23 @@
 package com.ljyh.mei.ui.component.player.component
 
+import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.graphics.ColorSpace
+import android.graphics.HardwareBufferRenderer
+import android.graphics.Paint
+import android.graphics.RenderNode
+import android.graphics.RuntimeXfermode
+import android.hardware.HardwareBuffer
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.inspector.WindowInspector
 
+import androidx.activity.compose.LocalActivity
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,11 +41,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.PixelMap
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.nativeCanvas
@@ -63,17 +77,21 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.neoruaa.glasmio.glass.render.backdrops.emptyBackdrop
 import com.ljyh.mei.R
@@ -109,7 +127,13 @@ import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeAlignment
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine
 import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeSyllable
 import com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine
-import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.KaraokeLineText
+import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.calculateBalancedLines
+import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.calculateRowRenderData
+import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.calculateStaticLineLayout
+import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.measureSyllablesAndDetermineAnimation
+import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -117,9 +141,12 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Color as AndroidColor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(AndroidJUnit4::class)
@@ -318,6 +345,63 @@ class PlayerLyricsRenderingTest {
             assertSame(line, clickedLine.get())
             assertEquals(2_000, clickedLine.get().start)
         }
+    }
+
+    @Test
+    fun manualBrowsingBrightensInactiveLyricsAndSettlesBackAfterFollowing() {
+        val browsing = mutableStateOf(false)
+        val lyrics = SyncedLyrics(lines = listOf(
+            SyncedLine("Current lyric", null, 1_000, 5_000),
+            SyncedLine("Upcoming lyric", null, 5_000, 9_000),
+        ))
+        compose.setContent {
+            MaterialTheme {
+                Box(Modifier.width(300.dp).height(300.dp).background(Color.Blue)) {
+                    PlayerLyricsView(
+                        listState = rememberLazyListState(),
+                        lyrics = lyrics,
+                        currentPosition = { 2_000 },
+                        onLineClicked = {},
+                        onLinePressed = {},
+                        isManualScrolling = false,
+                        isBrowsing = browsing.value,
+                        blendMode = BlendMode.SrcOver,
+                        textColor = Color.Red,
+                        useBlurEffect = false,
+                        normalLineTextStyle = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold),
+                        topFadeHeight = 0.dp,
+                        bottomFadeHeight = 0.dp,
+                        keepAliveZone = 0.dp,
+                    )
+                }
+            }
+        }
+        fun brightest(text: String): Color {
+            val pixels = compose.onNodeWithText(text).captureToImage().toPixelMap()
+            var peak = Color.Transparent
+            var hasBlueBackdrop = false
+            for (y in 0 until pixels.height) {
+                for (x in 0 until pixels.width) {
+                    val pixel = pixels[x, y]
+                    if (pixel.red > peak.red) peak = pixel
+                    if (pixel.blue > 0.98f) hasBlueBackdrop = true
+                }
+            }
+            assertTrue("The capture must include the contrasting backdrop", hasBlueBackdrop)
+            return peak
+        }
+        val current = brightest("Current lyric")
+        val following = brightest("Upcoming lyric")
+        assertTrue("Dimmed lyrics must still cover the backdrop inside the glyph", following.blue < 0.05f)
+        compose.runOnIdle { browsing.value = true }
+        val browsingGlyph = brightest("Upcoming lyric")
+        assertTrue(browsingGlyph.red > following.red + 0.2f)
+        assertTrue("Brightening must preserve glyph coverage", browsingGlyph.blue < 0.05f)
+        assertEquals(current.red, brightest("Current lyric").red, 0.025f)
+        compose.runOnIdle { browsing.value = false }
+        val restored = brightest("Upcoming lyric")
+        assertEquals(following.red, restored.red, 0.025f)
+        assertEquals(following.blue, restored.blue, 0.025f)
     }
 
     @Test
@@ -722,7 +806,7 @@ class PlayerLyricsRenderingTest {
                             val provider = remember(line) {
                                 { if (bounded.value) sampled.value else time.value }
                             }
-                            KaraokeLineText(
+                            PlayerKaraokeLineText(
                                 line = line,
                                 currentTimeProvider = provider,
                                 modifier = Modifier.fillMaxSize().padding(8.5.dp).playerAdditiveBlend(),
@@ -789,6 +873,303 @@ class PlayerLyricsRenderingTest {
                 assertTrue("$label mean pixel error: $meanError", meanError <= 0.25 / 255)
             }
             assertTrue("$name must exercise changing karaoke pixels", maximumClockChange > 0.05f)
+        }
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = 36)
+    fun overlappingOrdinaryKaraokeGlyphsRespectTheHdrBlendCeiling() {
+        val width = 320
+        val rowHeight = 72
+        val density = Density(1f)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val measurer = TextMeasurer(createFontFamilyResolver(context), density, LayoutDirection.Ltr)
+        val style = TextStyle(fontSize = 44.sp, fontWeight = FontWeight.Bold)
+        val layouts = measureSyllablesAndDetermineAnimation(
+            syllables = listOf(KaraokeSyllable("MMMMMM", 1_000, 3_000)),
+            textMeasurer = measurer,
+            style = style,
+            phoneticStyle = style,
+            isAccompanimentLine = false,
+            spaceWidth = measurer.measure(" ", style).size.width.toFloat(),
+        )
+        val wrapped = calculateBalancedLines(layouts, width.toFloat(), measurer, style)
+        val rows = calculateRowRenderData(
+            lineLayouts = calculateStaticLineLayout(
+                wrapped, false, width.toFloat(), measurer.measure("M", style).size.height.toFloat(), 0f, false,
+            ),
+            showPhonetic = false,
+            density = density.density,
+        )
+        assertNotNull("Exercise the sustained-glyph drawing path", rows.single().rowLayouts.single().wordAnimInfo)
+
+        data class Frame(val background: Float, val glyphCopies: Int, val cap: Boolean)
+        val sdrBackground = 0.15f
+        val hdrBackground = 1.30f
+        val frames = listOf(
+            Frame(background = 0f, glyphCopies = 1, cap = true),
+            Frame(background = sdrBackground, glyphCopies = 1, cap = true),
+            Frame(background = 0f, glyphCopies = 2, cap = false),
+            Frame(background = 0f, glyphCopies = 2, cap = true),
+            Frame(background = hdrBackground, glyphCopies = 2, cap = true),
+        )
+        val height = rowHeight * frames.size
+        val space = ColorSpace.get(ColorSpace.Named.LINEAR_EXTENDED_SRGB)
+        val capPaint = Paint().apply { xfermode = PlayerBlendApi36.additiveXfermode }
+        val glyphPaint = Paint().apply {
+            alpha = 179
+            // Linear extended sRGB has white at 1. Native Plus saturates there.
+            // Model overlap in white-relative units, where an HDR target whose
+            // working-space white is below 1 can retain the same over-white sum.
+            xfermode = RuntimeXfermode(
+                """
+                half4 main(half4 source, half4 destination) {
+                    return half4(source.rgb + destination.rgb, min(source.a + destination.a, 1.0));
+                }
+                """.trimIndent(),
+            )
+        }
+        withLinearFp16Pixels(
+            name = "karaoke-hdr-blend",
+            width = width,
+            height = height,
+            space = space,
+            record = { canvas ->
+                val drawScope = CanvasDrawScope()
+                frames.forEachIndexed { index, frame ->
+                    val checkpoint = canvas.save()
+                    canvas.translate(0f, (index * rowHeight).toFloat())
+                    canvas.clipRect(0f, 0f, width.toFloat(), rowHeight.toFloat())
+                    val backingPaint = Paint().apply {
+                        val value = frame.background
+                        setColor(AndroidColor.pack(value, value, value, 1f, space))
+                    }
+                    canvas.drawRect(0f, 0f, width.toFloat(), rowHeight.toFloat(), backingPaint)
+                    canvas.saveLayer(0f, 0f, width.toFloat(), rowHeight.toFloat(), capPaint.takeIf { frame.cap })
+                    repeat(frame.glyphCopies) {
+                        // Build the overlapping source from ordinary timed glyphs.
+                        canvas.saveLayer(0f, 0f, width.toFloat(), rowHeight.toFloat(), glyphPaint)
+                        drawScope.draw(density, LayoutDirection.Ltr, Canvas(canvas), Size(width.toFloat(), rowHeight.toFloat())) {
+                            drawLyricsLine(
+                                rowRenderData = rows,
+                                currentTimeMs = 2_000,
+                                color = Color.White,
+                                isRtl = false,
+                                showPhonetic = false,
+                                glowEnabled = false,
+                            )
+                        }
+                        canvas.restore()
+                    }
+                    canvas.restoreToCount(checkpoint)
+                }
+            },
+        ) { pixels ->
+            fun redAt(frame: Int, pixel: Int): Float =
+                pixels.getColor(pixel % width, frame * rowHeight + pixel / width).red()
+
+            val glyphPixel = (0 until width * rowHeight).maxBy { redAt(2, it) }
+            val singleGlyph = redAt(0, glyphPixel)
+            val uncappedOverlap = redAt(2, glyphPixel)
+            assertTrue("One ordinary glyph layer is below white: $singleGlyph", singleGlyph in 0.65f..0.75f)
+            assertEquals("The cap preserves addition below white", singleGlyph + sdrBackground, redAt(1, glyphPixel), 0.02f)
+            assertTrue("The fixture must produce an over-white source: $uncappedOverlap", uncappedOverlap > 1.20f)
+            assertEquals("The cap limits overlapping ordinary glyphs to white", 1f, redAt(3, glyphPixel), 0.02f)
+            assertEquals("Capped lyrics preserve the existing HDR destination", hdrBackground, redAt(4, glyphPixel), 0.02f)
+        }
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = 36)
+    fun isolatedLyricHdrAccentUsesMaskCoverageAndPreservesTheDestination() {
+        data class Sample(val backdrop: Float?, val coverage: Int, val expected: Float)
+        val samples = listOf(
+            Sample(backdrop = 1f, coverage = 0, expected = 1f),
+            Sample(backdrop = 1f, coverage = 128, expected = 1.09f),
+            Sample(backdrop = 1f, coverage = 255, expected = 1.18f),
+            Sample(backdrop = 1.30f, coverage = 255, expected = 1.30f),
+            Sample(backdrop = null, coverage = 255, expected = 0f),
+        )
+        val tileSize = 32
+        val space = ColorSpace.get(ColorSpace.Named.LINEAR_EXTENDED_SRGB)
+        val backdropPaint = Paint()
+        // A colored mask verifies that its RGB does not enter the destination.
+        val maskPaint = Paint().apply { color = AndroidColor.BLUE }
+        val accentPaint = Paint().apply { xfermode = PlayerLyricHdrApi36.accentXfermode }
+        withLinearFp16Pixels(
+            name = "karaoke-hdr-accent",
+            width = tileSize * samples.size,
+            height = tileSize,
+            space = space,
+            record = { canvas ->
+                samples.forEachIndexed { index, sample ->
+                    val left = (index * tileSize).toFloat()
+                    val right = left + tileSize
+                    sample.backdrop?.let { value ->
+                        backdropPaint.setColor(AndroidColor.pack(value, value, value, 1f, space))
+                        canvas.drawRect(left, 0f, right, tileSize.toFloat(), backdropPaint)
+                    }
+                    val checkpoint = canvas.saveLayer(left, 0f, right, tileSize.toFloat(), accentPaint)
+                    maskPaint.alpha = sample.coverage
+                    canvas.drawRect(left + 8f, 8f, right - 8f, tileSize - 8f, maskPaint)
+                    canvas.restoreToCount(checkpoint)
+                }
+            },
+        ) { pixels ->
+            samples.forEachIndexed { index, sample ->
+                val left = index * tileSize
+                val covered = pixels.getColor(left + tileSize / 2, tileSize / 2)
+                val uncovered = pixels.getColor(left + 2, 2)
+                val alpha = if (sample.backdrop == null) 0f else 1f
+                val label = "coverage=${sample.coverage}, backdrop=${sample.backdrop}"
+                assertEquals("$label red", sample.expected, covered.red(), 0.015f)
+                assertEquals("$label green", sample.expected, covered.green(), 0.015f)
+                assertEquals("$label blue", sample.expected, covered.blue(), 0.015f)
+                assertEquals("$label alpha", alpha, covered.alpha(), 0.005f)
+                assertEquals("$label outside mask", sample.backdrop ?: 0f, uncovered.red(), 0.015f)
+            }
+        }
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = 36)
+    fun lyricHdrOverlayAccentsOnlyTheHeldGlyphsInAnHdrWindow() {
+        val timeMs = mutableStateOf(2_000)
+        val sceneTag = "lyric-hdr-overlay-scene"
+        val lyrics = SyncedLyrics(lines = listOf(
+            KaraokeLine.MainKaraokeLine(
+                syllables = listOf(KaraokeSyllable("MMMMMM", 1_000, 3_000)),
+                translation = null,
+                alignment = KaraokeAlignment.Start,
+                start = 1_000,
+                end = 5_000,
+            ),
+        ))
+        var testWindow: Window? = null
+        compose.setContent {
+            val window = requireNotNull(LocalActivity.current).window
+            SideEffect { testWindow = window }
+            DisposableEffect(window) {
+                val previousColorMode = window.colorMode
+                window.colorMode = ActivityInfo.COLOR_MODE_HDR
+                onDispose { window.colorMode = previousColorMode }
+            }
+            MaterialTheme {
+                // Compare identical content inside one frame while display headroom settles.
+                Column(Modifier.testTag(sceneTag)) {
+                    repeat(2) { index ->
+                        val accent = if (index == 1) remember { PlayerLyricHdrAccent() } else null
+                        Box(Modifier.width(320.dp).height(160.dp).background(Color(0.10f, 0.10f, 0.10f))) {
+                            PlayerLyricsView(
+                                listState = rememberLazyListState(),
+                                lyrics = lyrics,
+                                currentPosition = { timeMs.value },
+                                onLineClicked = {},
+                                onLinePressed = {},
+                                isManualScrolling = false,
+                                modifier = Modifier.playerAdditiveLayer(),
+                                listModifier = Modifier,
+                                normalLineTextStyle = TextStyle(fontSize = 36.sp, fontWeight = FontWeight.Bold),
+                                // A midtone makes the routing visible even in an SDR readback.
+                                textColor = Color(0.5f, 0.5f, 0.5f),
+                                offset = 0.dp,
+                                keepAliveZone = 0.dp,
+                                topFadeHeight = 0.dp,
+                                bottomFadeHeight = 0.dp,
+                                isolateFadeLayer = false,
+                                hdrAccent = accent,
+                            )
+                            accent?.Overlay(Modifier.matchParentSize(), 0.dp, 0.dp, { null }, isVisible = { true })
+                        }
+                    }
+                }
+            }
+        }
+        compose.runOnIdle { assertEquals(ActivityInfo.COLOR_MODE_HDR, testWindow?.colorMode) }
+
+        fun capture(): PixelMap = compose.onNodeWithTag(sceneTag).captureToImage().toPixelMap()
+        fun largestRedChange(frame: PixelMap, firstRow: Int = 0): Float {
+            val viewportHeight = frame.height / 2
+            var largest = 0f
+            for (y in firstRow until viewportHeight) {
+                for (x in 0 until frame.width) {
+                    val change = frame[x, y + viewportHeight].red - frame[x, y].red
+                    if (kotlin.math.abs(change) > kotlin.math.abs(largest)) largest = change
+                }
+            }
+            return largest
+        }
+
+        val held = capture()
+        assertTrue("The held glyphs must receive the isolated accent", largestRedChange(held) > 0.025f)
+        assertEquals(
+            "The blank viewport must keep its backing color",
+            0f,
+            largestRedChange(held, firstRow = held.height / 4),
+            0.005f,
+        )
+
+        compose.runOnIdle { timeMs.value = 3_500 }
+        assertEquals(
+            "The finished syllable must no longer receive an accent",
+            0f,
+            largestRedChange(capture()),
+            0.005f,
+        )
+    }
+
+    @RequiresApi(36)
+    private fun withLinearFp16Pixels(
+        name: String,
+        width: Int,
+        height: Int,
+        space: ColorSpace,
+        record: (AndroidCanvas) -> Unit,
+        inspect: (Bitmap) -> Unit,
+    ) {
+        val usage = HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE
+        assumeTrue(HardwareBuffer.isSupported(width, height, HardwareBuffer.RGBA_FP16, 1, usage))
+        val node = RenderNode(name).apply { setPosition(0, 0, width, height) }
+        try {
+            HardwareBuffer.create(width, height, HardwareBuffer.RGBA_FP16, 1, usage).use { buffer ->
+                val canvas = node.beginRecording(width, height)
+                try {
+                    canvas.drawColor(AndroidColor.TRANSPARENT, android.graphics.BlendMode.SRC)
+                    record(canvas)
+                } finally {
+                    node.endRecording()
+                }
+                HardwareBufferRenderer(buffer).use { renderer ->
+                    renderer.setContentRoot(node)
+                    val done = CountDownLatch(1)
+                    val failure = AtomicReference<Throwable>()
+                    renderer.obtainRenderRequest().setColorSpace(space).draw({ it.run() }) { result ->
+                        try {
+                            check(result.status == HardwareBufferRenderer.RenderResult.SUCCESS)
+                            result.fence.use { if (it.isValid) check(it.await(Duration.ofSeconds(3))) }
+                        } catch (error: Throwable) {
+                            failure.set(error)
+                        } finally {
+                            done.countDown()
+                        }
+                    }
+                    assertTrue("$name must finish rendering to FP16", done.await(5, TimeUnit.SECONDS))
+                    failure.get()?.let { throw it }
+                }
+                val hardware = requireNotNull(Bitmap.wrapHardwareBuffer(buffer, space))
+                try {
+                    val pixels = requireNotNull(hardware.copy(Bitmap.Config.RGBA_F16, false))
+                    try {
+                        inspect(pixels)
+                    } finally {
+                        pixels.recycle()
+                    }
+                } finally {
+                    hardware.recycle()
+                }
+            }
+        } finally {
+            node.discardDisplayList()
         }
     }
 

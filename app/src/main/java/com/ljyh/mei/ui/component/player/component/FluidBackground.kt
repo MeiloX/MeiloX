@@ -4,6 +4,10 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import io.github.neoruaa.glasmio.glass.render.isRuntimeShaderSupported
 import android.graphics.Bitmap
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -44,14 +48,22 @@ import com.ljyh.mei.source.script.sourceTrackArtwork
 import com.ljyh.mei.ui.component.player.LocalAutoMixUpcomingArtwork
 import com.ljyh.mei.ui.component.player.LocalAutoMixVisuals
 import com.ljyh.mei.ui.component.player.LocalPlayerBackgroundReadyChanged
+import com.ljyh.mei.ui.component.player.component.mesh.CompactMeshDrawCount
+import com.ljyh.mei.ui.component.player.component.mesh.DefaultMeshFlowSpeed
 import com.ljyh.mei.ui.component.player.component.mesh.MeshAlbum
 import com.ljyh.mei.ui.component.player.component.mesh.MeshGradientRenderer
+import com.ljyh.mei.ui.component.player.component.mesh.PlayerMeshGeometry
+import com.ljyh.mei.ui.component.player.component.mesh.WideMeshVariantCount
+import com.ljyh.mei.ui.component.player.component.mesh.compactMeshVariantForDraw
 import com.ljyh.mei.ui.component.player.component.mesh.runMeshFrames
 import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
 import com.ljyh.mei.ui.component.sheet.playerBackgroundAlpha
 import com.ljyh.mei.ui.component.utils.LifecycleStartedEffect
 import io.github.neoruaa.glasmio.glass.trackBackdropPosition
 import com.ljyh.mei.utils.rememberPreference
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -64,9 +76,10 @@ fun FluidBackground(
     backdrop: LayerBackdrop,
     modifier: Modifier = Modifier,
     trackRef: TrackRef? = null,
+    behindLyrics: Boolean = false,
 ) {
     if (isRuntimeShaderSupported()) {
-        MeshBackground(imageUrl, beatMeter, isPlaying, alpha, backdrop, modifier, trackRef)
+        MeshBackground(imageUrl, beatMeter, isPlaying, alpha, backdrop, modifier, trackRef, behindLyrics)
         return
     }
     val sheet = LocalPlayerSheet.current
@@ -100,6 +113,7 @@ private fun MeshBackground(
     backdrop: LayerBackdrop,
     modifier: Modifier,
     trackRef: TrackRef?,
+    behindLyrics: Boolean,
 ) {
     val sheet = LocalPlayerSheet.current
     val onBackgroundReadyChanged by rememberUpdatedState(LocalPlayerBackgroundReadyChanged.current)
@@ -113,20 +127,33 @@ private fun MeshBackground(
     val autoMix = LocalAutoMixVisuals.current
     val upcomingArtwork = autoMix?.incoming ?: LocalAutoMixUpcomingArtwork.current
     val latestAutoMix by rememberUpdatedState(autoMix)
-    val (flowSpeed) = rememberPreference(MeshFlowSpeedKey, defaultValue = 0.25f)
+    val (flowSpeed) = rememberPreference(MeshFlowSpeedKey, defaultValue = DefaultMeshFlowSpeed)
     val (renderScale) = rememberPreference(MeshRenderScaleKey, defaultValue = 0.75f)
     val (staticMode) = rememberPreference(MeshStaticModeKey, defaultValue = false)
     val (meshPlaying) = rememberPreference(MeshPlayingKey, defaultValue = true)
     val (sensitivity) = rememberPreference(MeshLowFreqVolumeKey, defaultValue = 0.1f)
     val (subdivision) = rememberPreference(MeshSubdivisionKey, defaultValue = 50)
-    val currentSubdivision by rememberUpdatedState(subdivision)
-    val renderer = remember { MeshGradientRenderer() }
+    val clampedSubdivision = subdivision.coerceIn(4, 50)
+    val lyricsPinch = remember { Animatable(if (behindLyrics) 1f else 0f) }
+    val renderer = remember {
+        MeshGradientRenderer().apply { lyricsPinchProgress = lyricsPinch.value }
+    }
+    // Choose each orientation's field once so all covers share it through a transition.
+    val (compactVariant, wideVariant) = remember(renderer) {
+        compactMeshVariantForDraw(Random.nextInt(CompactMeshDrawCount)) to Random.nextInt(WideMeshVariantCount)
+    }
+    val meshGeometry = remember(clampedSubdivision, compactVariant, wideVariant) {
+        lazy { PlayerMeshGeometry(clampedSubdivision, compactVariant, wideVariant) }
+    }
     val meshLayer = rememberGraphicsLayer()
     val frameVersion = remember { mutableIntStateOf(0) }
     val hardwareAccelerated = LocalView.current.isHardwareAccelerated
     val reuseMeshCapture = sheet != null && hardwareAccelerated
     val shouldAnimate = !meshPlaying || isPlaying
     val audioReactive = backgroundActive && expanded && isPlaying && !staticMode && sensitivity > 0f
+    // Regular cover view clamps zoom intensity to 0.2 (<0.6% scale), so only lyrics view needs 60 Hz.
+    val fastAudioFrames = audioReactive && behindLyrics
+    val zoomIntensity by rememberUpdatedState(if (behindLyrics) 1f else .2f)
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && hardwareAccelerated) {
         LifecycleStartedEffect(renderer) {
@@ -136,14 +163,13 @@ private fun MeshBackground(
 
     // Each renderer owns its gray album's mutable shader. Prepare it once, off main,
     // so loading and failed artwork use the same mesh pipeline as real covers.
-    val placeholderAlbum by produceState<MeshAlbum?>(null, renderer) {
-        val preparedSubdivision = currentSubdivision
+    val placeholderAlbum by produceState<MeshAlbum?>(null, meshGeometry) {
         value = withContext(Dispatchers.Default) {
             val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply {
                 eraseColor(0xFF808080.toInt())
             }
             try {
-                MeshGradientRenderer.prepareAlbum(bitmap, preparedSubdivision)
+                MeshGradientRenderer.prepareAlbum(bitmap, meshGeometry.value)
             } finally {
                 bitmap.recycle()
             }
@@ -157,7 +183,7 @@ private fun MeshBackground(
     // Keys retain the prepared incoming texture when it becomes the current cover.
     val loadedAlbums = listOfNotNull(outgoingUrl, prewarmUrl).associateWith { url ->
         val artworkRef = if (url == outgoingUrl) trackRef else upcomingArtwork?.trackRef
-        key(url) { rememberMeshAlbum(url, currentSubdivision, artworkRef) }
+        key(url) { rememberMeshAlbum(url, artworkRef, meshGeometry) }
     }
     val loadedAlbum = outgoingUrl?.let(loadedAlbums::get)
     val album = loadedAlbum?.album ?: placeholderAlbum.takeIf {
@@ -178,6 +204,34 @@ private fun MeshBackground(
         frameVersion.intValue++
     }
 
+    LifecycleStartedEffect(renderer, behindLyrics, backgroundActive) {
+        val target = if (behindLyrics) 1f else 0f
+        if (!backgroundActive) {
+            if (lyricsPinch.value != target || renderer.lyricsPinchProgress != target) {
+                lyricsPinch.snapTo(target)
+                renderer.lyricsPinchProgress = target
+                frameVersion.intValue++
+            }
+            return@LifecycleStartedEffect
+        }
+        val distance = abs(target - lyricsPinch.value)
+        if (distance > 0f) {
+            // Page changes also update the captured backdrop when the flow clock is stopped.
+            // Animate the linear progress so reversing a transition also retraces its easing,
+            // paced at <=60 Hz so 120/144 Hz panels do not double backdrop/glass GPU cost mid-transition.
+            val duration = (400 * distance).roundToInt().coerceAtLeast(1)
+            var lastEmitNanos = Long.MIN_VALUE
+            lyricsPinch.animateTo(target, tween(durationMillis = duration, easing = LinearEasing)) {
+                val now = System.nanoTime()
+                if (value == target || lastEmitNanos == Long.MIN_VALUE || now - lastEmitNanos >= 15_000_000L) {
+                    lastEmitNanos = now
+                    renderer.lyricsPinchProgress = EaseInOut.transform(value)
+                    frameVersion.intValue++
+                }
+            }
+        }
+    }
+
     LaunchedEffect(renderer, album, autoMixAlbum) {
         album?.let(renderer::setAlbum)
         renderer.setAutoMixAlbum(autoMixAlbum)
@@ -190,7 +244,7 @@ private fun MeshBackground(
     LifecycleStartedEffect(renderer, beatMeter, audioReactive, sensitivity) {
         renderer.audioStrength = if (audioReactive) (sensitivity * 2f).coerceIn(0f, 1f) else 0f
         try {
-            if (audioReactive) beatMeter.spectrum.collect { renderer.spectrum = it }
+            if (audioReactive) beatMeter.observeSpectrum { zoomIntensity }.collect { renderer.spectrum = it }
         } finally {
             renderer.spectrum = PlaybackSpectrum.Zero
             renderer.audioStrength = 0f
@@ -199,13 +253,13 @@ private fun MeshBackground(
     }
 
     LifecycleStartedEffect(
-        renderer, backgroundActive, album, autoMixAlbum, staticMode, isPlaying, shouldAnimate, audioReactive,
+        renderer, backgroundActive, album, autoMixAlbum, staticMode, isPlaying, shouldAnimate, fastAudioFrames,
     ) {
         // Never include elapsed hidden/stopped time in flow or crossfade progression.
         renderer.resetFrameClock()
         if (!backgroundActive) return@LifecycleStartedEffect
         runMeshFrames(
-            intervalNanos = if (audioReactive) 16_666_667L else 33_333_333L,
+            intervalNanos = if (fastAudioFrames) 16_666_667L else 33_333_333L,
             needsAnimation = { renderer.needsAnimation || (autoMixAlbum != null && isPlaying) },
         ) { now ->
             val animatedMesh = renderer.needsAnimation
@@ -255,10 +309,13 @@ private class LoadedMeshAlbum(val album: MeshAlbum?)
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
-private fun rememberMeshAlbum(imageUrl: String, subdivision: Int, trackRef: TrackRef?): LoadedMeshAlbum? {
+private fun rememberMeshAlbum(
+    imageUrl: String,
+    trackRef: TrackRef?,
+    geometry: Lazy<PlayerMeshGeometry>,
+): LoadedMeshAlbum? {
     val context = LocalContext.current
-    val currentSubdivision by rememberUpdatedState(subdivision)
-    val loaded by produceState<LoadedMeshAlbum?>(null, imageUrl) {
+    val loaded by produceState<LoadedMeshAlbum?>(null, imageUrl, geometry) {
         val result = context.imageLoader.execute(
             ImageRequest.Builder(context)
                 .data(imageUrl)
@@ -269,7 +326,7 @@ private fun rememberMeshAlbum(imageUrl: String, subdivision: Int, trackRef: Trac
         )
         val album = if (result is SuccessResult) {
             withContext(Dispatchers.Default) {
-                MeshGradientRenderer.prepareAlbum(result.image.toBitmap(), currentSubdivision)
+                MeshGradientRenderer.prepareAlbum(result.image.toBitmap(), geometry.value)
             }
         } else null
         value = LoadedMeshAlbum(album)

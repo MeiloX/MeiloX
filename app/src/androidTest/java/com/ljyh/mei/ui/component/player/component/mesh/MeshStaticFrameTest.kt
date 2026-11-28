@@ -1,7 +1,12 @@
 package com.ljyh.mei.ui.component.player.component.mesh
 
 import android.graphics.Bitmap
+import android.graphics.BlendMode
+import android.graphics.Canvas.VertexMode
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RuntimeShader
+import android.os.Build
 import android.util.Log
 import android.view.ViewGroup
 import androidx.compose.foundation.Canvas
@@ -19,6 +24,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -27,13 +33,16 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.AndroidUiDispatcher
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberLayerBackdrop
 import io.github.neoruaa.glasmio.glass.render.backdrops.layerBackdrop
@@ -161,6 +170,27 @@ class MeshStaticFrameTest {
             assertTrue("$label maximum RGBA error: $maximum", maximum <= 2)
             assertTrue("$label mean RGBA error: $mean", mean <= 1.0)
         }
+
+        val restingSource = capture("meshBackdrop0")
+        compose.runOnIdle {
+            assertFalse("The settled artwork clock must be stopped", renderer.needsAnimation)
+            renderer.lyricsPinchProgress = 1f
+            redrawGeneration.intValue++
+        }
+        val lyricSource = capture("meshBackdrop0")
+        assertTrue("Lyrics mode must deform the artwork with the playback clock stopped",
+            lyricSource.indices.any { colorDistance(restingSource[it], lyricSource[it]) > 3 })
+        assertPixels("Lyrics mode backdrop", lyricSource, capture("meshBackdrop1"))
+        repeat(2) { output ->
+            assertPixels("Lyrics mode presentation $output", lyricSource, capture("meshPresentation$output"))
+        }
+        compose.runOnIdle {
+            assertFalse("Pinch must not start continuous flow", renderer.needsAnimation)
+            renderer.lyricsPinchProgress = 0f
+            redrawGeneration.intValue++
+        }
+        assertPixels("Returning from lyrics mode", restingSource, capture("meshBackdrop0"))
+
         var frameNanos = StartNanos
         var previousSource: IntArray? = null
         repeat(3) { frame ->
@@ -200,6 +230,215 @@ class MeshStaticFrameTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    fun lyricsMeshMovesFixedUvInPortraitAndWideOnBothDrawPaths() {
+        val subdivision = 20
+        assertLocalizedFoldVariants(subdivision)
+        val variant = mutableIntStateOf(0)
+        val warp = mutableFloatStateOf(0f)
+        val pinch = mutableFloatStateOf(0f)
+        val viewports = listOf(72.dp to 108.dp, 108.dp to 72.dp)
+        compose.setContent {
+            val density = LocalDensity.current
+            val geometry = remember(variant.intValue) {
+                PlayerMeshGeometry(
+                    subdivision,
+                    compactVariant = variant.intValue % CompactMeshVariantCount,
+                    wideVariant = variant.intValue,
+                )
+            }
+            val paint = remember {
+                Paint().apply {
+                    blendMode = BlendMode.SRC
+                    // An unchanging UV ramp isolates vertex motion from artwork rotation.
+                    shader = RuntimeShader("half4 main(float2 uv) { return half4(uv, 0.5, 1.0); }")
+                }
+            }
+            Column {
+                viewports.forEachIndexed { index, (width, height) ->
+                    val size = with(density) { IntSize(width.roundToPx(), height.roundToPx()) }
+                    val viewport = remember(size, geometry) { PlayerMeshViewport(geometry, size) }
+                    val retained = remember(viewport) { checkNotNull(RetainedPlayerMesh.prepare(viewport)) }
+                    Row {
+                        listOf(false, true).forEach { useRetained ->
+                            Canvas(Modifier.size(width, height).clipToBounds().testTag("warp-$index-$useRetained")) {
+                                val canvas = drawContext.canvas.nativeCanvas
+                                assertTrue("The mesh comparison requires a hardware canvas", canvas.isHardwareAccelerated)
+                                if (useRetained) {
+                                    retained.draw(canvas, paint, warp.floatValue, pinch.floatValue)
+                                } else {
+                                    val positions = viewport.positions(warp.floatValue, pinch.floatValue)
+                                    canvas.drawVertices(
+                                        VertexMode.TRIANGLES,
+                                        positions.size,
+                                        positions,
+                                        0,
+                                        viewport.textureCoordinates,
+                                        0,
+                                        null,
+                                        0,
+                                        geometry.indices,
+                                        0,
+                                        geometry.indices.size,
+                                        paint,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        fun capture(geometryIndex: Int, retained: Boolean): IntArray {
+            val image = compose.onNodeWithTag("warp-$geometryIndex-$retained").captureToImage()
+            return IntArray(image.width * image.height).also { image.readPixels(it) }
+        }
+
+        fun captureMatchingDrawPaths(pinchMix: Float, warpMix: Float): List<IntArray> {
+            compose.runOnIdle {
+                pinch.floatValue = pinchMix
+                warp.floatValue = warpMix
+            }
+            return viewports.indices.map { index ->
+                val fallback = capture(index, retained = false)
+                val retained = capture(index, retained = true)
+                val error = fallback.indices.maxOf { colorDistance(fallback[it], retained[it]) }
+                val label = "Variant ${variant.intValue}, viewport $index at ($pinchMix, $warpMix)"
+                assertTrue("$label path difference: $error", error <= 3)
+                assertTrue("$label must be fully covered",
+                    retained.all { Color.blue(it) in 125..131 })
+                retained
+            }
+        }
+
+        val flat = captureMatchingDrawPaths(pinchMix = 0f, warpMix = 0f)
+        repeat(WideMeshVariantCount) { id ->
+            compose.runOnIdle { variant.intValue = id }
+            captureMatchingDrawPaths(pinchMix = .5f, warpMix = .5f)
+            captureMatchingDrawPaths(pinchMix = 1f, warpMix = .5f)
+            val first = captureMatchingDrawPaths(pinchMix = 1f, warpMix = 0f)
+            val second = captureMatchingDrawPaths(pinchMix = 1f, warpMix = 1f)
+            val flattened = captureMatchingDrawPaths(pinchMix = 0f, warpMix = 1f)
+            viewports.indices.forEach { index ->
+                val changed = first[index].indices.count { pixel ->
+                    colorDistance(first[index][pixel], second[index][pixel]) > 5
+                }
+                assertTrue("Variant $id, viewport $index must move the fixed UV ramp",
+                    changed > first[index].size / 20)
+                assertArrayEquals("Variant $id, viewport $index must return to the resting grid",
+                    flat[index], flattened[index])
+            }
+        }
+    }
+
+    private fun assertLocalizedFoldVariants(subdivision: Int) {
+        assertEquals("The compact draw must give family 2 two slots",
+            listOf(0, 1, 2, 2, 3), (0..4).map(::compactMeshVariantForDraw))
+        for (size in listOf(IntSize(240, 480), IntSize(480, 240))) {
+            val wide = size.width > size.height
+            val count = if (wide) WideMeshVariantCount else CompactMeshVariantCount
+            val sampled = mutableListOf<PlayerMeshViewport>()
+            for (variant in 0 until count) {
+                val geometry = if (wide) {
+                    PlayerMeshGeometry(subdivision, wideVariant = variant)
+                } else {
+                    PlayerMeshGeometry(subdivision, compactVariant = variant)
+                }
+                val viewport = PlayerMeshViewport(geometry, size)
+                assertLocalizedFoldGeometry(geometry, viewport, "$size $variant")
+                if (wide) {
+                    sampled.firstOrNull()?.let { baseline ->
+                        assertArrayEquals("Wide family $variant must share the first field",
+                            baseline.firstOffset, viewport.firstOffset, 0f)
+                    }
+                }
+                sampled.forEachIndexed { previousVariant, previous ->
+                    assertDistinctFoldPaths(viewport, previous, geometry.cells, "$size $variant versus $previousVariant")
+                }
+                sampled += viewport
+            }
+        }
+    }
+
+    private fun assertDistinctFoldPaths(
+        viewport: PlayerMeshViewport,
+        previous: PlayerMeshViewport,
+        cells: Int,
+        label: String,
+    ) {
+        val side = cells + 1
+        val reflections = listOf(false to false, true to false, false to true, true to true)
+        for ((flipX, flipY) in reflections) {
+            fun matchingOffsets(actual: FloatArray, expected: FloatArray): Boolean =
+                actual.indices.all { index ->
+                    val row = index / 2 / side
+                    val column = index / 2 % side
+                    val previousRow = if (flipY) cells - row else row
+                    val previousColumn = if (flipX) cells - column else column
+                    val component = index % 2
+                    val previousIndex = 2 * (previousRow * side + previousColumn) + component
+                    val axisExtent = if (component == 0) viewport.size.width else viewport.size.height
+                    val reflected = if (component == 0) flipX else flipY
+                    val expectedOffset = if (reflected) -expected[previousIndex] else expected[previousIndex]
+                    abs(actual[index] - expectedOffset) <= axisExtent * .025f
+                }
+
+            val sameOrder = matchingOffsets(viewport.firstOffset, previous.firstOffset) &&
+                matchingOffsets(viewport.lastOffset, previous.lastOffset)
+            val reverseOrder = matchingOffsets(viewport.firstOffset, previous.lastOffset) &&
+                matchingOffsets(viewport.lastOffset, previous.firstOffset)
+            assertFalse("$label duplicates a fold pair after reflection ($flipX, $flipY)", sameOrder || reverseOrder)
+        }
+    }
+
+    private fun assertLocalizedFoldGeometry(
+        geometry: PlayerMeshGeometry,
+        viewport: PlayerMeshViewport,
+        label: String,
+    ) {
+        val cells = geometry.cells
+        val edgeRows = (cells / 10).coerceAtLeast(1)
+        val neighborSpan = (cells / 5).coerceAtLeast(1)
+        val flatCellArea = (viewport.size.width.toFloat() / cells) * (viewport.size.height.toFloat() / cells)
+        for (phase in listOf(0f, .25f, .5f, .75f, 1f)) {
+            val positions = viewport.positions(warpMix = phase, pinchMix = 1f)
+            var minAreaRatio = 1f
+            val cellAreas = FloatArray(cells * cells)
+            for (index in geometry.indices.indices step 3) {
+                val a = geometry.indices[index].toInt() * 2
+                val b = geometry.indices[index + 1].toInt() * 2
+                val c = geometry.indices[index + 2].toInt() * 2
+                val abX = positions[b] - positions[a]
+                val abY = positions[b + 1] - positions[a + 1]
+                val acX = positions[c] - positions[a]
+                val acY = positions[c + 1] - positions[a + 1]
+                val areaRatio = (abX * acY - abY * acX) / flatCellArea
+                minAreaRatio = minOf(minAreaRatio, areaRatio)
+                cellAreas[index / 6] += areaRatio * .5f
+            }
+            assertTrue("$label phase $phase inverts triangles: $minAreaRatio", minAreaRatio > 0f)
+            var strongRows = 0
+            for (row in 0 until cells) {
+                val rowStart = row * cells
+                val pinched = (neighborSpan until cells - neighborSpan).any { column ->
+                    val index = rowStart + column
+                    // Monotone redistribution does not form a local trough between these neighbors.
+                    val neighborArea = minOf(cellAreas[index - neighborSpan], cellAreas[index + neighborSpan])
+                    cellAreas[index] < neighborArea * .75f
+                }
+                if (pinched) {
+                    assertTrue("$label phase $phase has a strong crease at edge row $row",
+                        row in edgeRows until cells - edgeRows)
+                    strongRows++
+                }
+            }
+            assertTrue("$label phase $phase should pinch a local region, found $strongRows of $cells rows",
+                strongRows in 2..cells * 3 / 4)
         }
     }
 
@@ -267,7 +506,7 @@ class MeshStaticFrameTest {
         }
         assertArrayEquals("The first resumed frame must exclude the paused interval", paused, resumed)
         val advanced = host.capture {
-            renderer.advanceFrame(PausedNanos + 60_000_000_000L + FrameNanos)
+            renderer.advanceFrame(PausedNanos + 63_000_000_000L)
         }
         assertTrue("Flow must advance after playback resumes", advanced.indices.any {
             colorDistance(advanced[it], resumed[it]) > 2

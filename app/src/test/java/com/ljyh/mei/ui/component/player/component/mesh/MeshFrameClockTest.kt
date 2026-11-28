@@ -17,6 +17,31 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class MeshFrameClockTest {
     @Test
+    fun artworkOrbitsUseElapsedPlaybackTimeAndFlowSpeed() {
+        val quarterTurn = (Math.PI / 2).toFloat()
+        assertEquals(quarterTurn,
+            meshArtworkOrbitAngle(meshMotionSeconds(3_750_000_000L, .25f), PrimaryArtworkOrbitBaseSeconds), .0001f)
+        assertEquals(quarterTurn, meshArtworkOrbitAngle(meshMotionSeconds(5_833_333_333L, .5f), 70.0), .0001f)
+        val combinedTurnTime = meshMotionSeconds(13_333_333_333L, .25f)
+        val lowerTurn = meshArtworkOrbitAngle(combinedTurnTime, PrimaryArtworkOrbitBaseSeconds) +
+            meshArtworkOrbitAngle(combinedTurnTime, LowerArtworkOrbitBaseSeconds)
+        assertEquals(quarterTurn * 4, lowerTurn, .0001f)
+    }
+
+    @Test
+    fun creaseMakesOneRoundTripInTwentyTwoSecondsAtDefaultSpeed() {
+        fun phase(millis: Long, speed: Float = DefaultMeshFlowSpeed) =
+            meshCreasePhase(millis * 1_000_000L, speed)
+
+        assertEquals(.5f, phase(0), .0001f)
+        assertEquals(1f, phase(5_500), .0001f)
+        assertEquals(.5f, phase(11_000), .0001f)
+        assertEquals(0f, phase(16_500), .0001f)
+        assertEquals(phase(0), phase(22_000), .0001f)
+        assertEquals(phase(5_500), phase(2_750, speed = .5f), .0001f)
+    }
+
+    @Test
     fun ambientAndAudioCadenceRegisterOnlyFramesTheyRenderAcrossDisplayRates() = runTest {
         for (displayHz in listOf(60, 90, 120, 144)) {
             for (targetHz in listOf(30, 60)) {

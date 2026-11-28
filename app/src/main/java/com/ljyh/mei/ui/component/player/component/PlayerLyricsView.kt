@@ -13,19 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Adapted from KaraokeLyricsView in com.mocharealm.accompanist:lyrics-ui:1.0.19.
+ * Adapted from KaraokeLyricsView and LyricsLineItem in com.mocharealm.accompanist:lyrics-ui:1.0.19.
  * Upstream: https://github.com/6xingyv/accompanist-lyrics-ui
  * Modified for Mei: scrolling is owned by the player, which supplies manual
- * browsing state; upstream line rendering and keep-alive layout are retained.
+ * browsing state, while karaoke rendering can use a separate display clock.
  */
 
 package com.ljyh.mei.ui.component.player.component
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,23 +48,33 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -70,6 +85,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.kyant.capsule.ContinuousRoundedRectangle
+import com.ljyh.mei.utils.lyric.KaraokeRenderTimeWindow
 import com.ljyh.mei.utils.lyric.karaokeRenderTimeWindow
 import com.mocharealm.accompanist.lyrics.core.model.ISyncedLine
 import com.mocharealm.accompanist.lyrics.core.model.SyncedLyrics
@@ -78,26 +95,85 @@ import com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine
 import com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine
 import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.KaraokeBreathingDots
 import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.KaraokeBreathingDotsDefaults
-import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.KaraokeLineText
-import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.LyricsLineItem
 import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.SyllableLayout
 import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.SyncedLineText
 import com.mocharealm.accompanist.lyrics.ui.composable.lyrics.measureSyllablesAndDetermineAnimation
 import com.mocharealm.accompanist.lyrics.ui.utils.isRtl
 import com.mocharealm.accompanist.lyrics.ui.utils.modifier.springPlacement
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 private data class FocusState(
     val firstIndex: Int,
     val allIndices: List<Int>,
-    val activeInterludeIndex: Int?,
-    val activeIntro: Boolean
+    val quietInterval: IntRange?,
 )
 
+private const val DimLyricBrightness = 0.4f
+private const val BrowsingLyricBrightness = 0.72f
+private const val LyricBrightnessSteps = 96
+private const val MaxLyricBlurDistance = 4
+private const val LyricBlurStepsPerPx = 2
+private const val MaxCachedLyricBlurPx = 24
+private val lyricFocusTransition = tween<Float>(300)
+private val lyricRowShape = ContinuousRoundedRectangle(8.dp)
+
+private val lyricBrightnessFilters by lazy {
+    Array(LyricBrightnessSteps) { index ->
+        val gain = DimLyricBrightness + (1f - DimLyricBrightness) * index / LyricBrightnessSteps
+        ColorFilter.colorMatrix(ColorMatrix().apply { setToScale(gain, gain, gain, 1f) })
+    }
+}
+
+private val lyricBlurEffects by lazy {
+    Array(MaxCachedLyricBlurPx * LyricBlurStepsPerPx) { index ->
+        val radius = (index + 1).toFloat() / LyricBlurStepsPerPx
+        BlurEffect(radius, radius, TileMode.Clamp)
+    }
+}
+
+private fun cachedLyricBlurEffect(radius: Float): BlurEffect? {
+    if (radius <= 0f) return null
+    val step = (radius * LyricBlurStepsPerPx).roundToInt()
+    if (step <= 0) return null
+    return if (step <= lyricBlurEffects.size) {
+        lyricBlurEffects[step - 1]
+    } else {
+        val quantized = step.toFloat() / LyricBlurStepsPerPx
+        BlurEffect(quantized, quantized, TileMode.Clamp)
+    }
+}
+
+internal fun lyricEdgeFadeBrush(height: Float, top: Float, bottom: Float): Brush? {
+    if (height <= 0f || (top <= 0f && bottom <= 0f)) return null
+    val topFraction = (top / height).coerceIn(0f, 1f)
+    val bottomFraction = (bottom / height).coerceIn(0f, 1f - topFraction)
+    return Brush.verticalGradient(
+        0f to if (topFraction > 0f) Color.Transparent else Color.Black,
+        topFraction to Color.Black,
+        1f - bottomFraction to Color.Black,
+        1f to if (bottomFraction > 0f) Color.Transparent else Color.Black,
+        endY = height,
+    )
+}
+
+internal fun lyricControlsFadeBrush(
+    height: Float,
+    fadeRange: (Float) -> ClosedFloatingPointRange<Float>?,
+): Brush? {
+    val range = fadeRange(height) ?: return null
+    if (range.start >= height || range.endInclusive <= range.start) return null
+    return Brush.verticalGradient(
+        colors = listOf(Color.Black, Color.Transparent),
+        startY = range.start,
+        endY = range.endInclusive,
+    )
+}
+
 /** Renders lyrics while the caller owns automatic scrolling and manual browsing state. */
-@OptIn(ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalAnimationApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun PlayerLyricsView(
     listState: LazyListState,
@@ -143,6 +219,14 @@ internal fun PlayerLyricsView(
     isInteractive: Boolean = true,
     precomputeLineLayouts: Boolean = true,
     isolateFadeLayer: Boolean = true,
+    renderPosition: () -> Int = currentPosition,
+    quietIntervals: List<IntRange> = remember(lyrics.lines) { lyricQuietIntervals(lyrics.lines) },
+    glowEnabled: Boolean = true,
+    liftEnabled: Boolean = true,
+    longToneEnabled: Boolean = true,
+    isBrowsing: Boolean = false,
+    hdrAccent: PlayerLyricHdrAccent? = null,
+    renderWindows: List<KaraokeRenderTimeWindow?>? = null,
 ) {
     val stableNormalTextStyle = remember(normalLineTextStyle) { normalLineTextStyle }
     val stableAccompanimentTextStyle =
@@ -152,106 +236,73 @@ internal fun PlayerLyricsView(
     val translationTextStyle = translationLineTextStyle.copy(lineHeight = 1.2.em)
     val stableOffset = remember(offset) { offset }
     val stableBlendMode = remember(blendMode) { blendMode }
+    val inactiveRowBrightness = if (isBrowsing) BrowsingLyricBrightness else DimLyricBrightness
 
     val textMeasurer = rememberTextMeasurer()
     val layoutCache = remember(
         lyrics,
         isVerbatim,
         stableNormalTextStyle,
-        stableAccompanimentTextStyle,
-        stablePhoneticTextStyle,
-        textMeasurer
-    ) { mutableStateMapOf<Int, List<SyllableLayout>>() }
-
-    LaunchedEffect(
-        lyrics,
-        isVerbatim,
-        stableNormalTextStyle,
-        stableAccompanimentTextStyle,
         stablePhoneticTextStyle,
         textMeasurer,
         precomputeLineLayouts,
-    ) {
+    ) { mutableStateOf(emptyMap<Int, List<SyllableLayout>>()) }
+
+    LaunchedEffect(layoutCache) {
         // The incoming mix layer only measures the rows it needs to show.
         if (!isVerbatim || !precomputeLineLayouts) return@LaunchedEffect
-        withContext(Dispatchers.Default) {
+        layoutCache.value = withContext(Dispatchers.Default) {
             val normalStyle = stableNormalTextStyle.copy(textDirection = TextDirection.Content)
-            val accompanimentStyle =
-                stableAccompanimentTextStyle.copy(textDirection = TextDirection.Content)
             val phoneticStyle = stablePhoneticTextStyle.copy(textDirection = TextDirection.Content)
-
-            val normalSpaceWidth = textMeasurer.measure(" ", normalStyle).size.width.toFloat()
-            val accompanimentSpaceWidth =
-                textMeasurer.measure(" ", accompanimentStyle).size.width.toFloat()
-
-            lyrics.lines.forEachIndexed { index, line ->
-                if (!isActive) return@forEachIndexed
-                if (line is KaraokeLine) {
-                    val style =
-                        if (line is KaraokeLine.AccompanimentKaraokeLine) accompanimentStyle else normalStyle
-                    val spaceWidth =
-                        if (line is KaraokeLine.AccompanimentKaraokeLine) accompanimentSpaceWidth else normalSpaceWidth
-
-                    val processedSyllables = if (line.alignment == KaraokeAlignment.End) {
+            val spaceWidth = textMeasurer.measure(" ", normalStyle).size.width.toFloat()
+            buildMap {
+                lyrics.lines.forEachIndexed { index, line ->
+                    ensureActive()
+                    if (line !is KaraokeLine.MainKaraokeLine) return@forEachIndexed
+                    val syllables = if (line.alignment == KaraokeAlignment.End) {
                         line.syllables.dropLastWhile { it.content.isBlank() }
-                    } else {
-                        line.syllables
-                    }
-
-                    val layout = measureSyllablesAndDetermineAnimation(
-                        syllables = processedSyllables,
-                        textMeasurer = textMeasurer,
-                        style = style,
-                        phoneticStyle = phoneticStyle,
-                        isAccompanimentLine = line is KaraokeLine.AccompanimentKaraokeLine,
-                        spaceWidth = spaceWidth
+                    } else line.syllables
+                    put(
+                        index,
+                        measureSyllablesAndDetermineAnimation(
+                            syllables = syllables,
+                            textMeasurer = textMeasurer,
+                            style = normalStyle,
+                            phoneticStyle = phoneticStyle,
+                            isAccompanimentLine = false,
+                            spaceWidth = spaceWidth,
+                        ),
                     )
-
-                    withContext(Dispatchers.Main) {
-                        layoutCache[index] = layout
-                    }
                 }
             }
         }
     }
 
-    val currentTimeMs: () -> Int = currentPosition
-
-    val timeProvider = remember { currentPosition }
+    val focusPosition by rememberUpdatedState(currentPosition)
+    val drawPosition by rememberUpdatedState(renderPosition)
+    val timeProvider = remember { { focusPosition() } }
+    val renderTimeProvider = remember { { drawPosition() } }
 
     val accompanimentToMainMap = remember(lyrics.lines) {
         lyricAccompanimentOwners(lyrics.lines)
     }
 
-    val firstLine = lyrics.lines.firstOrNull()
-
-    val haveDotsIntro by remember(firstLine) {
+    val lyricsFocusState = remember(lyrics, accompanimentToMainMap, quietIntervals) {
         derivedStateOf {
-            if (firstLine == null) false
-            else (firstLine.start > 5000)
-        }
-    }
-
-    val lyricsFocusState by remember(lyrics, accompanimentToMainMap, haveDotsIntro) {
-        derivedStateOf {
-            val time = currentTimeMs()
+            val time = timeProvider()
             val activeIndices = activeMainLyricLineIndices(lyrics.lines, time, accompanimentToMainMap)
-            val first = lyricFocusLineIndex(lyrics.lines, time, accompanimentToMainMap)
-
-            val activeInterludeIndex = lyrics.lines.indices.find { index ->
-                val line = lyrics.lines[index]
-                val previousLine = lyrics.lines.getOrNull(index - 1)
-                previousLine != null && (line.start - previousLine.end > 5000) && time in previousLine.end..line.start
-            }
-            val activeIntro = haveDotsIntro && time in 0 until (firstLine?.start ?: 0)
-
-            FocusState(first, activeIndices, activeInterludeIndex, activeIntro)
+            val first = activeIndices.firstOrNull() ?: upcomingMainLyricLineIndex(lyrics.lines, time)
+            FocusState(first, activeIndices, lyricQuietIntervalAt(quietIntervals, time))
         }
     }
 
     val currentLyrics = lyrics
+    val lyricsTransition = updateTransition(lyrics to isVerbatim, label = "Lyrics content")
+    val settledAccent = hdrAccent?.takeIf {
+        !lyricsTransition.isRunning && lyricsTransition.currentState == lyricsTransition.targetState
+    }
     LookaheadScope {
-        Crossfade(lyrics to isVerbatim) { (lyrics, isVerbatim) ->
+        lyricsTransition.Crossfade { (lyrics, isVerbatim) ->
             Box(modifier = modifier.clipToBounds()) {
                 LazyColumn(
                     state = listState,
@@ -260,21 +311,21 @@ internal fun PlayerLyricsView(
                         .fillMaxSize()
                         .then(contentModifier)
                         .then(
+                            if (settledAccent != null) {
+                                Modifier.onGloballyPositioned(settledAccent::positionViewport)
+                            } else Modifier,
+                        )
+                        .then(
                             if (isolateFadeLayer) Modifier.graphicsLayer {
                                 compositingStrategy = CompositingStrategy.Offscreen
                             } else Modifier,
                         )
                         .drawWithCache {
-                            val edgeBrush = if ((topFadeHeight > 0.dp || bottomFadeHeight > 0.dp) && size.height > 0f) {
-                                val topFade = (topFadeHeight.toPx() / size.height).coerceIn(0f, 1f)
-                                val bottomFade = (bottomFadeHeight.toPx() / size.height).coerceIn(0f, 1f - topFade)
-                                Brush.verticalGradient(
-                                    0f to if (topFade > 0f) Color.Transparent else Color.Black,
-                                    topFade to Color.Black,
-                                    1f - bottomFade to Color.Black,
-                                    1f to if (bottomFade > 0f) Color.Transparent else Color.Black,
-                                )
-                            } else null
+                            val edgeBrush = lyricEdgeFadeBrush(
+                                size.height, topFadeHeight.toPx(), bottomFadeHeight.toPx(),
+                            )
+                            var cachedControlsStops = Offset.Unspecified
+                            var cachedControlsBrush: Brush? = null
                             onDrawWithContent {
                                 if (size.width <= 0f || size.height <= 0f) return@onDrawWithContent
                                 // Bound keep-alive rows to the fade rect even when reusing an ancestor
@@ -287,17 +338,21 @@ internal fun PlayerLyricsView(
                                             blendMode = BlendMode.DstIn
                                         )
                                     }
-                                    controlsFadeRange(size.height)?.let { range ->
-                                        if (range.start < size.height && range.endInclusive > range.start) {
-                                            // Fade lyric pixels while preserving the live player background.
-                                            drawRect(
-                                                brush = Brush.verticalGradient(
-                                                    colors = listOf(Color.Black, Color.Transparent),
-                                                    startY = range.start,
-                                                    endY = range.endInclusive,
-                                                ),
-                                                blendMode = BlendMode.DstIn,
+                                    val controlsRange = controlsFadeRange(size.height)
+                                    if (controlsRange != null && controlsRange.start < size.height &&
+                                        controlsRange.endInclusive > controlsRange.start
+                                    ) {
+                                        val stops = Offset(controlsRange.start, controlsRange.endInclusive)
+                                        if (cachedControlsStops != stops) {
+                                            cachedControlsStops = stops
+                                            cachedControlsBrush = Brush.verticalGradient(
+                                                colors = listOf(Color.Black, Color.Transparent),
+                                                startY = controlsRange.start,
+                                                endY = controlsRange.endInclusive,
                                             )
+                                        }
+                                        cachedControlsBrush?.let { brush ->
+                                            drawRect(brush = brush, blendMode = BlendMode.DstIn)
                                         }
                                     }
                                 }
@@ -322,7 +377,9 @@ internal fun PlayerLyricsView(
                         items = lyrics.lines,
                         key = { index, line -> "${line.start}-${line.end}-$index" }
                     ) { index, line ->
-                        val isCurrentFocusLine = index in lyricsFocusState.allIndices
+                        val isCurrentFocusLine by remember(lyricsFocusState, index) {
+                            derivedStateOf { index in lyricsFocusState.value.allIndices }
+                        }
                         val isLineRtl =
                             when (line) {
                                 is KaraokeLine -> {
@@ -343,10 +400,11 @@ internal fun PlayerLyricsView(
                             else isLineRtl
                         }
 
-                        val distanceWeightState = remember(useBlurEffect, lyricsFocusState) {
+                        val distanceWeightState = remember(lyricsFocusState, index) {
                             derivedStateOf {
-                                val start = lyricsFocusState.allIndices.firstOrNull() ?: lyricsFocusState.firstIndex
-                                val end = lyricsFocusState.allIndices.lastOrNull() ?: lyricsFocusState.firstIndex
+                                val focus = lyricsFocusState.value
+                                val start = focus.allIndices.firstOrNull() ?: focus.firstIndex
+                                val end = focus.allIndices.lastOrNull() ?: focus.firstIndex
                                 maxOf(0, start - index, index - end)
                             }
                         }
@@ -354,6 +412,12 @@ internal fun PlayerLyricsView(
                         val dynamicStiffness by remember(distanceWeightState) {
                             derivedStateOf {
                                 (240f - (distanceWeightState.value * 26f)).coerceAtLeast(65f)
+                            }
+                        }
+
+                        val blurDistance by remember(distanceWeightState) {
+                            derivedStateOf {
+                                distanceWeightState.value.coerceAtMost(MaxLyricBlurDistance)
                             }
                         }
 
@@ -369,45 +433,46 @@ internal fun PlayerLyricsView(
                                 ),
                             horizontalAlignment = if (isVisualRightAligned) Alignment.End else Alignment.Start
                         ) {
-                            val previousLine = lyrics.lines.getOrNull(index - 1)
-
-                            val showDotsInterlude = lyricsFocusState.activeInterludeIndex == index
-                            val showDotsIntro = lyricsFocusState.activeIntro && index == 0
-
-                            AnimatedVisibility(showDotsInterlude || showDotsIntro) {
+                            val quietInterval by remember(lyricsFocusState, index, lyrics, currentLyrics) {
+                                derivedStateOf {
+                                    val focus = lyricsFocusState.value
+                                    focus.quietInterval.takeIf { index == focus.firstIndex && lyrics == currentLyrics }
+                                }
+                            }
+                            AnimatedVisibility(quietInterval != null) {
+                                val lastInterval = remember { mutableStateOf(quietInterval) }
+                                SideEffect { if (quietInterval != null) lastInterval.value = quietInterval }
+                                val interval = quietInterval ?: lastInterval.value ?: return@AnimatedVisibility
                                 KaraokeBreathingDots(
-                                    alignment = when (val line = previousLine ?: firstLine) {
-                                        is KaraokeLine -> line.alignment
-                                        is SyncedLine -> if (line.content.isRtl()) KaraokeAlignment.End else KaraokeAlignment.Start
+                                    alignment = when (val previous = lyrics.lines.getOrNull(index - 1) ?: line) {
+                                        is KaraokeLine -> previous.alignment
+                                        is SyncedLine -> if (previous.content.isRtl()) KaraokeAlignment.End
+                                            else KaraokeAlignment.Start
                                         else -> KaraokeAlignment.Start
                                     },
-                                    startTimeMs = previousLine?.end ?: 0,
-                                    endTimeMs = if (showDotsIntro) firstLine!!.start else line.start,
-                                    currentTimeProvider = timeProvider,
+                                    startTimeMs = interval.first,
+                                    endTimeMs = interval.last + 1,
+                                    currentTimeProvider = renderTimeProvider,
                                     defaults = breathingDotsDefaults,
                                     modifier = Modifier.padding(vertical = 12.dp)
                                 )
                             }
 
 
-                            val blurRadiusState = animateFloatAsState(
-                                targetValue = (
-                                        if (!useBlurEffect) 0f
-                                        else if (distanceWeightState.value > 0 && !isManualScrolling) {
-                                            distanceWeightState.value * blurDelta
-                                        } else 0f),
-                                animationSpec = tween(300),
-                            )
+                            val targetBlurRadius = if (useBlurEffect && !isBrowsing && !isManualScrolling) {
+                                blurDistance * blurDelta
+                            } else 0f
 
                             when (line) {
                                 is KaraokeLine -> {
                                     if (line is KaraokeLine.MainKaraokeLine) {
-                                        LyricsLineItem(
+                                        PlayerLyricsLineItem(
                                             isFocused = isCurrentFocusLine,
                                             isRightAligned = isVisualRightAligned,
                                             onLineClicked = { onLineClicked(line) },
                                             onLinePressed = { onLinePressed(line) },
-                                            blurRadius = { blurRadiusState.value },
+                                            blurRadius = targetBlurRadius,
+                                            inactiveBrightness = inactiveRowBrightness,
                                             blendMode = stableBlendMode,
                                             isInteractive = isInteractive,
                                         ) {
@@ -425,43 +490,48 @@ internal fun PlayerLyricsView(
                                                     showPhonetic = showPhonetic,
                                                 )
                                             } else {
-                                                val renderTimeProvider = remember(line, timeProvider) {
-                                                    val window = karaokeRenderTimeWindow(line)
-                                                    if (window == null) timeProvider else {
+                                                val window = remember(line, renderWindows, lyrics == currentLyrics) {
+                                                    if (renderWindows != null && lyrics == currentLyrics) {
+                                                        renderWindows.getOrNull(index)
+                                                    } else karaokeRenderTimeWindow(line)
+                                                }
+                                                val lineTimeProvider = remember(window, renderTimeProvider) {
+                                                    if (window == null) renderTimeProvider else {
                                                         // Reuse static row pixels; every active animation
                                                         // still receives the original playback clock.
-                                                        val renderTime = derivedStateOf { window.sample(timeProvider()) }
+                                                        val renderTime = derivedStateOf { window.sample(renderTimeProvider()) }
                                                         val provider: () -> Int = { renderTime.value }
                                                         provider
                                                     }
                                                 }
-                                                // Outgoing content must not use the incoming lyric's syllable measurements.
-                                                val precalculatedLayouts = if (lyrics == currentLyrics) layoutCache[index] else null
-                                                // The upstream renderer remembers styles and wrapping without all inputs.
-                                                key(
-                                                    stableNormalTextStyle,
-                                                    stableAccompanimentTextStyle,
-                                                    stablePhoneticTextStyle,
-                                                    textMeasurer,
-                                                    precalculatedLayouts
-                                                ) {
-                                                    // Translation Text inherits this style; primary and phonetic text use explicit styles.
-                                                    CompositionLocalProvider(LocalTextStyle provides translationTextStyle) {
-                                                        KaraokeLineText(
-                                                            line = line,
-                                                            currentTimeProvider = renderTimeProvider,
-                                                            normalLineTextStyle = stableNormalTextStyle,
-                                                            accompanimentLineTextStyle = stableAccompanimentTextStyle,
-                                                            phoneticTextStyle = stablePhoneticTextStyle,
-                                                            activeColor = textColor,
-                                                            blendMode = stableBlendMode,
-                                                            showDebugRectangles = showDebugRectangles,
-                                                            showTranslation = showTranslation,
-                                                            showPhonetic = showPhonetic,
-                                                            precalculatedLayouts = precalculatedLayouts,
-                                                            textMeasurer = textMeasurer
-                                                        )
-                                                    }
+                                                // Each row keeps the layout it entered with. Warmup supplies
+                                                // future rows instead of remeasuring already-visible text.
+                                                val precalculatedLayouts = remember(layoutCache, lyrics == currentLyrics, index) {
+                                                    if (lyrics == currentLyrics) {
+                                                        Snapshot.withoutReadObservation { layoutCache.value[index] }
+                                                    } else null
+                                                }
+                                                CompositionLocalProvider(LocalTextStyle provides translationTextStyle) {
+                                                    PlayerKaraokeLineText(
+                                                        line = line,
+                                                        currentTimeProvider = lineTimeProvider,
+                                                        normalLineTextStyle = stableNormalTextStyle,
+                                                        accompanimentLineTextStyle = stableAccompanimentTextStyle,
+                                                        phoneticTextStyle = stablePhoneticTextStyle,
+                                                        activeColor = textColor,
+                                                        blendMode = stableBlendMode,
+                                                        showDebugRectangles = showDebugRectangles,
+                                                        showTranslation = showTranslation,
+                                                        showPhonetic = showPhonetic,
+                                                        glowEnabled = glowEnabled,
+                                                        liftEnabled = liftEnabled,
+                                                        longToneEnabled = longToneEnabled,
+                                                        precalculatedLayouts = precalculatedLayouts,
+                                                        textMeasurer = textMeasurer,
+                                                        hdrAccent = settledAccent?.takeIf {
+                                                            isCurrentFocusLine && lyrics == currentLyrics
+                                                        },
+                                                    )
                                                 }
                                             }
                                         }
@@ -470,12 +540,13 @@ internal fun PlayerLyricsView(
 
                                 is SyncedLine -> {
                                     val isLineRtl = remember(line.content) { line.content.isRtl() }
-                                    LyricsLineItem(
+                                    PlayerLyricsLineItem(
                                         isFocused = isCurrentFocusLine,
                                         isRightAligned = isLineRtl,
                                         onLineClicked = { onLineClicked(line) },
                                         onLinePressed = { onLinePressed(line) },
-                                        blurRadius = { blurRadiusState.value },
+                                        blurRadius = targetBlurRadius,
+                                        inactiveBrightness = inactiveRowBrightness,
                                         blendMode = stableBlendMode,
                                         isInteractive = isInteractive,
                                     ) {
@@ -502,6 +573,56 @@ internal fun PlayerLyricsView(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PlayerLyricsLineItem(
+    isFocused: Boolean,
+    isRightAligned: Boolean,
+    onLineClicked: () -> Unit,
+    onLinePressed: () -> Unit,
+    blurRadius: Float,
+    inactiveBrightness: Float,
+    blendMode: BlendMode,
+    isInteractive: Boolean,
+    content: @Composable () -> Unit,
+) {
+    val scale by animateFloatAsState(
+        if (isFocused) 1f else 0.98f,
+        if (isFocused) tween(600, easing = LinearOutSlowInEasing) else tween(300, easing = EaseInOut),
+        label = "Lyric row scale",
+    )
+    val brightness by animateFloatAsState(
+        if (isFocused) 1f else inactiveBrightness,
+        lyricFocusTransition,
+        label = "Lyric row brightness",
+    )
+    val blur = animateFloatAsState(blurRadius, lyricFocusTransition, label = "Lyric row blur")
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = TransformOrigin(if (isRightAligned) 1f else 0f, 1f)
+                this.blendMode = blendMode
+                compositingStrategy = CompositingStrategy.Offscreen
+                renderEffect = cachedLyricBlurEffect(blur.value)
+                // Attenuate neutral RGB after rendering the row and its karaoke mask.
+                // Coverage stays intact, and gains never exceed the original source.
+                val step = ((brightness - DimLyricBrightness) * LyricBrightnessSteps /
+                    (1f - DimLyricBrightness)).roundToInt()
+                colorFilter = if (step >= LyricBrightnessSteps) null
+                    else lyricBrightnessFilters[step.coerceAtLeast(0)]
+            }
+            .then(
+                if (isInteractive) Modifier.clip(lyricRowShape).combinedClickable(
+                    onClick = onLineClicked,
+                    onLongClick = onLinePressed,
+                ) else Modifier,
+            )
+    ) {
+        content()
     }
 }
 
@@ -537,7 +658,6 @@ private fun LineSyncedPhoneticText(
                     style = translationTextStyle,
                     color = textColor.copy(alpha = 0.4f),
                     textAlign = textAlign,
-                    modifier = Modifier.graphicsLayer { this.blendMode = blendMode },
                 )
             }
         }
@@ -548,7 +668,6 @@ private fun LineSyncedPhoneticText(
                     style = phoneticTextStyle.copy(lineHeight = 1.2.em),
                     color = textColor.copy(alpha = 0.6f),
                     textAlign = textAlign,
-                    modifier = Modifier.graphicsLayer { this.blendMode = blendMode },
                 )
             }
         }

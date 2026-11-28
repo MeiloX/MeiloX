@@ -20,7 +20,9 @@ class PlaybackBeatMeter {
     @Volatile private var epoch = 0
 
     // Collection is owned by the visible UI: no service timer or background analysis job.
-    val spectrum: Flow<PlaybackSpectrum> = flow {
+    val spectrum: Flow<PlaybackSpectrum> = observeSpectrum { 1f }
+
+    internal fun observeSpectrum(zoomIntensity: () -> Float): Flow<PlaybackSpectrum> = flow {
         beginObservation()
         val power = FloatArray(3)
         val envelope = SpectrumEnvelope()
@@ -29,7 +31,7 @@ class PlaybackBeatMeter {
             while (true) {
                 val now = System.nanoTime()
                 currentPower(power)
-                emit(envelope.update(power, (now - previousNs) / 1e9f))
+                emit(envelope.update(power, (now - previousNs) / 1e9f, zoomIntensity()))
                 previousNs = now
                 delay(33L)
             }

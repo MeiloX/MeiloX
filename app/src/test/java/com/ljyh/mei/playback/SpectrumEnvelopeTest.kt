@@ -42,41 +42,43 @@ class SpectrumEnvelopeTest {
     }
 
     @Test
-    fun sustainedLoudBassDoesNotHoldTheBeatPulseOpen() {
-        val envelope = SpectrumEnvelope()
-        repeat(90) {
-            val result = envelope.update(floatArrayOf(.1f, .1f, .1f), 1f / 30f)
-            assertEquals(0f, result.pulse, 0f)
-        }
+    fun zoomShapesTheWeightedLowAndMidHistoryAfterTheAttack() {
+        val seconds = 1f / 60f
+        val bass = SpectrumEnvelope().update(floatArrayOf(1f, 0f, 0f), seconds)
+        val middle = SpectrumEnvelope().update(floatArrayOf(0f, 1f, 0f), seconds)
+        val treble = SpectrumEnvelope().update(floatArrayOf(0f, 0f, 1f), seconds)
+        // The newest report weighs .4 and the first step moves halfway toward it.
+        assertEquals(.05792f * .9f, bass.zoomEnergy, .00001f)
+        assertEquals(.05792f * .1f, middle.zoomEnergy, .00001f)
+        assertEquals(0f, treble.zoomEnergy, 0f)
     }
 
     @Test
-    fun repeatedKicksKeepTheirTravelEvenWhenColorLevelsAreNearTheCeiling() {
-        val envelope = SpectrumEnvelope()
-        repeat(60) { envelope.update(floatArrayOf(.01f, .003f, .002f), 1f / 30f) }
-        repeat(8) {
-            var peak = 0f
-            var tail = PlaybackSpectrum.Zero
-            repeat(15) { frame ->
-                tail = envelope.update(floatArrayOf(if (frame < 2) .1225f else .01f, .003f, .002f), 1f / 30f)
-                peak = maxOf(peak, tail.pulse)
-            }
-            assertTrue("Each kick needs a distinct attack: $peak", peak > .65f)
-            assertTrue("The pulse must recover before the next beat: ${tail.pulse}", tail.pulse < .15f)
+    fun normalModeAttenuatesZoomBeforeShapingWithoutChangingColorBands() {
+        val normal = SpectrumEnvelope()
+        val lyrics = SpectrumEnvelope()
+        val power = floatArrayOf(1f, 1f, 1f)
+        val seconds = 1f / 30f
+        repeat(40) {
+            normal.update(power, seconds, zoomIntensity = .2f)
+            lyrics.update(power, seconds)
         }
+        val normalFrame = normal.update(power, seconds, zoomIntensity = .2f)
+        val lyricsFrame = lyrics.update(power, seconds)
+        assertEquals(.05792f, normalFrame.zoomEnergy, .00001f)
+        assertEquals(1f, lyricsFrame.zoomEnergy, .00001f)
+        assertEquals(normalFrame.copy(zoomEnergy = lyricsFrame.zoomEnergy), lyricsFrame)
     }
 
     @Test
-    fun beatResponseAdaptsToTrackLevelWithoutAmplifyingNearSilence() {
-        fun kick(gain: Float): Float {
-            val envelope = SpectrumEnvelope()
-            val base = .01f * gain * gain
-            repeat(60) { envelope.update(floatArrayOf(base, base * .3f, 0f), 1f / 30f) }
-            return (0..2).maxOf {
-                envelope.update(floatArrayOf(base * 9f, base * .3f, 0f), 1f / 30f).pulse
-            }
-        }
-        assertEquals(kick(1f), kick(.25f), .02f)
-        assertTrue(kick(.001f) < .001f)
+    fun leavingLyricsRetainsTheRecentZoomEnvelopeAndThenSettles() {
+        val envelope = SpectrumEnvelope()
+        val power = floatArrayOf(1f, 1f, 0f)
+        val seconds = 1f / 30f
+        repeat(40) { envelope.update(power, seconds) }
+        val first = envelope.update(power, seconds, zoomIntensity = .2f)
+        assertTrue(first.zoomEnergy > .9f)
+        repeat(300) { envelope.update(power, seconds, zoomIntensity = .2f) }
+        assertEquals(.05792f, envelope.update(power, seconds, zoomIntensity = .2f).zoomEnergy, .00001f)
     }
 }

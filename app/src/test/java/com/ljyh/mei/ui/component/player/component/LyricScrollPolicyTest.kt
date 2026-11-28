@@ -57,6 +57,102 @@ class LyricScrollPolicyTest {
     }
 
     @Test
+    fun interludeStartsWhenBothSingersFinishAndEndsAtTheNextVocal() {
+        val duet = listOf(
+            mainLine(KaraokeAlignment.Start, 0, 20_000),
+            mainLine(KaraokeAlignment.End, 12_000, 13_000),
+            mainLine(KaraokeAlignment.Start, 26_000, 35_000),
+        )
+
+        val gaps = lyricQuietIntervals(duet)
+        assertEquals(listOf(20_000 until 26_000), gaps)
+        assertEquals(null, lyricQuietIntervalAt(gaps, 13_000))
+        assertEquals(gaps.single(), lyricQuietIntervalAt(gaps, 20_000))
+        assertEquals(null, lyricQuietIntervalAt(gaps, 26_000))
+    }
+
+    @Test
+    fun accompanimentSplitsSilenceAndContributesMotionBoundaries() {
+        val attached = KaraokeLine.AccompanimentKaraokeLine(
+            syllables = emptyList(),
+            translation = null,
+            alignment = KaraokeAlignment.Start,
+            start = 10_000,
+            end = 16_000,
+        )
+        val vocals = listOf(
+            mainLine(KaraokeAlignment.Start, 0, 10_000, listOf(attached)),
+            attached.copy(start = 21_000, end = 24_000),
+            mainLine(KaraokeAlignment.End, 29_000, 35_000),
+        )
+        val boundaries = lyricMotionBoundaries(vocals)
+
+        assertEquals(emptyList<IntRange>(), lyricQuietIntervals(vocals, mapOf(1 to 0)))
+        assertEquals(listOf(0, 10_000, 16_000, 21_000, 24_000, 29_000, 35_000), boundaries)
+        assertEquals(1, lyricMotionBoundaryIndex(boundaries, 15_999))
+        assertEquals(2, lyricMotionBoundaryIndex(boundaries, 16_000))
+    }
+
+    @Test
+    fun delayedAccompanimentLeavesQuietIntervalsOnBothSides() {
+        val harmony = KaraokeLine.AccompanimentKaraokeLine(
+            syllables = emptyList(),
+            translation = null,
+            alignment = KaraokeAlignment.Start,
+            start = 7_000,
+            end = 8_000,
+        )
+        val vocals = listOf(
+            mainLine(KaraokeAlignment.Start, 0, 1_000, listOf(harmony)),
+            mainLine(KaraokeAlignment.Start, 14_000, 15_000),
+        )
+
+        val gaps = lyricQuietIntervals(vocals)
+        assertEquals(listOf(1_000 until 7_000, 8_000 until 14_000), gaps)
+        assertEquals(gaps[0], lyricQuietIntervalAt(gaps, 6_999))
+        assertEquals(null, lyricQuietIntervalAt(gaps, 7_000))
+        assertEquals(gaps[1], lyricQuietIntervalAt(gaps, 8_000))
+        assertEquals(listOf(0, 1_000, 7_000, 8_000, 14_000, 15_000), lyricMotionBoundaries(vocals))
+    }
+
+    @Test
+    fun attachedVocalsCountBeforeTheirLeadButStopAtItsReplacement() {
+        val earlyHarmony = KaraokeLine.AccompanimentKaraokeLine(
+            syllables = emptyList(),
+            translation = null,
+            alignment = KaraokeAlignment.Start,
+            start = 6_000,
+            end = 7_000,
+        )
+        val vocals = listOf(
+            mainLine(
+                KaraokeAlignment.Start,
+                14_000,
+                15_000,
+                listOf(earlyHarmony, earlyHarmony.copy(start = 15_500, end = 27_000)),
+            ),
+            mainLine(KaraokeAlignment.Start, 16_000, 17_000),
+            mainLine(KaraokeAlignment.Start, 30_000, 31_000),
+        )
+
+        assertEquals(
+            listOf(0 until 6_000, 7_000 until 14_000, 17_000 until 30_000),
+            lyricQuietIntervals(vocals),
+        )
+    }
+
+    @Test
+    fun supersededTimingDoesNotHideTheIntroOrInterlude() {
+        val vocals = listOf(
+            mainLine(KaraokeAlignment.End, 6_000, 35_000),
+            mainLine(KaraokeAlignment.End, 10_000, 12_000),
+            mainLine(KaraokeAlignment.Start, 20_000, 25_000),
+        )
+
+        assertEquals(listOf(0 until 6_000, 12_000 until 20_000), lyricQuietIntervals(vocals))
+    }
+
+    @Test
     fun anOverlongRightLineIsReplacedByTheNextRightLineWithoutReturning() {
         val duet = listOf(
             mainLine(KaraokeAlignment.End, 16_770, 35_040),

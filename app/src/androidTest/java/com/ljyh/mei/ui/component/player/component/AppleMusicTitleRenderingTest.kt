@@ -82,7 +82,6 @@ import com.ljyh.mei.data.model.MediaMetadata
 import com.ljyh.mei.data.network.Resource
 import com.ljyh.mei.ui.component.player.state.rememberPlayerLikeState
 import com.ljyh.mei.ui.local.LocalPlayerConnection
-import com.ljyh.mei.ui.component.player.component.classic.component.PlayerHeader
 import com.ljyh.mei.ui.component.player.component.applemusic.AppleMusicMarqueeText
 import com.ljyh.mei.ui.component.player.component.applemusic.AppleMusicProgressSlider
 import com.ljyh.mei.ui.component.player.component.applemusic.AppleMusicDimensions
@@ -143,7 +142,6 @@ class AppleMusicTitleRenderingTest {
 
     @Test fun favoritesSwitchImmediatelyAndKeepCurrentTrackCallbacks() {
         compose.mainClock.autoAdvance = false
-        val classic = mutableStateOf(false)
         val local = mutableStateOf(false)
         val podcast = mutableStateOf(false)
         val trackId = mutableStateOf(1L)
@@ -165,21 +163,9 @@ class AppleMusicTitleRenderingTest {
             val id = trackId.value
             val isLiked = rememberPlayerLikeState(liked.value).value
             SideEffect { renderedLiked = isLiked }
-            MaterialTheme {
-                val modifier = Modifier.width(360.dp).background(Color.Black).testTag("metadata")
-                if (classic.value) {
-                    PlayerHeader(
-                        modifier = modifier,
-                        mediaMetadata = MediaMetadata(
-                            id, "Track $id", "", listOf(MediaMetadata.Artist(1, "Artist")),
-                            1_000, MediaMetadata.Album(1, "Album"), isLocal = local.value, isPodcast = podcast.value,
-                        ),
-                        isLiked = isLiked,
-                        onClick = {}, onMoreClick = { moreClicks++ },
-                        onLikeClick = { likedTracks += id },
-                        onTextPositioned = { textRight = it.boundsInRoot().right },
-                    )
-                } else {
+            CompositionLocalProvider(LocalPlayerConnection provides null) {
+                MaterialTheme {
+                    val modifier = Modifier.width(360.dp).background(Color.Black).testTag("metadata")
                     Title(
                         title = "Track $id", subTitle = "Artist", isLiked = isLiked,
                         showLikeButton = !local.value && !podcast.value,
@@ -195,82 +181,79 @@ class AppleMusicTitleRenderingTest {
                 }
             }
         }
-        for (useClassic in listOf(false, true)) {
+        compose.runOnIdle {
+            local.value = false
+            podcast.value = false
+            trackId.value = 1
+            liked.value = Resource.Success(false)
+            likedTracks.clear()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        val openRight = textRight
+        val moreX = more.fetchSemanticsNode().boundsInRoot.center.x
+        favorite.performTouchInput { click(center) }
+        compose.runOnIdle { assertEquals(listOf(1L), likedTracks) }
+
+        compose.runOnIdle { liked.value = Resource.Success(true) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { assertTrue(renderedLiked) }
+        compose.runOnIdle {
+            trackId.value = 2
+            liked.value = Resource.Loading
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { assertTrue("Loading the next track must retain the filled star", renderedLiked) }
+        compose.runOnIdle { liked.value = Resource.Success(true) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { assertTrue("Two liked tracks must not show an empty star between them", renderedLiked) }
+        favorite.performTouchInput { click(center) }
+        compose.runOnIdle { assertEquals(listOf(1L, 2L), likedTracks) }
+
+        compose.runOnIdle { liked.value = Resource.Success(false) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { assertFalse("A confirmed unlike must still update the star", renderedLiked) }
+
+        for (isPodcast in listOf(false, true)) {
+            val previousCenter = favorite.fetchSemanticsNode().boundsInRoot.center -
+                compose.onNodeWithTag("metadata").fetchSemanticsNode().boundsInRoot.topLeft
             compose.runOnIdle {
-                classic.value = useClassic
+                local.value = !isPodcast
+                podcast.value = isPodcast
+                liked.value = Resource.Success(false)
+            }
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            favorite.assertDoesNotExist()
+            val closedRight = textRight
+            assertTrue("Hidden favorites must release text space immediately", closedRight > openRight)
+            assertEquals("More must remain anchored", moreX, more.fetchSemanticsNode().boundsInRoot.center.x, 1f)
+            compose.onNodeWithTag("metadata").performTouchInput { click(previousCenter) }
+            val expectedLikes = if (isPodcast) listOf(1L, 2L, 3L) else listOf(1L, 2L)
+            compose.runOnIdle { assertEquals(expectedLikes, likedTracks) }
+            more.performTouchInput { click(center) }
+
+            compose.runOnIdle {
                 local.value = false
                 podcast.value = false
-                trackId.value = 1
-                liked.value = Resource.Success(false)
-                likedTracks.clear()
+                trackId.value = if (isPodcast) 4L else 3L
+                liked.value = Resource.Success(true)
             }
             compose.mainClock.advanceTimeByFrame()
             compose.waitForIdle()
-            val openRight = textRight
-            val moreX = more.fetchSemanticsNode().boundsInRoot.center.x
+            favorite.assertExists()
+            assertEquals("Online tracks must reserve favorite space immediately", openRight, textRight, 1f)
+            assertEquals("More must remain anchored", moreX, more.fetchSemanticsNode().boundsInRoot.center.x, 1f)
             favorite.performTouchInput { click(center) }
-            compose.runOnIdle { assertEquals(listOf(1L), likedTracks) }
-
-            compose.runOnIdle { liked.value = Resource.Success(true) }
-            compose.mainClock.advanceTimeByFrame()
-            compose.waitForIdle()
-            compose.runOnIdle { assertTrue(renderedLiked) }
             compose.runOnIdle {
-                trackId.value = 2
-                liked.value = Resource.Loading
-            }
-            compose.mainClock.advanceTimeByFrame()
-            compose.waitForIdle()
-            compose.runOnIdle { assertTrue("Loading the next track must retain the filled star", renderedLiked) }
-            compose.runOnIdle { liked.value = Resource.Success(true) }
-            compose.mainClock.advanceTimeByFrame()
-            compose.waitForIdle()
-            compose.runOnIdle { assertTrue("Two liked tracks must not show an empty star between them", renderedLiked) }
-            favorite.performTouchInput { click(center) }
-            compose.runOnIdle { assertEquals(listOf(1L, 2L), likedTracks) }
-
-            compose.runOnIdle { liked.value = Resource.Success(false) }
-            compose.mainClock.advanceTimeByFrame()
-            compose.waitForIdle()
-            compose.runOnIdle { assertFalse("A confirmed unlike must still update the star", renderedLiked) }
-
-            for (isPodcast in listOf(false, true)) {
-                val previousCenter = favorite.fetchSemanticsNode().boundsInRoot.center -
-                    compose.onNodeWithTag("metadata").fetchSemanticsNode().boundsInRoot.topLeft
-                compose.runOnIdle {
-                    local.value = !isPodcast
-                    podcast.value = isPodcast
-                    liked.value = Resource.Success(false)
-                }
-                compose.mainClock.advanceTimeByFrame()
-                compose.waitForIdle()
-                favorite.assertDoesNotExist()
-                val closedRight = textRight
-                assertTrue("Hidden favorites must release text space immediately", closedRight > openRight)
-                assertEquals("More must remain anchored", moreX, more.fetchSemanticsNode().boundsInRoot.center.x, 1f)
-                compose.onNodeWithTag("metadata").performTouchInput { click(previousCenter) }
-                val expectedLikes = if (isPodcast) listOf(1L, 2L, 3L) else listOf(1L, 2L)
-                compose.runOnIdle { assertEquals(expectedLikes, likedTracks) }
-                more.performTouchInput { click(center) }
-
-                compose.runOnIdle {
-                    local.value = false
-                    podcast.value = false
-                    trackId.value = if (isPodcast) 4L else 3L
-                    liked.value = Resource.Success(true)
-                }
-                compose.mainClock.advanceTimeByFrame()
-                compose.waitForIdle()
-                favorite.assertExists()
-                assertEquals("Online tracks must reserve favorite space immediately", openRight, textRight, 1f)
-                assertEquals("More must remain anchored", moreX, more.fetchSemanticsNode().boundsInRoot.center.x, 1f)
-                favorite.performTouchInput { click(center) }
-                compose.runOnIdle {
-                    assertEquals(if (isPodcast) listOf(1L, 2L, 3L, 4L) else listOf(1L, 2L, 3L), likedTracks)
-                }
+                assertEquals(if (isPodcast) listOf(1L, 2L, 3L, 4L) else listOf(1L, 2L, 3L), likedTracks)
             }
         }
-        compose.runOnIdle { assertEquals(4, moreClicks) }
+        compose.runOnIdle { assertEquals(2, moreClicks) }
     }
 
     @Test fun detailPagesPreloadOnceAndRetainTheirStateAcrossSwitches() {

@@ -1,23 +1,17 @@
-package com.ljyh.mei.ui.component.player.component.classic.component
+package com.ljyh.mei.ui.component.player.component.applemusic
 
 import androidx.annotation.OptIn
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.SaveAlt
@@ -34,8 +28,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
-import com.ljyh.mei.ui.component.sheet.playerArtwork
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -52,22 +44,18 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.kyant.capsule.ContinuousRoundedRectangle
-import com.ljyh.mei.constants.CoverStyle
-import com.ljyh.mei.constants.CoverStyleKey
 import com.ljyh.mei.constants.OriginalCoverKey
-import com.ljyh.mei.constants.PlayerStyle
-import com.ljyh.mei.constants.PlayerStyleKey
 import com.ljyh.mei.data.model.MediaMetadata
+import com.ljyh.mei.playback.PlayerConnection
 import com.ljyh.mei.source.api.TrackRef
 import com.ljyh.mei.source.script.sourceTrackArtwork
 import com.ljyh.mei.ui.component.player.PlayerArtworkTransition
-import com.ljyh.mei.ui.component.player.component.applemusic.rememberAppleMusicPlaybackScale
-import com.ljyh.mei.playback.PlayerConnection
+import com.ljyh.mei.ui.component.sheet.LocalPlayerSheet
+import com.ljyh.mei.ui.component.sheet.playerArtwork
 import com.ljyh.mei.utils.image.saveImageToGallery
-import com.ljyh.mei.utils.rememberEnumPreference
 import com.ljyh.mei.utils.rememberPreference
-import com.ljyh.mei.utils.smallImage
 import com.ljyh.mei.utils.size1600
+import com.ljyh.mei.utils.smallImage
 import kotlinx.coroutines.launch
 import net.engawapg.lib.zoomable.rememberZoomState
 import net.engawapg.lib.zoomable.zoomable
@@ -81,41 +69,22 @@ fun Cover(
     modifier: Modifier,
     pausedScale: Float = 0.75f,
     onClick: (() -> Unit)? = null,
-    onDoubleClick: (Offset, Int) -> Unit = { _, _ ->}
+    onDoubleClick: (Offset, Int) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val sheet = LocalPlayerSheet.current
     val sheetExpanded by remember(sheet) {
         derivedStateOf { sheet == null || sheet.state.isExpanded }
     }
-    val playerStyle by rememberEnumPreference(PlayerStyleKey, defaultValue = PlayerStyle.AppleMusic)
-    val savedCoverStyle by rememberEnumPreference(CoverStyleKey, defaultValue = CoverStyle.Square)
-    // AppleMusic reuses this cover in landscape but keeps its rounded-square shape.
-    val coverStyle = if (playerStyle == PlayerStyle.Classic) savedCoverStyle else CoverStyle.Square
     val originalCover by rememberPreference(
         OriginalCoverKey,
         defaultValue = false
     )
 
-    val coverShape = if (coverStyle == CoverStyle.Circle) {
-        CircleShape
-    } else {
-        ContinuousRoundedRectangle(12.dp)
-    }
-
-    val animatedCoverScale by if (playerStyle == PlayerStyle.AppleMusic) {
-        rememberAppleMusicPlaybackScale(isPlaying, sheetExpanded, pausedScale)
-    } else animateFloatAsState(
-        targetValue = if (isPlaying) 1f else 0.9f,
-        animationSpec = if (sheetExpanded) spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ) else androidx.compose.animation.core.snap(),
-        label = "CoverScale"
-    )
-
+    val coverShape = ContinuousRoundedRectangle(12.dp)
+    val animatedCoverScale by rememberAppleMusicPlaybackScale(isPlaying, sheetExpanded, pausedScale)
     val coverScale = rememberUpdatedState(
-        if (sheetExpanded) animatedCoverScale else if (isPlaying) 1f else if (playerStyle == PlayerStyle.AppleMusic) pausedScale else 0.9f,
+        if (sheetExpanded) animatedCoverScale else if (isPlaying) 1f else pausedScale,
     )
 
     val currentOnClick by rememberUpdatedState(onClick)
@@ -125,13 +94,12 @@ fun Cover(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-
         Surface(
             modifier = Modifier.graphicsLayer {
                 scaleX = coverScale.value
                 scaleY = coverScale.value
             }.playerArtwork(
-                circle = coverStyle == CoverStyle.Circle,
+                circle = false,
                 shadowElevation = { 12.dp },
                 backgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 playbackScale = { coverScale.value },
@@ -179,8 +147,6 @@ fun Cover(
             )
         }
     }
-
-
 }
 
 /**
@@ -196,12 +162,10 @@ fun FullScreenImageViewer(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
-            usePlatformDefaultWidth = false, // 全屏关键
+            usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false
         )
     ) {
@@ -235,7 +199,6 @@ fun FullScreenImageViewer(
                     .padding(16.dp)
                     .align(Alignment.TopCenter)
             ) {
-                // 关闭按钮
                 IconButton(
                     onClick = onDismiss,
                     modifier = Modifier.align(Alignment.TopStart)
@@ -248,14 +211,12 @@ fun FullScreenImageViewer(
                 }
             }
 
-
             Box(
-                modifier =  Modifier
+                modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
                     .align(Alignment.BottomCenter)
-            ){
-                // 保存按钮
+            ) {
                 IconButton(
                     onClick = {
                         scope.launch {

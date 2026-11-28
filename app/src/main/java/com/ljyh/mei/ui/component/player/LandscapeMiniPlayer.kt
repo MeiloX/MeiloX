@@ -135,7 +135,6 @@ internal fun LandscapeMiniPlayer(
                     iconSize = 20.dp, selected = shuffle, toggle = true, enabled = !fmEnabled || autoplayEnabled,
                     onClick = { connection.service.setShuffleModeEnabled(!shuffle) })
                 PlayerTransportButton(
-                    appleMusicStyle = true,
                     onClick = { previousClicks++; connection.seekToPrevious() },
                     enabled = previous,
                     modifier = Modifier.size(44.dp).semantics {
@@ -147,7 +146,6 @@ internal fun LandscapeMiniPlayer(
                         weight = FontWeight.SemiBold)
                 }
                 PlayerTransportButton(
-                    appleMusicStyle = true,
                     onClick = {
                         if (playbackState == Player.STATE_ENDED) {
                             connection.player.seekTo(0, 0)
@@ -165,7 +163,6 @@ internal fun LandscapeMiniPlayer(
                     }
                 }
                 PlayerTransportButton(
-                    appleMusicStyle = true,
                     onClick = { nextClicks++; connection.seekToNext() },
                     enabled = next,
                     modifier = Modifier.size(44.dp).semantics {
@@ -265,7 +262,7 @@ private fun LandscapePlayerButton(
     onClick: () -> Unit,
 ) {
     val colors = LocalGlassColors.current
-    PlayerTransportButton(appleMusicStyle = true, onClick = onClick, enabled = enabled,
+    PlayerTransportButton(onClick = onClick, enabled = enabled,
         modifier = Modifier.size(targetSize).semantics {
         contentDescription = description
         this.selected = selected

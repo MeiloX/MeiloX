@@ -42,8 +42,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kyant.capsule.ContinuousRoundedRectangle
 import com.ljyh.mei.constants.PlayerActionKey
-import com.ljyh.mei.constants.PlayerStyle
-import com.ljyh.mei.constants.PlayerStyleKey
 import com.ljyh.mei.playback.PlayMode
 import com.ljyh.mei.playback.SleepTimerState
 import io.github.neoruaa.glasmio.icons.SfIcon
@@ -52,7 +50,6 @@ import com.ljyh.mei.ui.model.PlayerAction
 import com.ljyh.mei.ui.model.availableFor
 import com.ljyh.mei.utils.TimeUtils.makeTimeString
 import com.ljyh.mei.utils.rememberPreference
-import com.ljyh.mei.utils.rememberEnumPreference
 import timber.log.Timber
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -78,8 +75,7 @@ fun PlayerActionToolbar(
     val owner = remember(registry, currentMetadata?.trackRef, sourceRevision) {
         currentMetadata?.trackRef?.providerId?.let(registry::provider)
     }
-    val playerStyle by rememberEnumPreference(PlayerStyleKey, PlayerStyle.AppleMusic)
-    val pressedAlpha = if (playerStyle == PlayerStyle.AppleMusic) 0.6f else 0.3f
+    val pressedAlpha = 0.6f
 
     val (actionString, _) = rememberPreference(
         key = PlayerActionKey,
@@ -107,8 +103,7 @@ fun PlayerActionToolbar(
         horizontalArrangement = horizontalArrangement,
         verticalAlignment = Alignment.CenterVertically,
         // Apply shared opacity after the lyrics cutout has been composed.
-        modifier = modifier.fillMaxWidth()
-            .then(if (playerStyle == PlayerStyle.AppleMusic) Modifier.alpha(0.5f) else Modifier)
+        modifier = modifier.fillMaxWidth().alpha(0.5f)
     ) {
 
         actions.filter { it.availableFor(currentMetadata, owner) }.forEach { action ->

@@ -3,10 +3,14 @@ package com.ljyh.mei.playback
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.log10
-import kotlin.math.sqrt
 
 /** Normalized, smoothed output energy; unrelated to microphone input. */
-data class PlaybackSpectrum(val low: Float, val mid: Float, val high: Float, val pulse: Float = 0f) {
+data class PlaybackSpectrum(
+    val low: Float,
+    val mid: Float,
+    val high: Float,
+    val zoomEnergy: Float = low * .9f + mid * .1f,
+) {
     companion object {
         val Zero = PlaybackSpectrum(0f, 0f, 0f)
     }
@@ -18,44 +22,47 @@ internal class SpectrumEnvelope {
     private val peaks = FloatArray(3)
     private val current = FloatArray(3)
     private val decayRates = floatArrayOf(ln(.98f) * 120f, ln(.99f) * 120f, ln(.999f) * 120f)
+    private val zoomHistory = FloatArray(8)
+    private val zoomPeaks = FloatArray(2)
+    private val zoomLevels = FloatArray(2)
+    private val zoomDecayRates = floatArrayOf(ln(.98f) * 60f, ln(.99f) * 60f)
     private var index = 0
-    private var bassReference = 0f
-    private var referenceReady = false
-    private var pulse = 0f
 
-    fun update(power: FloatArray, seconds: Float): PlaybackSpectrum {
+    fun update(power: FloatArray, seconds: Float, zoomIntensity: Float = 1f): PlaybackSpectrum {
         val dt = seconds.coerceIn(0f, .25f)
         val retention = exp(-83.17766f * dt) // Native backdrop's half-life of 1/120 second.
+        val zoomRetention = exp(-41.58883f * dt) // Halfway toward the peak at 60 updates per second.
         for (band in 0..2) {
-            val energy = power[band]
-            val level = if (energy.isFinite() && energy > 0f) {
-                ((10f * log10(energy) + 55f) / 47f).coerceIn(0f, 1f)
-            } else 0f
-            history[index * 3 + band] = level * level * level * (level * (level * 6f - 15f) + 10f)
+            val level = levelFor(power[band])
+            val drivesZoom = band < zoomLevels.size
+            history[index * 3 + band] = smootherstep(level)
+            if (drivesZoom) zoomHistory[index * 2 + band] = level * zoomIntensity
             var weighted = 0f
+            var weightedZoom = 0f
             for (age in 0..3) {
-                weighted += history[((index + 1 + age) % 4) * 3 + band] * ((age + 1) * .1f)
+                val report = (index + 1 + age) % 4
+                val weight = (age + 1) * .1f
+                weighted += history[report * 3 + band] * weight
+                if (drivesZoom) weightedZoom += zoomHistory[report * 2 + band] * weight
             }
             peaks[band] = maxOf(peaks[band] * exp(decayRates[band] * dt), weighted)
             current[band] = peaks[band] + (current[band] - peaks[band]) * retention
             if (current[band] < .0001f) current[band] = 0f
+            if (drivesZoom) {
+                zoomPeaks[band] = maxOf(zoomPeaks[band] * exp(zoomDecayRates[band] * dt), weightedZoom)
+                zoomLevels[band] = zoomPeaks[band] + (zoomLevels[band] - zoomPeaks[band]) * zoomRetention
+            }
         }
         index = (index + 1) % 4
-        // Absolute dB levels stay near the ceiling on mastered music. Detect low-frequency
-        // rises relative to the recent RMS instead, before the long color-envelope decay.
-        val bassPower = power[0] * .9f + power[1] * .1f
-        val bass = if (bassPower.isFinite() && bassPower > 0f) sqrt(bassPower) else 0f
-        if (!referenceReady && bass > .004f) {
-            bassReference = bass
-            referenceReady = true
-        }
-        bassReference += (bass - bassReference) * (1f - exp(-dt / .6f))
-        val rise = ((bass - bassReference * 1.08f) / maxOf(bassReference * .8f, .012f)).coerceIn(0f, 1f)
-        val audible = ((bass - .004f) / .016f).coerceIn(0f, 1f)
-        val targetPulse = rise * audible
-        val responseSeconds = if (targetPulse > pulse) .03f else .16f
-        pulse += (targetPulse - pulse) * (1f - exp(-dt / responseSeconds))
-        if (pulse < .0001f) pulse = 0f
-        return PlaybackSpectrum(current[0], current[1], current[2], pulse)
+        // Shape the zoom bands after applying the mode gain, history and peak response.
+        val zoomEnergy = smootherstep(zoomLevels[0]) * .9f + smootherstep(zoomLevels[1]) * .1f
+        return PlaybackSpectrum(current[0], current[1], current[2], zoomEnergy)
     }
+
+    private fun levelFor(energy: Float): Float = if (energy.isFinite() && energy > 0f) {
+        ((10f * log10(energy) + 55f) / 47f).coerceIn(0f, 1f)
+    } else 0f
+
+    private fun smootherstep(level: Float): Float =
+        level * level * level * (level * (level * 6f - 15f) + 10f)
 }
